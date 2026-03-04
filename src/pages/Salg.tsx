@@ -1,5 +1,195 @@
-import React from "react";
+// src/pages/Salg.tsx
+import React, { useMemo, useState } from "react";
+import { addSale, fmtKr, getItems, round2, setItems, useItems, useSales, Vare } from "../app/storage";
+
+function toNum(v: string) {
+  const n = Number(String(v).replace(",", "."));
+  return Number.isFinite(n) ? n : 0;
+}
+
+function Modal(props: { open: boolean; title: string; children: React.ReactNode; onClose: () => void }) {
+  if (!props.open) return null;
+  return (
+    <div className="modalBackdrop" role="dialog" aria-modal="true" onClick={props.onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modalHeader">
+          <p className="modalTitle">{props.title}</p>
+          <button className="iconBtn" type="button" onClick={props.onClose} aria-label="Lukk">
+            ✕
+          </button>
+        </div>
+        <div className="modalBody">{props.children}</div>
+      </div>
+    </div>
+  );
+}
 
 export function Salg() {
-  return <div className="card">Salg kommer…</div>;
+  const { items } = useItems();
+  const { sales } = useSales();
+
+  const [itemId, setItemId] = useState<string>("");
+  const [qty, setQty] = useState<string>("1");
+  const [customer, setCustomer] = useState<string>("");
+  const [unitPrice, setUnitPrice] = useState<string>("");
+
+  const [lowPopup, setLowPopup] = useState<{ item: Vare; newStock: number } | null>(null);
+
+  const selected = useMemo(() => items.find((i) => i.id === itemId) ?? null, [items, itemId]);
+
+  // autopopulate price when item changes (only if user hasn't typed)
+  React.useEffect(() => {
+    if (!selected) return;
+    if (unitPrice.trim() === "") {
+      setUnitPrice(String(selected.price ?? 0));
+    }
+  }, [selected]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const total = useMemo(() => {
+    const q = Math.trunc(toNum(qty));
+    const p = toNum(unitPrice || (selected?.price ? String(selected.price) : "0"));
+    return round2(q * p);
+  }, [qty, unitPrice, selected]);
+
+  function doSale() {
+    if (!selected) {
+      alert("Velg en vare først.");
+      return;
+    }
+
+    const q = Math.trunc(toNum(qty));
+    if (q <= 0) {
+      alert("Antall må være minst 1.");
+      return;
+    }
+
+    const p = toNum(unitPrice || String(selected.price ?? 0));
+    const itemsNow = getItems();
+    const idx = itemsNow.findIndex((x) => x.id === selected.id);
+    if (idx < 0) {
+      alert("Fant ikke varen i lageret.");
+      return;
+    }
+
+    const newStock = (itemsNow[idx].stock ?? 0) - q;
+    itemsNow[idx] = { ...itemsNow[idx], stock: newStock, updatedAt: new Date().toISOString() };
+    setItems(itemsNow);
+
+    addSale({
+      itemId: selected.id,
+      itemName: selected.name,
+      qty: q,
+      unitPrice: round2(p),
+      customer: customer.trim() ? customer.trim() : undefined,
+    });
+
+    // popup if hits or goes below min
+    const min = itemsNow[idx].minStock ?? 0;
+    if (min > 0 && newStock <= min) {
+      setLowPopup({ item: itemsNow[idx], newStock });
+    }
+
+    setQty("1");
+    setCustomer("");
+    setUnitPrice("");
+    setItemId("");
+  }
+
+  return (
+    <div className="card">
+      <div className="cardTitle">Salg</div>
+      <div className="cardSub">Registrer salg. Lager trekkes automatisk, og du får varsel når lager når minimum.</div>
+
+      <div className="fieldGrid">
+        <div>
+          <label className="label">Vare</label>
+          <select className="input" value={itemId} onChange={(e) => setItemId(e.target.value)}>
+            <option value="">Velg vare…</option>
+            {items.map((i) => (
+              <option key={i.id} value={i.id}>
+                {i.name} (lager: {i.stock}, min: {i.minStock})
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="row3">
+          <div>
+            <label className="label">Antall</label>
+            <input className="input" inputMode="numeric" value={qty} onChange={(e) => setQty(e.target.value)} />
+          </div>
+          <div>
+            <label className="label">Pris pr stk (kr)</label>
+            <input className="input" inputMode="decimal" value={unitPrice} onChange={(e) => setUnitPrice(e.target.value)} placeholder={selected ? String(selected.price ?? 0) : "0"} />
+          </div>
+          <div>
+            <label className="label">Sum</label>
+            <input className="input" value={fmtKr(total)} readOnly />
+          </div>
+        </div>
+
+        <div>
+          <label className="label">Kunde (valgfritt)</label>
+          <input className="input" value={customer} onChange={(e) => setCustomer(e.target.value)} placeholder="Navn / referanse" />
+        </div>
+
+        <div className="btnRow">
+          <button className="btn btnPrimary" type="button" onClick={doSale}>
+            Registrer salg
+          </button>
+        </div>
+      </div>
+
+      <div style={{ height: 18 }} />
+
+      <div className="card" style={{ marginTop: 0 }}>
+        <div className="cardTitle">Siste salg</div>
+        <div className="list">
+          {sales.slice(0, 20).map((s) => (
+            <div key={s.id} className="item">
+              <div className="itemTop">
+                <div>
+                  <p className="itemTitle">{s.itemName}</p>
+                  <div className="itemMeta">
+                    Antall: <b>{s.qty}</b> • Pris: <b>{fmtKr(s.unitPrice)}</b> • Sum: <b>{fmtKr(s.total)}</b>
+                    {s.customer ? (
+                      <>
+                        {" "}
+                        • Kunde: <b>{s.customer}</b>
+                      </>
+                    ) : null}
+                  </div>
+                  <div className="itemMeta" style={{ marginTop: 6 }}>
+                    {new Date(s.createdAt).toLocaleString("nb-NO")}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+          {sales.length === 0 ? <div className="item">Ingen salg enda.</div> : null}
+        </div>
+      </div>
+
+      <Modal open={!!lowPopup} title="⚠️ Lav lagerbeholdning" onClose={() => setLowPopup(null)}>
+        {lowPopup ? (
+          <div>
+            <div style={{ marginBottom: 10 }}>
+              <b>{lowPopup.item.name}</b>
+            </div>
+            <div>
+              Ny beholdning: <b>{lowPopup.newStock}</b> • Minimum: <b>{lowPopup.item.minStock}</b>
+            </div>
+            <div style={{ marginTop: 10, opacity: 0.9 }}>
+              Tips: Gå til <b>Varer</b> og øk lager, eller juster minimum per vare.
+            </div>
+            <div className="btnRow" style={{ marginTop: 12 }}>
+              <button className="btn btnPrimary" type="button" onClick={() => setLowPopup(null)}>
+                Ok
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
+    </div>
+  );
 }
