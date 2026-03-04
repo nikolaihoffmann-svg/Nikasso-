@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 
 import { Oversikt } from "../pages/Oversikt";
 import { Salg } from "../pages/Salg";
@@ -8,8 +8,26 @@ import { Gjeld } from "../pages/Gjeld";
 
 type Tab = "oversikt" | "salg" | "varer" | "kunder" | "gjeld";
 
+const THEME_KEY = "nikasso.theme"; // "light" | "dark"
+
+function getSavedTheme(): "light" | "dark" {
+  const t = localStorage.getItem(THEME_KEY);
+  return t === "light" || t === "dark" ? t : "dark";
+}
+
+function applyTheme(theme: "light" | "dark") {
+  // Krever at styles.css støtter [data-theme="light"] (og default/dark)
+  document.documentElement.setAttribute("data-theme", theme);
+  localStorage.setItem(THEME_KEY, theme);
+}
+
 export function App() {
   const [tab, setTab] = useState<Tab>("oversikt");
+  const [theme, setTheme] = useState<"light" | "dark>(() => getSavedTheme());
+
+  useEffect(() => {
+    applyTheme(theme);
+  }, [theme]);
 
   const title = useMemo(() => {
     switch (tab) {
@@ -26,13 +44,33 @@ export function App() {
     }
   }, [tab]);
 
+  const toggleTheme = () => {
+    setTheme((t) => (t === "dark" ? "light" : "dark"));
+  };
+
   return (
     <>
       <div className="container">
         <div className="header">
-          <div>
-            <div className="h1">{title}</div>
-            <div className="sub">Privat • Lokal lagring i nettleseren</div>
+          <div className="headerTop">
+            <div>
+              <div className="h1">{title}</div>
+
+              <div className="subRow">
+                <div className="sub">Privat • Lokal lagring i nettleseren</div>
+
+                {/* Diskré theme-toggle */}
+                <button
+                  type="button"
+                  className="themeBtn"
+                  onClick={toggleTheme}
+                  title={theme === "dark" ? "Bytt til lys modus" : "Bytt til mørk modus"}
+                  aria-label="Bytt tema"
+                >
+                  {theme === "dark" ? "☾" : "☀︎"}
+                </button>
+              </div>
+            </div>
           </div>
 
           <div className="tabs">
