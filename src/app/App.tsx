@@ -1,3 +1,4 @@
+// src/app/App.tsx
 import React, { useEffect, useMemo, useState } from "react";
 
 import { Oversikt } from "../pages/Oversikt";
@@ -6,27 +7,17 @@ import { Varer } from "../pages/Varer";
 import { Kunder } from "../pages/Kunder";
 import { Gjeld } from "../pages/Gjeld";
 
+import { applyThemeToDom, getTheme, setTheme, Theme } from "./storage";
+
 type Tab = "oversikt" | "salg" | "varer" | "kunder" | "gjeld";
-
-const THEME_KEY = "nikasso.theme"; // "light" | "dark"
-
-function getSavedTheme(): "light" | "dark" {
-  const t = localStorage.getItem(THEME_KEY);
-  return t === "light" || t === "dark" ? t : "dark";
-}
-
-function applyTheme(theme: "light" | "dark") {
-  // Krever at styles.css støtter [data-theme="light"] (og default/dark)
-  document.documentElement.setAttribute("data-theme", theme);
-  localStorage.setItem(THEME_KEY, theme);
-}
 
 export function App() {
   const [tab, setTab] = useState<Tab>("oversikt");
-  const [theme, setTheme] = useState<"light" | "dark>(() => getSavedTheme());
+  const [theme, setThemeState] = useState<Theme>(() => getTheme());
 
   useEffect(() => {
-    applyTheme(theme);
+    applyThemeToDom(theme);
+    setTheme(theme);
   }, [theme]);
 
   const title = useMemo(() => {
@@ -44,10 +35,6 @@ export function App() {
     }
   }, [tab]);
 
-  const toggleTheme = () => {
-    setTheme((t) => (t === "dark" ? "light" : "dark"));
-  };
-
   return (
     <>
       <div className="container">
@@ -55,62 +42,39 @@ export function App() {
           <div className="headerTop">
             <div>
               <div className="h1">{title}</div>
-
               <div className="subRow">
                 <div className="sub">Privat • Lokal lagring i nettleseren</div>
-
-                {/* Diskré theme-toggle */}
                 <button
-                  type="button"
                   className="themeBtn"
-                  onClick={toggleTheme}
-                  title={theme === "dark" ? "Bytt til lys modus" : "Bytt til mørk modus"}
-                  aria-label="Bytt tema"
+                  type="button"
+                  onClick={() => setThemeState((t) => (t === "dark" ? "light" : "dark"))}
+                  title="Bytt mørk/lys modus"
+                  aria-label="Bytt mørk/lys modus"
                 >
-                  {theme === "dark" ? "☾" : "☀︎"}
+                  {theme === "dark" ? "🌙" : "☀️"}
                 </button>
               </div>
             </div>
           </div>
 
           <div className="tabs">
-            <button
-              className={tab === "oversikt" ? "tab active" : "tab"}
-              onClick={() => setTab("oversikt")}
-              type="button"
-            >
+            <button className={tab === "oversikt" ? "tab active" : "tab"} onClick={() => setTab("oversikt")} type="button">
               Oversikt
             </button>
 
-            <button
-              className={tab === "salg" ? "tab active" : "tab"}
-              onClick={() => setTab("salg")}
-              type="button"
-            >
+            <button className={tab === "salg" ? "tab active" : "tab"} onClick={() => setTab("salg")} type="button">
               Salg
             </button>
 
-            <button
-              className={tab === "varer" ? "tab active" : "tab"}
-              onClick={() => setTab("varer")}
-              type="button"
-            >
+            <button className={tab === "varer" ? "tab active" : "tab"} onClick={() => setTab("varer")} type="button">
               Varer
             </button>
 
-            <button
-              className={tab === "kunder" ? "tab active" : "tab"}
-              onClick={() => setTab("kunder")}
-              type="button"
-            >
+            <button className={tab === "kunder" ? "tab active" : "tab"} onClick={() => setTab("kunder")} type="button">
               Kunder
             </button>
 
-            <button
-              className={tab === "gjeld" ? "tab active" : "tab"}
-              onClick={() => setTab("gjeld")}
-              type="button"
-            >
+            <button className={tab === "gjeld" ? "tab active" : "tab"} onClick={() => setTab("gjeld")} type="button">
               Gjeld
             </button>
           </div>
