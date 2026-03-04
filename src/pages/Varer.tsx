@@ -4,409 +4,416 @@ type Vare = {
   id: string;
   name: string;
   price: number; // salgspris
-  cost: number; // innkjøpspris / kost
+  cost: number; // kost
   stock: number; // lager
+  minStock: number; // minimum før varsel
   createdAt: number;
-  updatedAt: number;
 };
 
-const STORAGE_KEY = "salg-gjeld.varer.v1";
+const LS_KEY = "salg_gjeld_varer_v1";
 
-function safeParse<T>(raw: string | null, fallback: T): T {
+function n(v: string): number {
+  const x = Number(String(v).replace(",", ".").trim());
+  return Number.isFinite(x) ? x : 0;
+}
+
+function formatKr(value: number): string {
+  // enkel NOK-format
+  const rounded = Math.round((value + Number.EPSILON) * 100) / 100;
+  return rounded.toLocaleString("nb-NO", { minimumFractionDigits: 0, maximumFractionDigits: 2 }) + " kr";
+}
+
+function uid(): string {
+  return Math.random().toString(16).slice(2) + "-" + Date.now().toString(16);
+}
+
+function load(): Vare[] {
   try {
-    if (!raw) return fallback;
-    return JSON.parse(raw) as T;
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed as Vare[];
   } catch {
-    return fallback;
+    return [];
   }
 }
 
-function uid() {
-  // iOS/Safari kan støtte crypto.randomUUID, men vi har fallback
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const c: any = (globalThis as any).crypto;
-  if (c?.randomUUID) return c.randomUUID();
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
-function clampInt(n: number) {
-  if (!Number.isFinite(n)) return 0;
-  return Math.trunc(n);
-}
-
-function clampMoney(n: number) {
-  if (!Number.isFinite(n)) return 0;
-  // hold det enkelt: 2 desimaler
-  return Math.round(n * 100) / 100;
-}
-
-function formatMoney(n: number) {
-  // enkel visning (NOK-ish)
-  return `${clampMoney(n).toLocaleString("nb-NO")} kr`;
+function save(items: Vare[]) {
+  localStorage.setItem(LS_KEY, JSON.stringify(items));
 }
 
 export function Varer() {
-  const [varer, setVarer] = useState<Vare[]>(() =>
-    safeParse<Vare[]>(localStorage.getItem(STORAGE_KEY), [])
-  );
-
-  // Ny vare (skjema)
-  const [name, setName] = useState("");
-  const [price, setPrice] = useState<string>("");
-  const [cost, setCost] = useState<string>("");
-  const [stock, setStock] = useState<string>("");
-
-  // Redigering
-  const [editId, setEditId] = useState<string | null>(null);
-  const editVare = useMemo(
-    () => varer.find((v) => v.id === editId) ?? null,
-    [editId, varer]
-  );
-  const [editName, setEditName] = useState("");
-  const [editPrice, setEditPrice] = useState<string>("");
-  const [editCost, setEditCost] = useState<string>("");
-  const [editStock, setEditStock] = useState<string>("");
-
-  // Søk
+  const [items, setItems] = useState<Vare[]>([]);
   const [q, setQ] = useState("");
 
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(varer));
-  }, [varer]);
+  // add form
+  const [name, setName] = useState("");
+  const [price, setPrice] = useState("");
+  const [cost, setCost] = useState("");
+  const [stock, setStock] = useState("");
+  const [minStock, setMinStock] = useState("1");
+
+  // edit
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const editingItem = useMemo(() => items.find((x) => x.id === editingId) ?? null, [items, editingId]);
 
   useEffect(() => {
-    if (!editVare) return;
-    setEditName(editVare.name);
-    setEditPrice(String(editVare.price));
-    setEditCost(String(editVare.cost));
-    setEditStock(String(editVare.stock));
-  }, [editVare]);
+    setItems(load());
+  }, []);
 
-  const filtrert = useMemo(() => {
-    const query = q.trim().toLowerCase();
-    if (!query) return varer;
-    return varer.filter((v) => v.name.toLowerCase().includes(query));
-  }, [q, varer]);
+  useEffect(() => {
+    save(items);
+  }, [items]);
+
+  const filtered = useMemo(() => {
+    const s = q.trim().toLowerCase();
+    if (!s) return items;
+    return items.filter((x) => x.name.toLowerCase().includes(s));
+  }, [items, q]);
 
   const totals = useMemo(() => {
-    const antall = varer.length;
-    const lagerSum = varer.reduce((sum, v) => sum + (v.stock || 0), 0);
-    const lagerVerdiKost = varer.reduce(
-      (sum, v) => sum + (v.stock || 0) * (v.cost || 0),
-      0
-    );
-    const lagerVerdiSalg = varer.reduce(
-      (sum, v) => sum + (v.stock || 0) * (v.price || 0),
-      0
-    );
-    return { antall, lagerSum, lagerVerdiKost, lagerVerdiSalg };
-  }, [varer]);
+    const count = items.length;
+    const stockTotal = items.reduce((a, b) => a + (b.stock || 0), 0);
+    const costValue = items.reduce((a, b) => a + (b.cost || 0) * (b.stock || 0), 0);
+    const sellValue = items.reduce((a, b) => a + (b.price || 0) * (b.stock || 0), 0);
+    const lowCount = items.reduce((a, b) => a + ((b.stock ?? 0) <= (b.minStock ?? 0) ? 1 : 0), 0);
+    return { count, stockTotal, costValue, sellValue, lowCount };
+  }, [items]);
 
-  function addVare() {
-    const n = name.trim();
-    if (!n) return alert("Skriv navn på vare.");
-
-    const p = clampMoney(Number(price.replace(",", ".")));
-    const c = clampMoney(Number(cost.replace(",", ".")));
-    const s = clampInt(Number(stock.replace(",", ".")));
-
-    const now = Date.now();
-    const ny: Vare = {
-      id: uid(),
-      name: n,
-      price: Number.isFinite(p) ? p : 0,
-      cost: Number.isFinite(c) ? c : 0,
-      stock: Number.isFinite(s) ? s : 0,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    setVarer((prev) => [ny, ...prev]);
+  function resetAddForm() {
     setName("");
     setPrice("");
     setCost("");
     setStock("");
+    setMinStock("1");
   }
 
-  function startEdit(id: string) {
-    setEditId(id);
+  function addItem() {
+    const nm = name.trim();
+    if (!nm) return;
+
+    const item: Vare = {
+      id: uid(),
+      name: nm,
+      price: n(price),
+      cost: n(cost),
+      stock: Math.max(0, Math.floor(n(stock))),
+      minStock: Math.max(0, Math.floor(n(minStock))),
+      createdAt: Date.now(),
+    };
+
+    setItems((prev) => [item, ...prev]);
+    resetAddForm();
   }
 
-  function cancelEdit() {
-    setEditId(null);
-  }
-
-  function saveEdit() {
-    if (!editVare) return;
-
-    const n = editName.trim();
-    if (!n) return alert("Navn kan ikke være tomt.");
-
-    const p = clampMoney(Number(editPrice.replace(",", ".")));
-    const c = clampMoney(Number(editCost.replace(",", ".")));
-    const s = clampInt(Number(editStock.replace(",", ".")));
-
-    const now = Date.now();
-    setVarer((prev) =>
-      prev.map((v) =>
-        v.id === editVare.id
-          ? {
-              ...v,
-              name: n,
-              price: Number.isFinite(p) ? p : 0,
-              cost: Number.isFinite(c) ? c : 0,
-              stock: Number.isFinite(s) ? s : 0,
-              updatedAt: now,
-            }
-          : v
-      )
-    );
-    setEditId(null);
-  }
-
-  function delVare(id: string) {
-    const v = varer.find((x) => x.id === id);
-    if (!v) return;
-    const ok = confirm(`Slette "${v.name}"?`);
-    if (!ok) return;
-    setVarer((prev) => prev.filter((x) => x.id !== id));
+  function removeItem(id: string) {
+    setItems((prev) => prev.filter((x) => x.id !== id));
+    if (editingId === id) setEditingId(null);
   }
 
   function adjustStock(id: string, delta: number) {
-    setVarer((prev) =>
-      prev.map((v) =>
-        v.id === id
-          ? { ...v, stock: clampInt((v.stock || 0) + delta), updatedAt: Date.now() }
-          : v
-      )
+    setItems((prev) =>
+      prev.map((x) => (x.id === id ? { ...x, stock: Math.max(0, (x.stock || 0) + delta) } : x))
     );
   }
 
-  function exportJSON() {
-    const data = JSON.stringify(varer, null, 2);
-    // Kopier til utklippstavle (best effort)
-    navigator.clipboard
-      ?.writeText(data)
-      .then(() => alert("Eksport kopiert til utklippstavlen ✅"))
-      .catch(() => alert("Kunne ikke kopiere. Marker og kopier manuelt:\n\n" + data));
+  function startEdit(id: string) {
+    setEditingId(id);
   }
 
-  function importJSON() {
-    const raw = prompt("Lim inn JSON (varer) her. Dette vil ERSTATTE listen din:");
-    if (!raw) return;
+  function cancelEdit() {
+    setEditingId(null);
+  }
 
-    const parsed = safeParse<Vare[]>(raw, []);
-    if (!Array.isArray(parsed)) return alert("Ugyldig JSON.");
+  function saveEdit(next: Partial<Vare>) {
+    if (!editingId) return;
+    setItems((prev) => prev.map((x) => (x.id === editingId ? { ...x, ...next } : x)));
+    setEditingId(null);
+  }
 
-    // Litt enkel validering + normalisering
-    const now = Date.now();
-    const cleaned: Vare[] = parsed
-      .filter((x) => x && typeof x === "object")
-      .map((x: any) => ({
-        id: typeof x.id === "string" ? x.id : uid(),
-        name: typeof x.name === "string" ? x.name : "Uten navn",
-        price: clampMoney(Number(x.price)),
-        cost: clampMoney(Number(x.cost)),
-        stock: clampInt(Number(x.stock)),
-        createdAt: Number.isFinite(Number(x.createdAt)) ? Number(x.createdAt) : now,
-        updatedAt: Number.isFinite(Number(x.updatedAt)) ? Number(x.updatedAt) : now,
-      }));
+  function exportJson() {
+    const blob = new Blob([JSON.stringify(items, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `varer-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 
-    const ok = confirm(`Importere ${cleaned.length} varer og erstatte dagens liste?`);
-    if (!ok) return;
-    setVarer(cleaned);
+  function importJson(file: File) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(String(reader.result || "[]"));
+        if (!Array.isArray(parsed)) return;
+
+        const cleaned: Vare[] = parsed
+          .map((x: any) => ({
+            id: String(x.id || uid()),
+            name: String(x.name || "").trim(),
+            price: Number(x.price) || 0,
+            cost: Number(x.cost) || 0,
+            stock: Math.max(0, Math.floor(Number(x.stock) || 0)),
+            minStock: Math.max(0, Math.floor(Number(x.minStock) || 0)),
+            createdAt: Number(x.createdAt) || Date.now(),
+          }))
+          .filter((x) => x.name.length > 0);
+
+        setItems(cleaned);
+      } catch {
+        // ignore
+      }
+    };
+    reader.readAsText(file);
   }
 
   return (
-    <div className="card" style={{ padding: 16 }}>
-      <div style={{ display: "grid", gap: 10 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+    <div className="grid">
+      {/* TOPP */}
+      <div className="card">
+        <div className="row between wrap gap">
           <div>
-            <div style={{ fontSize: 18, fontWeight: 700 }}>Varer / Lager</div>
-            <div style={{ opacity: 0.8, fontSize: 13 }}>
-              Antall varer: <b>{totals.antall}</b> • Lager totalt: <b>{totals.lagerSum}</b>
-              <br />
-              Lagerverdi (kost): <b>{formatMoney(totals.lagerVerdiKost)}</b> • (salgsverdi):{" "}
-              <b>{formatMoney(totals.lagerVerdiSalg)}</b>
+            <div className="h2">Varer / Lager</div>
+            <div className="muted">
+              Antall varer: <b>{totals.count}</b> • Lager totalt: <b>{totals.stockTotal}</b>
+              <span className="dot">•</span>
+              Lagerverdi (kost): <b>{formatKr(totals.costValue)}</b>
+              <span className="dot">•</span>
+              (salgsverdi): <b>{formatKr(totals.sellValue)}</b>
             </div>
+
+            {totals.lowCount > 0 && (
+              <div className="lowBanner">
+                ⚠️ <b>{totals.lowCount}</b> vare(r) er på eller under min-lager.
+              </div>
+            )}
           </div>
 
-          <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
-            <button className="tab" type="button" onClick={exportJSON}>
+          <div className="row gap">
+            <button className="btn" onClick={exportJson} type="button">
               Eksporter
             </button>
-            <button className="tab" type="button" onClick={importJSON}>
+
+            <label className="btn ghost" style={{ cursor: "pointer" }}>
               Importer
-            </button>
+              <input
+                type="file"
+                accept="application/json"
+                style={{ display: "none" }}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) importJson(f);
+                  e.currentTarget.value = "";
+                }}
+              />
+            </label>
           </div>
         </div>
+      </div>
 
-        {/* Legg til vare */}
-        <div
-          style={{
-            border: "1px solid rgba(255,255,255,0.08)",
-            borderRadius: 14,
-            padding: 12,
-            display: "grid",
-            gap: 10,
-          }}
-        >
-          <div style={{ fontWeight: 700 }}>Legg til vare</div>
+      {/* LEGG TIL */}
+      <div className="card">
+        <div className="h2">Legg til vare</div>
 
-          <div style={{ display: "grid", gap: 8 }}>
+        <div className="formGrid">
+          <div className="field span-2">
+            <label>Navn</label>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Navn (f.eks. Bremseklosser foran)"
-              style={inputStyle}
+              inputMode="text"
             />
+          </div>
 
-            <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr 1fr" }}>
-              <input
-                value={price}
-                onChange={(e) => setPrice(e.target.value)}
-                placeholder="Pris (kr)"
-                inputMode="decimal"
-                style={inputStyle}
-              />
-              <input
-                value={cost}
-                onChange={(e) => setCost(e.target.value)}
-                placeholder="Kost (kr)"
-                inputMode="decimal"
-                style={inputStyle}
-              />
-              <input
-                value={stock}
-                onChange={(e) => setStock(e.target.value)}
-                placeholder="Lager (stk)"
-                inputMode="numeric"
-                style={inputStyle}
-              />
-            </div>
+          <div className="field">
+            <label>Pris (kr)</label>
+            <input value={price} onChange={(e) => setPrice(e.target.value)} placeholder="0" inputMode="decimal" />
+          </div>
 
-            <button className="tab active" type="button" onClick={addVare} style={{ width: "fit-content" }}>
+          <div className="field">
+            <label>Kost (kr)</label>
+            <input value={cost} onChange={(e) => setCost(e.target.value)} placeholder="0" inputMode="decimal" />
+          </div>
+
+          <div className="field">
+            <label>Lager (stk)</label>
+            <input value={stock} onChange={(e) => setStock(e.target.value)} placeholder="0" inputMode="numeric" />
+          </div>
+
+          <div className="field">
+            <label>Min lager (varsel)</label>
+            <input
+              value={minStock}
+              onChange={(e) => setMinStock(e.target.value)}
+              placeholder="1"
+              inputMode="numeric"
+            />
+          </div>
+
+          <div className="row gap span-2">
+            <button className="btn primary" onClick={addItem} type="button">
               + Legg til
+            </button>
+
+            <button className="btn ghost" onClick={resetAddForm} type="button">
+              Nullstill
             </button>
           </div>
         </div>
+      </div>
 
-        {/* Søk */}
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Søk i varer…"
-          style={inputStyle}
-        />
+      {/* LISTE */}
+      <div className="card">
+        <div className="row between wrap gap">
+          <div className="h2">Vareliste</div>
 
-        {/* Liste */}
-        <div style={{ display: "grid", gap: 10 }}>
-          {filtrert.length === 0 ? (
-            <div style={{ opacity: 0.8 }}>Ingen varer enda.</div>
+          <div className="field" style={{ minWidth: 240 }}>
+            <label>Søk</label>
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Søk i varer…" />
+          </div>
+        </div>
+
+        <div className="list">
+          {filtered.length === 0 ? (
+            <div className="empty">Ingen varer enda.</div>
           ) : (
-            filtrert.map((v) => (
-              <div
-                key={v.id}
-                style={{
-                  border: "1px solid rgba(255,255,255,0.08)",
-                  borderRadius: 14,
-                  padding: 12,
-                  display: "grid",
-                  gap: 10,
-                }}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-                  <div>
-                    <div style={{ fontWeight: 800, fontSize: 16 }}>{v.name}</div>
-                    <div style={{ opacity: 0.85, fontSize: 13 }}>
-                      Pris: <b>{formatMoney(v.price)}</b> • Kost: <b>{formatMoney(v.cost)}</b> • Lager:{" "}
-                      <b>{v.stock}</b>
-                    </div>
-                  </div>
+            filtered.map((x) => {
+              const low = (x.stock ?? 0) <= (x.minStock ?? 0);
+              const margin = (x.price || 0) - (x.cost || 0);
 
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <button className="tab" type="button" onClick={() => adjustStock(v.id, -1)}>
-                      −1
-                    </button>
-                    <button className="tab" type="button" onClick={() => adjustStock(v.id, +1)}>
-                      +1
-                    </button>
-                  </div>
-                </div>
+              return (
+                <div key={x.id} className={low ? "item low" : "item"}>
+                  <div className="itemMain">
+                    <div className="row between gap">
+                      <div className="itemTitle">
+                        {x.name} {low && <span className="badge bad">Lav</span>}
+                      </div>
 
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <button className="tab" type="button" onClick={() => startEdit(v.id)}>
-                    Rediger
-                  </button>
-                  <button className="tab" type="button" onClick={() => delVare(v.id)}>
-                    Slett
-                  </button>
-                </div>
-
-                {/* Redigeringsfelt */}
-                {editId === v.id && (
-                  <div
-                    style={{
-                      marginTop: 4,
-                      paddingTop: 10,
-                      borderTop: "1px solid rgba(255,255,255,0.08)",
-                      display: "grid",
-                      gap: 8,
-                    }}
-                  >
-                    <div style={{ fontWeight: 700 }}>Rediger</div>
-
-                    <input value={editName} onChange={(e) => setEditName(e.target.value)} style={inputStyle} />
-
-                    <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr 1fr" }}>
-                      <input
-                        value={editPrice}
-                        onChange={(e) => setEditPrice(e.target.value)}
-                        inputMode="decimal"
-                        placeholder="Pris"
-                        style={inputStyle}
-                      />
-                      <input
-                        value={editCost}
-                        onChange={(e) => setEditCost(e.target.value)}
-                        inputMode="decimal"
-                        placeholder="Kost"
-                        style={inputStyle}
-                      />
-                      <input
-                        value={editStock}
-                        onChange={(e) => setEditStock(e.target.value)}
-                        inputMode="numeric"
-                        placeholder="Lager"
-                        style={inputStyle}
-                      />
+                      <div className="row gap">
+                        <button className="btn small" onClick={() => adjustStock(x.id, -1)} type="button">
+                          −1
+                        </button>
+                        <button className="btn small" onClick={() => adjustStock(x.id, +1)} type="button">
+                          +1
+                        </button>
+                      </div>
                     </div>
 
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <button className="tab active" type="button" onClick={saveEdit}>
-                        Lagre
+                    <div className="muted">
+                      Pris: <b>{formatKr(x.price)}</b> <span className="dot">•</span> Kost: <b>{formatKr(x.cost)}</b>{" "}
+                      <span className="dot">•</span> Margin pr stk: <b>{formatKr(margin)}</b>
+                      <span className="dot">•</span> Lager: <b>{x.stock}</b> <span className="dot">•</span> Min:{" "}
+                      <b>{x.minStock}</b>
+                    </div>
+
+                    <div className="row gap" style={{ marginTop: 10 }}>
+                      <button className="btn ghost" onClick={() => startEdit(x.id)} type="button">
+                        Rediger
                       </button>
-                      <button className="tab" type="button" onClick={cancelEdit}>
-                        Avbryt
+                      <button className="btn danger" onClick={() => removeItem(x.id)} type="button">
+                        Slett
                       </button>
                     </div>
                   </div>
-                )}
-              </div>
-            ))
+                </div>
+              );
+            })
           )}
         </div>
       </div>
+
+      {/* EDIT MODAL */}
+      {editingItem && (
+        <div className="modalBackdrop" onClick={cancelEdit} role="presentation">
+          <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+            <div className="h2">Rediger vare</div>
+
+            <div className="formGrid" style={{ marginTop: 10 }}>
+              <div className="field span-2">
+                <label>Navn</label>
+                <input
+                  defaultValue={editingItem.name}
+                  onChange={(e) => saveEdit({ name: e.target.value })}
+                  style={{ display: "none" }}
+                />
+                {/* Vi bruker controlled under, men holder det enkelt: */}
+                <input
+                  value={editingItem.name}
+                  onChange={(e) => setItems((prev) => prev.map((v) => (v.id === editingItem.id ? { ...v, name: e.target.value } : v)))}
+                />
+              </div>
+
+              <div className="field">
+                <label>Pris (kr)</label>
+                <input
+                  value={String(editingItem.price)}
+                  onChange={(e) =>
+                    setItems((prev) =>
+                      prev.map((v) => (v.id === editingItem.id ? { ...v, price: n(e.target.value) } : v))
+                    )
+                  }
+                  inputMode="decimal"
+                />
+              </div>
+
+              <div className="field">
+                <label>Kost (kr)</label>
+                <input
+                  value={String(editingItem.cost)}
+                  onChange={(e) =>
+                    setItems((prev) =>
+                      prev.map((v) => (v.id === editingItem.id ? { ...v, cost: n(e.target.value) } : v))
+                    )
+                  }
+                  inputMode="decimal"
+                />
+              </div>
+
+              <div className="field">
+                <label>Lager (stk)</label>
+                <input
+                  value={String(editingItem.stock)}
+                  onChange={(e) =>
+                    setItems((prev) =>
+                      prev.map((v) =>
+                        v.id === editingItem.id ? { ...v, stock: Math.max(0, Math.floor(n(e.target.value))) } : v
+                      )
+                    )
+                  }
+                  inputMode="numeric"
+                />
+              </div>
+
+              <div className="field">
+                <label>Min lager (varsel)</label>
+                <input
+                  value={String(editingItem.minStock)}
+                  onChange={(e) =>
+                    setItems((prev) =>
+                      prev.map((v) =>
+                        v.id === editingItem.id ? { ...v, minStock: Math.max(0, Math.floor(n(e.target.value))) } : v
+                      )
+                    )
+                  }
+                  inputMode="numeric"
+                />
+              </div>
+
+              <div className="row gap span-2" style={{ marginTop: 10 }}>
+                <button className="btn primary" onClick={() => setEditingId(null)} type="button">
+                  Lagre
+                </button>
+                <button className="btn ghost" onClick={cancelEdit} type="button">
+                  Avbryt
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
-
-const inputStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "10px 12px",
-  borderRadius: 12,
-  border: "1px solid rgba(255,255,255,0.10)",
-  background: "rgba(255,255,255,0.04)",
-  color: "inherit",
-  outline: "none",
-};
