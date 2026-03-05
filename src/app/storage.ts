@@ -146,6 +146,7 @@ function normalizePayments(raw: any): Payment[] {
     .map((p) => ({
       id: str(p.id, uid("pay")),
       amount: round2(num(p.amount, 0)),
+      // støtter gamle felt (date/dateIso), og krever createdAt i UI
       createdAt: str(p.createdAt ?? p.date ?? p.dateIso ?? nowIso(), nowIso()),
       note: p.note ? String(p.note) : undefined,
     }))
@@ -153,7 +154,7 @@ function normalizePayments(raw: any): Payment[] {
 }
 
 /* =========================
-   Paid/Remaining helpers
+   Paid/Remaining helpers (Salg + Gjeld)
 ========================= */
 
 export function salePaidSum(s: Sale) {
@@ -364,11 +365,10 @@ export function getSales(): Sale[] {
   const normalized: Sale[] = (raw || []).map((x) => {
     const total = round2(num(x.total, round2(num(x.qty, 0) * num(x.unitPrice, 0))));
     const payments = normalizePayments(x.payments);
-    const paidSum = payments.length ? payments.reduce((a, p) => a + num(p.amount, 0), 0) : 0;
 
-    // fallback for eldre data
+    // legacy fallback
     const paidLegacy = Boolean(x.paid);
-    const paid = payments.length ? round2(paidSum) >= total : paidLegacy;
+    const paid = payments.length ? saleRemaining({ ...(x as any), total, payments, paid: false } as Sale) <= 0 : paidLegacy;
 
     return {
       id: str(x.id, uid("sale")),
@@ -402,17 +402,13 @@ export function setSales(next: Sale[]) {
   emitChange();
 }
 
-export function addSale(
-  input: Omit<Sale, "id" | "createdAt" | "total" | "paid" | "payments"> & { payments?: Payment[]; paid?: boolean }
-) {
+export function addSale(input: Omit<Sale, "id" | "createdAt" | "total" | "paid" | "payments"> & { payments?: Payment[]; paid?: boolean }) {
   const sales = getSales();
   const createdAt = nowIso();
-
   const total = round2((num(input.qty, 0) || 0) * (num(input.unitPrice, 0) || 0));
 
   const payments = normalizePayments(input.payments);
-  const paid =
-    payments.length > 0 ? round2(payments.reduce((a, p) => a + num(p.amount, 0), 0)) >= total : Boolean(input.paid);
+  const paid = payments.length > 0 ? round2(payments.reduce((a, p) => a + num(p.amount, 0), 0)) >= total : Boolean(input.paid);
 
   const next: Sale = {
     id: uid("sale"),
@@ -442,6 +438,14 @@ function setSalePaidCore(saleId: string, paid: boolean) {
     sales[i] = { ...s, payments: [], paid: false };
   }
   setSales(sales);
+}
+
+/**
+ * NB: rekkefølge matcher komponentene dine:
+ * addSalePayment(saleId, amount, note?, dateIso?)
+ */
+export function addSalePayment(saleId: string, amount: number, note?: string, dateIso?: string) {
+  addSalePaymentCore(saleId, amount, dateIso, note);
 }
 
 function addSalePaymentCore(saleId: string, amount: number, dateIso?: string, note?: string) {
@@ -475,11 +479,6 @@ function removeSalePaymentCore(saleId: string, paymentId: string) {
   setSales(sales);
 }
 
-/** ✅ Disse TRE var de du manglet i build-loggen */
-export const setSalePaid = setSalePaidCore;
-export const addSalePayment = addSalePaymentCore;
-export const removeSalePayment = removeSalePaymentCore;
-
 export function useSales() {
   const [sales, setState] = useState<Sale[]>(() => getSales());
 
@@ -497,8 +496,10 @@ export function useSales() {
     () => ({
       sales,
       setPaid: (saleId: string, paid: boolean) => setSalePaidCore(saleId, paid),
-      addPayment: (saleId: string, amount: number, dateIso?: string, note?: string) =>
-        addSalePaymentCore(saleId, amount, dateIso, note),
+
+      // rekkefølge matcher komponentene dine (note først, dato sist)
+      addPayment: (saleId: string, amount: number, note?: string, dateIso?: string) => addSalePaymentCore(saleId, amount, dateIso, note),
+
       removePayment: (saleId: string, paymentId: string) => removeSalePaymentCore(saleId, paymentId),
       setAll: (all: Sale[]) => setSales(all),
     }),
@@ -516,10 +517,12 @@ export function getReceivables(): Receivable[] {
   const normalized: Receivable[] = (raw || []).map((x) => {
     const amount = round2(num(x.amount, 0));
     const payments = normalizePayments(x.payments);
-    const paid = payments.length ? receivableRemaining({ ...x, payments, amount } as any) <= 0 : Boolean(x.paid);
+
+    const paidLegacy = Boolean(x.paid);
+    const paid = payments.length ? receivableRemaining({ ...(x as any), amount, payments, paid: false } as Receivable) <= 0 : paidLegacy;
 
     return {
-      id: str(x.id, uid("rec")),
+      id: str(x.id, uid("rcv")),
       title: str(x.title, "Gjeld"),
       debtorName: str(x.debtorName, "Ukjent"),
       amount,
@@ -527,7 +530,7 @@ export function getReceivables(): Receivable[] {
       dueDate: x.dueDate ? String(x.dueDate) : undefined,
       note: x.note ? String(x.note) : undefined,
 
-      payments,
+      payments: payments.length ? payments : [],
       paid,
 
       createdAt: str(x.createdAt, nowIso()),
@@ -549,22 +552,22 @@ function upsertReceivableCore(r: Omit<Receivable, "createdAt" | "updatedAt" | "p
   const i = list.findIndex((x) => x.id === r.id);
 
   const payments = normalizePayments((r as any).payments);
-  const paid =
-    receivableRemaining({ ...(r as any), payments, amount: round2(num((r as any).amount, 0)) } as Receivable) <= 0;
+  const amount = round2(num((r as any).amount, 0));
+  const paid = receivableRemaining({ ...(r as any), payments, amount } as Receivable) <= 0;
 
   if (i >= 0) {
     list[i] = {
       ...list[i],
       ...r,
-      amount: round2(num((r as any).amount, 0)),
+      amount,
       payments,
       paid,
       updatedAt: nowIso(),
     };
   } else {
     list.unshift({
-      ...r,
-      amount: round2(num((r as any).amount, 0)),
+      ...(r as any),
+      amount,
       payments,
       paid,
       createdAt: nowIso(),
@@ -593,6 +596,14 @@ function setReceivablePaidCore(id: string, paid: boolean) {
     list[i] = { ...r, payments: [], paid: false, updatedAt: nowIso() };
   }
   setReceivables(list);
+}
+
+/**
+ * NB: rekkefølge matcher komponentene dine:
+ * addReceivablePayment(id, amount, note?, dateIso?)
+ */
+export function addReceivablePayment(id: string, amount: number, note?: string, dateIso?: string) {
+  addReceivablePaymentCore(id, amount, dateIso, note);
 }
 
 function addReceivablePaymentCore(id: string, amount: number, dateIso?: string, note?: string) {
@@ -645,8 +656,10 @@ export function useReceivables() {
       upsert: (r: Omit<Receivable, "createdAt" | "updatedAt" | "paid">) => upsertReceivableCore(r),
       remove: (id: string) => removeReceivableCore(id),
       setPaid: (id: string, paid: boolean) => setReceivablePaidCore(id, paid),
-      addPayment: (id: string, amount: number, dateIso?: string, note?: string) =>
-        addReceivablePaymentCore(id, amount, dateIso, note),
+
+      // rekkefølge matcher komponentene dine (note først, dato sist)
+      addPayment: (id: string, amount: number, note?: string, dateIso?: string) => addReceivablePaymentCore(id, amount, dateIso, note),
+
       removePayment: (id: string, paymentId: string) => removeReceivablePaymentCore(id, paymentId),
       setAll: (all: Receivable[]) => setReceivables(all),
     }),
@@ -711,8 +724,10 @@ export function downloadExportAll(filename?: string) {
   URL.revokeObjectURL(url);
 }
 
-/** Alias hvis noen filer forventer dette navnet */
+// Aliaser (matcher feilene dine)
 export const downloadAllDataJson = downloadExportAll;
+export const downloadExportAllData = downloadExportAll;
+export const downloadExportAllDataJson = downloadExportAll;
 
 export async function importAllFromFile(file: File, mode: "replace" | "merge" = "replace") {
   const text = await file.text();
@@ -725,10 +740,10 @@ export async function importAllFromFile(file: File, mode: "replace" | "merge" = 
           version: 1,
           exportedAt: nowIso(),
           theme: getTheme(),
-          items: Array.isArray((parsed as any)?.items) ? (parsed as any).items : [],
-          customers: Array.isArray((parsed as any)?.customers) ? (parsed as any).customers : [],
-          sales: Array.isArray((parsed as any)?.sales) ? (parsed as any).sales : [],
-          receivables: Array.isArray((parsed as any)?.receivables) ? (parsed as any).receivables : [],
+          items: Array.isArray(parsed?.items) ? parsed.items : [],
+          customers: Array.isArray(parsed?.customers) ? parsed.customers : [],
+          sales: Array.isArray(parsed?.sales) ? parsed.sales : [],
+          receivables: Array.isArray(parsed?.receivables) ? parsed.receivables : [],
         };
 
   const nextItems = (Array.isArray(payload.items) ? payload.items : []).map((x: any) => ({
@@ -755,8 +770,7 @@ export async function importAllFromFile(file: File, mode: "replace" | "merge" = 
   const nextSales = (Array.isArray(payload.sales) ? payload.sales : []).map((x: any) => {
     const total = round2(num(x.total, round2(num(x.qty, 0) * num(x.unitPrice, 0))));
     const payments = normalizePayments(x.payments);
-    const paid =
-      payments.length ? round2(payments.reduce((a, p) => a + num(p.amount, 0), 0)) >= total : Boolean(x.paid);
+    const paid = payments.length ? round2(payments.reduce((a, p) => a + num(p.amount, 0), 0)) >= total : Boolean(x.paid);
 
     return {
       id: str(x.id, uid("sale")),
@@ -783,11 +797,10 @@ export async function importAllFromFile(file: File, mode: "replace" | "merge" = 
   const nextReceivables = (Array.isArray(payload.receivables) ? payload.receivables : []).map((x: any) => {
     const amount = round2(num(x.amount, 0));
     const payments = normalizePayments(x.payments);
-    const paid =
-      payments.length ? round2(payments.reduce((a, p) => a + num(p.amount, 0), 0)) >= amount : Boolean(x.paid);
+    const paid = payments.length ? round2(payments.reduce((a, p) => a + num(p.amount, 0), 0)) >= amount : Boolean(x.paid);
 
     return {
-      id: str(x.id, uid("rec")),
+      id: str(x.id, uid("rcv")),
       title: str(x.title, "Gjeld"),
       debtorName: str(x.debtorName, "Ukjent"),
       amount,
@@ -827,12 +840,19 @@ export async function importAllFromFile(file: File, mode: "replace" | "merge" = 
   emitChange();
 }
 
+// Aliaser (matcher feilen din)
+export const importAllFromFileData = importAllFromFile;
+export const importAllDataFromFile = importAllFromFile;
+
 export function clearAllData() {
   localStorage.removeItem(LS_KEYS.items);
   localStorage.removeItem(LS_KEYS.customers);
   localStorage.removeItem(LS_KEYS.sales);
   localStorage.removeItem(LS_KEYS.receivables);
   localStorage.removeItem(LS_KEYS.saleDraftCustomer);
-  // theme lar vi stå (kan fjernes om du vil)
+  // theme lar vi stå
   emitChange();
 }
+
+// Aliaser (matcher feilen din)
+export const clearAllDataJson = clearAllData;
