@@ -31,35 +31,33 @@ export function Varer() {
   const [price, setPrice] = useState("0");
   const [cost, setCost] = useState("0");
   const [stock, setStock] = useState("0");
-  // ✅ Default min-lager = 10
-  const [minStock, setMinStock] = useState("10");
+  const [minStock, setMinStock] = useState("10"); // default 10
 
   const [q, setQ] = useState("");
   const [edit, setEdit] = useState<Vare | null>(null);
 
   const filtered = useMemo(() => {
     const qq = q.trim().toLowerCase();
-    if (!qq) return items;
-    return items.filter((i) => i.name.toLowerCase().includes(qq));
+    const list = items.slice().sort((a, b) => (a.name || "").localeCompare(b.name || "", "nb-NO", { sensitivity: "base" }));
+    if (!qq) return list;
+    return list.filter((i) => i.name.toLowerCase().includes(qq));
   }, [items, q]);
 
   const stats = useMemo(() => {
     const count = items.length;
-    const totalStock = items.reduce((a, b) => a + (b.stock || 0), 0);
-    const costTotal = items.reduce((a, b) => a + (b.cost || 0) * (b.stock || 0), 0);
-    const saleTotal = items.reduce((a, b) => a + (b.price || 0) * (b.stock || 0), 0);
-    const lowCount = items.reduce(
-      (a, b) => a + ((b.stock ?? 0) <= (b.minStock ?? 0) && (b.minStock ?? 0) > 0 ? 1 : 0),
-      0
-    );
+    const totalStock = items.reduce((a, b) => a + (Number(b.stock) || 0), 0);
 
-    return {
-      count,
-      totalStock,
-      costTotal: round2(costTotal),
-      saleTotal: round2(saleTotal),
-      lowCount,
-    };
+    const costTotal = round2(items.reduce((a, b) => a + (Number(b.cost) || 0) * (Number(b.stock) || 0), 0));
+    const saleTotal = round2(items.reduce((a, b) => a + (Number(b.price) || 0) * (Number(b.stock) || 0), 0));
+    const profitPotential = round2(saleTotal - costTotal);
+
+    const lowCount = items.reduce((a, b) => {
+      const min = Number(b.minStock ?? 0);
+      const st = Number(b.stock ?? 0);
+      return a + (min > 0 && st <= min ? 1 : 0);
+    }, 0);
+
+    return { count, totalStock, costTotal, saleTotal, profitPotential, lowCount };
   }, [items]);
 
   function addItem() {
@@ -79,7 +77,6 @@ export function Varer() {
     setPrice("0");
     setCost("0");
     setStock("0");
-    // ✅ resetter tilbake til 10 etter lagt til
     setMinStock("10");
   }
 
@@ -109,15 +106,15 @@ export function Varer() {
         const normalized = next
           .map((x: any) => ({
             id: String(x.id ?? uid("item")),
-            name: String(x.name ?? ""),
+            name: String(x.name ?? "").trim(),
             price: Number(x.price ?? 0),
             cost: Number(x.cost ?? 0),
             stock: Number(x.stock ?? 0),
-            minStock: Number(x.minStock ?? 10), // ✅ default 10 om mangler i import
+            minStock: Number(x.minStock ?? 10),
             createdAt: String(x.createdAt ?? new Date().toISOString()),
             updatedAt: String(x.updatedAt ?? new Date().toISOString()),
           }))
-          .filter((x) => x.name.trim().length > 0);
+          .filter((x) => x.name.length > 0);
 
         setAll(normalized);
       } catch {
@@ -128,17 +125,17 @@ export function Varer() {
   }
 
   function isLow(i: Vare) {
-    const min = i.minStock ?? 0;
+    const min = Number(i.minStock ?? 0);
     if (min <= 0) return false;
-    return (i.stock ?? 0) <= min;
+    return Number(i.stock ?? 0) <= min;
   }
 
   return (
     <div className="card">
       <div className="cardTitle">Varer / Lager</div>
       <div className="cardSub">
-        Antall varer: <b>{stats.count}</b> • Lager totalt: <b>{stats.totalStock}</b> • Lagerverdi (kost):{" "}
-        <b>{fmtKr(stats.costTotal)}</b> • (salgsverdi): <b>{fmtKr(stats.saleTotal)}</b>
+        Antall varer: <b>{stats.count}</b> • Lager totalt: <b>{stats.totalStock}</b> • Lagerverdi (kost): <b>{fmtKr(stats.costTotal)}</b> •
+        Lagerverdi (salgsverdi): <b>{fmtKr(stats.saleTotal)}</b> • Profitt-potensial: <b>{fmtKr(stats.profitPotential)}</b>
         {stats.lowCount > 0 ? (
           <>
             {" "}
@@ -189,13 +186,7 @@ export function Varer() {
 
           <div>
             <label className="label">Min lager (varsel)</label>
-            <input
-              className="input"
-              inputMode="numeric"
-              value={minStock}
-              onChange={(e) => setMinStock(e.target.value)}
-              placeholder="0 = ingen varsel"
-            />
+            <input className="input" inputMode="numeric" value={minStock} onChange={(e) => setMinStock(e.target.value)} placeholder="0 = ingen varsel" />
           </div>
 
           <div className="btnRow">
@@ -213,44 +204,57 @@ export function Varer() {
       </div>
 
       <div className="list">
-        {filtered.map((i) => (
-          <div key={i.id} className={isLow(i) ? "item low" : "item"}>
-            <div className="itemTop">
-              <div>
-                <p className="itemTitle">{i.name}</p>
-                <div className="itemMeta">
-                  Pris: <b>{fmtKr(i.price)}</b> • Kost: <b>{fmtKr(i.cost)}</b> • Lager: <b>{i.stock}</b> • Min:{" "}
-                  <b>{i.minStock}</b>
+        {filtered.map((i) => {
+          const st = Number(i.stock ?? 0);
+          const costTotal = round2(st * Number(i.cost ?? 0));
+          const saleTotal = round2(st * Number(i.price ?? 0));
+          const profitPotential = round2(saleTotal - costTotal);
+
+          return (
+            <div key={i.id} className={isLow(i) ? "item low" : "item"}>
+              <div className="itemTop">
+                <div>
+                  <p className="itemTitle">{i.name}</p>
+
+                  <div className="itemMeta">
+                    Lager: <b>{i.stock}</b> • Min: <b>{i.minStock}</b> • Kost/stk: <b>{fmtKr(i.cost)}</b> • Pris/stk: <b>{fmtKr(i.price)}</b>
+                  </div>
+
+                  <div className="itemMeta" style={{ marginTop: 6 }}>
+                    Kost totalt: <b>{fmtKr(costTotal)}</b> • Salgsverdi totalt: <b>{fmtKr(saleTotal)}</b> • Profitt-potensial:{" "}
+                    <b>{fmtKr(profitPotential)}</b>
+                  </div>
+
+                  {isLow(i) ? <div className="lowTag">⚠️ Lavt lager (≤ {i.minStock})</div> : null}
                 </div>
-                {isLow(i) ? <div className="lowTag">⚠️ Lavt lager (≤ {i.minStock})</div> : null}
+
+                <div className="stockBtns">
+                  <button className="stockBtn" type="button" onClick={() => adjust(i.id, -1)} title="Trekk 1">
+                    −1
+                  </button>
+                  <button className="stockBtn" type="button" onClick={() => adjust(i.id, 1)} title="Legg til 1">
+                    +1
+                  </button>
+                </div>
               </div>
 
-              <div className="stockBtns">
-                <button className="stockBtn" type="button" onClick={() => adjust(i.id, -1)} title="Trekk 1">
-                  −1
+              <div className="itemActions">
+                <button className="btn" type="button" onClick={() => setEdit(i)}>
+                  Rediger
                 </button>
-                <button className="stockBtn" type="button" onClick={() => adjust(i.id, 1)} title="Legg til 1">
-                  +1
+                <button
+                  className="btn btnDanger"
+                  type="button"
+                  onClick={() => {
+                    if (confirm(`Slette "${i.name}"?`)) remove(i.id);
+                  }}
+                >
+                  Slett
                 </button>
               </div>
             </div>
-
-            <div className="itemActions">
-              <button className="btn" type="button" onClick={() => setEdit(i)}>
-                Rediger
-              </button>
-              <button
-                className="btn btnDanger"
-                type="button"
-                onClick={() => {
-                  if (confirm(`Slette "${i.name}"?`)) remove(i.id);
-                }}
-              >
-                Slett
-              </button>
-            </div>
-          </div>
-        ))}
+          );
+        })}
 
         {filtered.length === 0 ? <div className="item">Ingen treff.</div> : null}
       </div>
@@ -275,54 +279,52 @@ function EditForm(props: { item: Vare; onSave: (next: Omit<Vare, "createdAt" | "
   const [price, setPrice] = useState(String(props.item.price ?? 0));
   const [cost, setCost] = useState(String(props.item.cost ?? 0));
   const [stock, setStock] = useState(String(props.item.stock ?? 0));
-  const [minStock, setMinStock] = useState(String(props.item.minStock ?? 10)); // ✅ om tom, default 10
+  const [minStock, setMinStock] = useState(String(props.item.minStock ?? 10));
 
   return (
-    <div>
-      <div className="fieldGrid">
+    <div className="fieldGrid">
+      <div>
+        <label className="label">Navn</label>
+        <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
+      </div>
+
+      <div className="row3">
         <div>
-          <label className="label">Navn</label>
-          <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
+          <label className="label">Pris (kr)</label>
+          <input className="input" inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} />
         </div>
-
-        <div className="row3">
-          <div>
-            <label className="label">Pris (kr)</label>
-            <input className="input" inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} />
-          </div>
-          <div>
-            <label className="label">Kost (kr)</label>
-            <input className="input" inputMode="decimal" value={cost} onChange={(e) => setCost(e.target.value)} />
-          </div>
-          <div>
-            <label className="label">Lager (stk)</label>
-            <input className="input" inputMode="numeric" value={stock} onChange={(e) => setStock(e.target.value)} />
-          </div>
-        </div>
-
         <div>
-          <label className="label">Min lager (varsel)</label>
-          <input className="input" inputMode="numeric" value={minStock} onChange={(e) => setMinStock(e.target.value)} />
+          <label className="label">Kost (kr)</label>
+          <input className="input" inputMode="decimal" value={cost} onChange={(e) => setCost(e.target.value)} />
         </div>
+        <div>
+          <label className="label">Lager (stk)</label>
+          <input className="input" inputMode="numeric" value={stock} onChange={(e) => setStock(e.target.value)} />
+        </div>
+      </div>
 
-        <div className="btnRow">
-          <button
-            className="btn btnPrimary"
-            type="button"
-            onClick={() =>
-              props.onSave({
-                id: props.item.id,
-                name: name.trim(),
-                price: round2(toNum(price)),
-                cost: round2(toNum(cost)),
-                stock: Math.trunc(toNum(stock)),
-                minStock: Math.trunc(toNum(minStock)),
-              })
-            }
-          >
-            Lagre
-          </button>
-        </div>
+      <div>
+        <label className="label">Min lager (varsel)</label>
+        <input className="input" inputMode="numeric" value={minStock} onChange={(e) => setMinStock(e.target.value)} />
+      </div>
+
+      <div className="btnRow">
+        <button
+          className="btn btnPrimary"
+          type="button"
+          onClick={() =>
+            props.onSave({
+              id: props.item.id,
+              name: name.trim(),
+              price: round2(toNum(price)),
+              cost: round2(toNum(cost)),
+              stock: Math.trunc(toNum(stock)),
+              minStock: Math.trunc(toNum(minStock)),
+            })
+          }
+        >
+          Lagre
+        </button>
       </div>
     </div>
   );
