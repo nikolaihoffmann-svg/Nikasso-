@@ -15,15 +15,14 @@ import { Varer } from "../pages/Varer";
 import { Salg } from "../pages/Salg";
 import { Kunder } from "../pages/Kunder";
 import { Gjeld } from "../pages/Gjeld";
-import { Backup } from "../pages/Backup";
 
-type TabKey = "oversikt" | "varer" | "salg" | "kunder" | "gjeld" | "backup";
+type TabKey = "oversikt" | "varer" | "salg" | "kunder" | "gjeld";
 
 export function App() {
   const [theme, setThemeState] = useState<Theme>(() => getTheme());
   const [tab, setTab] = useState<TabKey>("oversikt");
 
-  const importInputRef = useRef<HTMLInputElement | null>(null);
+  const importRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     applyThemeToDom(theme);
@@ -34,18 +33,20 @@ export function App() {
     setThemeState((t) => (t === "dark" ? "light" : "dark"));
   }
 
-  async function handleImportReplace(file: File) {
-    await importAllFromFile(file, "replace");
-    alert("Import OK ✅");
-  }
-
   const content = useMemo(() => {
     if (tab === "oversikt") return <Oversikt />;
     if (tab === "varer") return <Varer />;
     if (tab === "salg") return <Salg />;
     if (tab === "kunder") return <Kunder />;
-    if (tab === "gjeld") return <Gjeld />;
-    return <Backup />;
+    return <Gjeld />;
+  }, [tab]);
+
+  const title = useMemo(() => {
+    if (tab === "oversikt") return "Oversikt";
+    if (tab === "varer") return "Varer";
+    if (tab === "salg") return "Salg";
+    if (tab === "kunder") return "Kunder";
+    return "Gjeld";
   }, [tab]);
 
   return (
@@ -53,47 +54,23 @@ export function App() {
       <header className="header">
         <div className="headerTop">
           <div>
-            <div className="h1">Oversikt</div>
+            <div className="h1">{title}</div>
             <div className="subRow">
               <div className="sub">Privat • Lokal lagring i nettleseren</div>
             </div>
           </div>
 
           <div className="btnRow" style={{ marginTop: 0, justifyContent: "flex-end" }}>
-            {/* Eksport */}
+            {/* ✅ 1) Eksport = wrap i arrow */}
             <button className="btn" type="button" onClick={() => downloadExportAll()}>
               Eksporter ALT
             </button>
 
-            {/* Import (via hidden file input) */}
-            <button
-              className="btn"
-              type="button"
-              onClick={() => {
-                importInputRef.current?.click();
-              }}
-            >
+            {/* ✅ 2) Import = åpne filvelger */}
+            <button className="btn" type="button" onClick={() => importRef.current?.click()}>
               Importer ALT
             </button>
 
-            <input
-              ref={importInputRef}
-              type="file"
-              accept="application/json"
-              style={{ display: "none" }}
-              onChange={async (e) => {
-                const file = e.target.files?.[0];
-                if (!file) return;
-                e.target.value = "";
-                try {
-                  await handleImportReplace(file);
-                } catch (err: any) {
-                  alert(`Import feilet: ${String(err?.message ?? err)}`);
-                }
-              }}
-            />
-
-            {/* Nullstill */}
             <button
               className="btn btnDanger"
               type="button"
@@ -104,10 +81,29 @@ export function App() {
               Nullstill
             </button>
 
-            {/* Tema */}
             <button className="themeBtn" type="button" onClick={toggleTheme} title="Bytt tema">
               {theme === "dark" ? "🌙 Mørk" : "☀️ Lys"}
             </button>
+
+            {/* Hidden file input for import */}
+            <input
+              ref={importRef}
+              type="file"
+              accept="application/json,.json"
+              style={{ display: "none" }}
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                e.target.value = "";
+                if (!file) return;
+
+                try {
+                  await importAllFromFile(file, "replace");
+                  alert("Import OK ✅");
+                } catch (err: any) {
+                  alert("Import feilet: " + String(err?.message ?? err));
+                }
+              }}
+            />
           </div>
         </div>
 
@@ -126,9 +122,6 @@ export function App() {
           </button>
           <button className={`tab ${tab === "gjeld" ? "active" : ""}`} onClick={() => setTab("gjeld")} type="button">
             Gjeld
-          </button>
-          <button className={`tab ${tab === "backup" ? "active" : ""}`} onClick={() => setTab("backup")} type="button">
-            Backup
           </button>
         </nav>
       </header>
