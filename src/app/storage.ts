@@ -34,7 +34,7 @@ export type Customer = {
   id: string;
   name: string;
   phone?: string;
-  email?: string;
+  address?: string;
   note?: string;
   createdAt: string;
   updatedAt: string;
@@ -214,7 +214,7 @@ export function upsertCustomer(
       id: partial.id,
       name: String(partial.name ?? "").trim(),
       phone: partial.phone?.trim() || undefined,
-      email: partial.email?.trim() || undefined,
+      address: partial.address?.trim() || undefined,
       note: partial.note?.trim() || undefined,
       createdAt: ts,
       updatedAt: ts,
