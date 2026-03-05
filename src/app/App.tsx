@@ -1,18 +1,29 @@
 // src/app/App.tsx
-import React, { useEffect, useMemo, useState } from "react";
-import { applyThemeToDom, getTheme, setTheme, Theme, downloadExportAll, importAllFromFile, clearAllData } from "./storage";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import {
+  applyThemeToDom,
+  getTheme,
+  setTheme,
+  Theme,
+  downloadExportAll,
+  importAllFromFile,
+  clearAllData,
+} from "./storage";
 
 import { Oversikt } from "../pages/Oversikt";
 import { Varer } from "../pages/Varer";
 import { Salg } from "../pages/Salg";
 import { Kunder } from "../pages/Kunder";
 import { Gjeld } from "../pages/Gjeld";
+import { Backup } from "../pages/Backup";
 
-type TabKey = "oversikt" | "varer" | "salg" | "kunder" | "gjeld";
+type TabKey = "oversikt" | "varer" | "salg" | "kunder" | "gjeld" | "backup";
 
 export function App() {
   const [theme, setThemeState] = useState<Theme>(() => getTheme());
   const [tab, setTab] = useState<TabKey>("oversikt");
+
+  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     applyThemeToDom(theme);
@@ -23,12 +34,18 @@ export function App() {
     setThemeState((t) => (t === "dark" ? "light" : "dark"));
   }
 
+  async function handleImportReplace(file: File) {
+    await importAllFromFile(file, "replace");
+    alert("Import OK ✅");
+  }
+
   const content = useMemo(() => {
     if (tab === "oversikt") return <Oversikt />;
     if (tab === "varer") return <Varer />;
     if (tab === "salg") return <Salg />;
     if (tab === "kunder") return <Kunder />;
-    return <Gjeld />;
+    if (tab === "gjeld") return <Gjeld />;
+    return <Backup />;
   }, [tab]);
 
   return (
@@ -43,12 +60,40 @@ export function App() {
           </div>
 
           <div className="btnRow" style={{ marginTop: 0, justifyContent: "flex-end" }}>
-            <button className="btn" type="button" onClick={downloadExportAll}>
+            {/* Eksport */}
+            <button className="btn" type="button" onClick={() => downloadExportAll()}>
               Eksporter ALT
             </button>
-            <button className="btn" type="button" onClick={importAllFromFile}>
+
+            {/* Import (via hidden file input) */}
+            <button
+              className="btn"
+              type="button"
+              onClick={() => {
+                importInputRef.current?.click();
+              }}
+            >
               Importer ALT
             </button>
+
+            <input
+              ref={importInputRef}
+              type="file"
+              accept="application/json"
+              style={{ display: "none" }}
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                e.target.value = "";
+                try {
+                  await handleImportReplace(file);
+                } catch (err: any) {
+                  alert(`Import feilet: ${String(err?.message ?? err)}`);
+                }
+              }}
+            />
+
+            {/* Nullstill */}
             <button
               className="btn btnDanger"
               type="button"
@@ -59,6 +104,7 @@ export function App() {
               Nullstill
             </button>
 
+            {/* Tema */}
             <button className="themeBtn" type="button" onClick={toggleTheme} title="Bytt tema">
               {theme === "dark" ? "🌙 Mørk" : "☀️ Lys"}
             </button>
@@ -80,6 +126,9 @@ export function App() {
           </button>
           <button className={`tab ${tab === "gjeld" ? "active" : ""}`} onClick={() => setTab("gjeld")} type="button">
             Gjeld
+          </button>
+          <button className={`tab ${tab === "backup" ? "active" : ""}`} onClick={() => setTab("backup")} type="button">
+            Backup
           </button>
         </nav>
       </header>
