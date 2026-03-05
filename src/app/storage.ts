@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 
 /* =========================
    Types
-   ========================= */
+========================= */
 
 export type Theme = "dark" | "light";
 
@@ -13,7 +13,7 @@ export type Vare = {
   price: number; // salg
   cost: number; // kost
   stock: number; // lager
-  minStock: number; // minimum (varsling)
+  minStock: number; // minimum (varsel)
   createdAt: string;
   updatedAt: string;
 };
@@ -30,43 +30,52 @@ export type Customer = {
 
 export type Sale = {
   id: string;
-  createdAt: string;
   itemId: string;
   itemName: string;
   qty: number;
   unitPrice: number;
   total: number;
-
-  // Ny løsning (brukes av Salg.tsx / Kunder.tsx)
   customerId?: string;
   customerName?: string;
-
-  // Legacy (for gamle lagrede salg)
-  customer?: string;
-
-  note?: string;
+  createdAt: string;
 };
 
-type SaleDraftCustomer = { customerId: string; setAt: string };
-
 /* =========================
-   Storage keys / events
-   ========================= */
+   Utils
+========================= */
 
-const KEY_ITEMS = "sg_items_v1";
-const KEY_SALES = "sg_sales_v1";
-const KEY_CUSTOMERS = "sg_customers_v1";
-const KEY_THEME = "sg_theme_v1";
-const KEY_SALE_DRAFT_CUSTOMER = "sg_sale_draft_customer_v1";
-const EVT = "sg_storage_changed";
-
-/* =========================
-   Helpers
-   ========================= */
-
-function nowIso() {
-  return new Date().toISOString();
+export function round2(n: number) {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
 }
+
+export function fmtKr(n: number) {
+  const x = Number.isFinite(n) ? n : 0;
+  return `${x.toLocaleString("nb-NO", { maximumFractionDigits: 2 })} kr`;
+}
+
+export function uid(prefix = "id") {
+  // crypto.randomUUID finnes i moderne nettlesere
+  const r =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? // @ts-expect-error randomUUID exists in modern browsers
+        crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return `${prefix}_${r}`;
+}
+
+/* =========================
+   Storage keys
+========================= */
+
+const KEY_THEME = "app_theme";
+const KEY_ITEMS = "app_items";
+const KEY_CUSTOMERS = "app_customers";
+const KEY_SALES = "app_sales";
+const KEY_SALE_DRAFT_CUSTOMER = "app_sale_draft_customer";
+
+/* =========================
+   Low-level storage helpers
+========================= */
 
 function safeParse<T>(raw: string | null, fallback: T): T {
   if (!raw) return fallback;
@@ -77,356 +86,267 @@ function safeParse<T>(raw: string | null, fallback: T): T {
   }
 }
 
-function notify() {
-  window.dispatchEvent(new Event(EVT));
+function save<T>(key: string, value: T) {
+  localStorage.setItem(key, JSON.stringify(value));
+  // Egen event for samme tab (storage-event trigges ikke alltid i samme tab)
+  window.dispatchEvent(new CustomEvent("app-storage"));
 }
 
-export function uid(prefix = "id") {
-  return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`;
+function nowIso() {
+  return new Date().toISOString();
 }
 
 /* =========================
    Theme
-   ========================= */
+========================= */
 
 export function getTheme(): Theme {
-  const t = safeParse<Theme>(localStorage.getItem(KEY_THEME), "dark");
+  const t = localStorage.getItem(KEY_THEME);
   return t === "light" ? "light" : "dark";
 }
 
 export function setTheme(theme: Theme) {
-  localStorage.setItem(KEY_THEME, JSON.stringify(theme));
-  notify();
-}
-
-export function applyThemeToDom(theme: Theme) {
-  document.documentElement.setAttribute("data-theme", theme);
+  localStorage.setItem(KEY_THEME, theme);
+  window.dispatchEvent(new CustomEvent("app-storage"));
 }
 
 /* =========================
    Items
-   ========================= */
-
-function normalizeItems(raw: any[]): Vare[] {
-  const ts = nowIso();
-  return (raw ?? [])
-    .map((x: any) => {
-      const createdAt = String(x?.createdAt ?? ts);
-      const updatedAt = String(x?.updatedAt ?? ts);
-      const minStock = Number.isFinite(Number(x?.minStock)) ? Number(x.minStock) : 10; // default 10
-      return {
-        id: String(x?.id ?? uid("item")),
-        name: String(x?.name ?? ""),
-        price: Number(x?.price ?? 0),
-        cost: Number(x?.cost ?? 0),
-        stock: Number(x?.stock ?? 0),
-        minStock,
-        createdAt,
-        updatedAt,
-      } as Vare;
-    })
-    .filter((v) => v.name.trim().length > 0);
-}
+========================= */
 
 export function getItems(): Vare[] {
-  const parsed = safeParse<any[]>(localStorage.getItem(KEY_ITEMS), []);
-  return normalizeItems(Array.isArray(parsed) ? parsed : []);
+  const arr = safeParse<any[]>(localStorage.getItem(KEY_ITEMS), []);
+  // Normaliser litt så appen tåler gamle data
+  return (arr || [])
+    .map((x) => ({
+      id: String(x.id ?? uid("item")),
+      name: String(x.name ?? ""),
+      price: Number(x.price ?? 0),
+      cost: Number(x.cost ?? 0),
+      stock: Number(x.stock ?? 0),
+      minStock: Number(x.minStock ?? 10),
+      createdAt: String(x.createdAt ?? nowIso()),
+      updatedAt: String(x.updatedAt ?? nowIso()),
+    }))
+    .filter((x) => x.name.trim().length > 0);
 }
 
 export function setItems(items: Vare[]) {
-  localStorage.setItem(KEY_ITEMS, JSON.stringify(items));
-  notify();
-}
-
-export function upsertItem(
-  partial: Omit<Vare, "createdAt" | "updatedAt"> & Partial<Pick<Vare, "createdAt" | "updatedAt">>
-) {
-  const items = getItems();
-  const existingIdx = items.findIndex((i) => i.id === partial.id);
-
-  const ts = nowIso();
-
-  if (existingIdx >= 0) {
-    const updated: Vare = {
-      ...items[existingIdx],
-      ...partial,
-      // sikker default
-      minStock:
-        Number.isFinite(Number((partial as any).minStock)) ? Number((partial as any).minStock) : items[existingIdx].minStock ?? 10,
-      updatedAt: ts,
-    } as Vare;
-    items[existingIdx] = updated;
-  } else {
-    const created: Vare = {
-      id: partial.id,
-      name: partial.name ?? "",
-      price: partial.price ?? 0,
-      cost: partial.cost ?? 0,
-      stock: partial.stock ?? 0,
-      minStock: Number.isFinite(Number((partial as any).minStock)) ? Number((partial as any).minStock) : 10, // default 10
-      createdAt: ts,
-      updatedAt: ts,
-    };
-    items.unshift(created);
-  }
-
-  setItems(items);
-}
-
-export function deleteItem(id: string) {
-  const items = getItems().filter((i) => i.id !== id);
-  setItems(items);
-}
-
-export function adjustStock(id: string, delta: number) {
-  const items = getItems();
-  const idx = items.findIndex((i) => i.id === id);
-  if (idx < 0) return;
-
-  const ts = nowIso();
-  items[idx] = {
-    ...items[idx],
-    stock: (items[idx].stock ?? 0) + delta,
-    updatedAt: ts,
-  };
-  setItems(items);
+  save(KEY_ITEMS, items);
 }
 
 /* =========================
    Customers
-   ========================= */
-
-function normalizeCustomers(raw: any[]): Customer[] {
-  const ts = nowIso();
-  return (raw ?? [])
-    .map((x: any) => ({
-      id: String(x?.id ?? uid("cust")),
-      name: String(x?.name ?? "").trim(),
-      phone: x?.phone ? String(x.phone).trim() : undefined,
-      address: x?.address ? String(x.address).trim() : undefined,
-      note: x?.note ? String(x.note).trim() : undefined,
-      createdAt: String(x?.createdAt ?? ts),
-      updatedAt: String(x?.updatedAt ?? ts),
-    }))
-    .filter((c) => c.name.length > 0);
-}
+========================= */
 
 export function getCustomers(): Customer[] {
-  const parsed = safeParse<any[]>(localStorage.getItem(KEY_CUSTOMERS), []);
-  return normalizeCustomers(Array.isArray(parsed) ? parsed : []);
+  const arr = safeParse<any[]>(localStorage.getItem(KEY_CUSTOMERS), []);
+  return (arr || [])
+    .map((x) => ({
+      id: String(x.id ?? uid("cust")),
+      name: String(x.name ?? "").trim(),
+      phone: x.phone ? String(x.phone).trim() : undefined,
+      address: x.address ? String(x.address).trim() : undefined,
+      note: x.note ? String(x.note).trim() : undefined,
+      createdAt: String(x.createdAt ?? nowIso()),
+      updatedAt: String(x.updatedAt ?? nowIso()),
+    }))
+    .filter((x) => x.name.length > 0);
 }
 
 export function setCustomers(customers: Customer[]) {
-  localStorage.setItem(KEY_CUSTOMERS, JSON.stringify(customers));
-  notify();
-}
-
-export function upsertCustomer(
-  partial: Omit<Customer, "createdAt" | "updatedAt"> & Partial<Pick<Customer, "createdAt" | "updatedAt">>
-) {
-  const customers = getCustomers();
-  const idx = customers.findIndex((c) => c.id === partial.id);
-  const ts = nowIso();
-
-  if (idx >= 0) {
-    customers[idx] = {
-      ...customers[idx],
-      ...partial,
-      updatedAt: ts,
-    } as Customer;
-  } else {
-    customers.unshift({
-      id: partial.id,
-      name: (partial.name ?? "").trim(),
-      phone: partial.phone?.trim() || undefined,
-      address: partial.address?.trim() || undefined,
-      note: partial.note?.trim() || undefined,
-      createdAt: ts,
-      updatedAt: ts,
-    });
-  }
-
-  setCustomers(customers);
-}
-
-export function deleteCustomer(id: string) {
-  const customers = getCustomers().filter((c) => c.id !== id);
-  setCustomers(customers);
+  save(KEY_CUSTOMERS, customers);
 }
 
 /* =========================
    Sales
-   ========================= */
-
-function normalizeSales(raw: any[]): Sale[] {
-  const ts = nowIso();
-  return (raw ?? [])
-    .map((x: any) => {
-      const createdAt = String(x?.createdAt ?? ts);
-      const qty = Number(x?.qty ?? 0);
-      const unitPrice = Number(x?.unitPrice ?? 0);
-      const total =
-        Number.isFinite(Number(x?.total)) ? Number(x.total) : round2((Number.isFinite(qty) ? qty : 0) * (Number.isFinite(unitPrice) ? unitPrice : 0));
-
-      // Legacy støtte:
-      const legacyCustomer = typeof x?.customer === "string" ? x.customer : undefined;
-      const customerName = typeof x?.customerName === "string" ? x.customerName : legacyCustomer;
-
-      return {
-        id: String(x?.id ?? uid("sale")),
-        createdAt,
-        itemId: String(x?.itemId ?? ""),
-        itemName: String(x?.itemName ?? ""),
-        qty: Number.isFinite(qty) ? qty : 0,
-        unitPrice: Number.isFinite(unitPrice) ? unitPrice : 0,
-        total: Number.isFinite(total) ? total : 0,
-
-        customerId: typeof x?.customerId === "string" && x.customerId.length ? x.customerId : undefined,
-        customerName: customerName && customerName.length ? customerName : undefined,
-
-        customer: legacyCustomer,
-        note: typeof x?.note === "string" ? x.note : undefined,
-      } as Sale;
-    })
-    .filter((s) => s.itemId.length > 0 && s.itemName.trim().length > 0);
-}
+========================= */
 
 export function getSales(): Sale[] {
-  const parsed = safeParse<any[]>(localStorage.getItem(KEY_SALES), []);
-  return normalizeSales(Array.isArray(parsed) ? parsed : []);
+  const arr = safeParse<any[]>(localStorage.getItem(KEY_SALES), []);
+  return (arr || []).map((x) => ({
+    id: String(x.id ?? uid("sale")),
+    itemId: String(x.itemId ?? ""),
+    itemName: String(x.itemName ?? ""),
+    qty: Number(x.qty ?? 0),
+    unitPrice: Number(x.unitPrice ?? 0),
+    total: Number(x.total ?? round2(Number(x.qty ?? 0) * Number(x.unitPrice ?? 0))),
+    customerId: x.customerId ? String(x.customerId) : undefined,
+    customerName: x.customerName ? String(x.customerName) : undefined,
+    createdAt: String(x.createdAt ?? nowIso()),
+  }));
 }
 
 export function setSales(sales: Sale[]) {
-  localStorage.setItem(KEY_SALES, JSON.stringify(sales));
-  notify();
+  save(KEY_SALES, sales);
 }
 
-export function addSale(s: Omit<Sale, "id" | "createdAt" | "total">) {
+export function addSale(input: Omit<Sale, "id" | "createdAt" | "total">) {
   const sales = getSales();
-  const createdAt = nowIso();
-  const total = round2((s.unitPrice ?? 0) * (s.qty ?? 0));
-
-  const sale: Sale = {
+  const s: Sale = {
     id: uid("sale"),
-    createdAt,
-    total,
-    ...s,
+    createdAt: nowIso(),
+    itemId: input.itemId,
+    itemName: input.itemName,
+    qty: Number(input.qty ?? 0),
+    unitPrice: round2(Number(input.unitPrice ?? 0)),
+    total: round2(Number(input.qty ?? 0) * Number(input.unitPrice ?? 0)),
+    customerId: input.customerId,
+    customerName: input.customerName,
   };
-
-  sales.unshift(sale);
+  // nyeste først
+  sales.unshift(s);
   setSales(sales);
-  return sale;
 }
 
 /* =========================
-   Sale draft customer (forhåndsvalg)
-   ========================= */
+   Sale draft customer (forhåndsvalg fra Kunder -> Salg)
+========================= */
+
+type SaleDraftCustomer = { customerId: string; setAt: string };
 
 export function setSaleDraftCustomer(customerId: string) {
   const payload: SaleDraftCustomer = { customerId, setAt: nowIso() };
-  localStorage.setItem(KEY_SALE_DRAFT_CUSTOMER, JSON.stringify(payload));
-  notify();
+  save(KEY_SALE_DRAFT_CUSTOMER, payload);
 }
 
 export function getSaleDraftCustomer(): SaleDraftCustomer | null {
-  const parsed = safeParse<SaleDraftCustomer | null>(localStorage.getItem(KEY_SALE_DRAFT_CUSTOMER), null);
-  if (!parsed?.customerId) return null;
-  return parsed;
+  const payload = safeParse<SaleDraftCustomer | null>(localStorage.getItem(KEY_SALE_DRAFT_CUSTOMER), null);
+  if (!payload?.customerId) return null;
+  return payload;
 }
 
 export function clearSaleDraftCustomer() {
   localStorage.removeItem(KEY_SALE_DRAFT_CUSTOMER);
-  notify();
+  window.dispatchEvent(new CustomEvent("app-storage"));
 }
 
 /* =========================
-   Hooks
-   ========================= */
+   React hooks (sync med localStorage)
+========================= */
+
+function useStorageSync() {
+  const [, bump] = useState(0);
+  useEffect(() => {
+    const onAny = () => bump((x) => x + 1);
+    window.addEventListener("app-storage", onAny);
+    window.addEventListener("storage", onAny);
+    return () => {
+      window.removeEventListener("app-storage", onAny);
+      window.removeEventListener("storage", onAny);
+    };
+  }, []);
+}
 
 export function useItems() {
+  useStorageSync();
   const [items, setItemsState] = useState<Vare[]>(() => getItems());
 
+  useEffect(() => setItemsState(getItems()), []);
+
+  // oppdater på sync-event
   useEffect(() => {
-    const on = () => setItemsState(getItems());
-    window.addEventListener(EVT, on);
-    window.addEventListener("storage", on);
+    const onAny = () => setItemsState(getItems());
+    window.addEventListener("app-storage", onAny);
+    window.addEventListener("storage", onAny);
     return () => {
-      window.removeEventListener(EVT, on);
-      window.removeEventListener("storage", on);
+      window.removeEventListener("app-storage", onAny);
+      window.removeEventListener("storage", onAny);
     };
   }, []);
 
-  const api = useMemo(
-    () => ({
-      setAll: (next: Vare[]) => setItems(next),
-      upsert: upsertItem,
-      remove: deleteItem,
-      adjust: adjustStock,
-    }),
-    []
-  );
+  function upsert(next: Omit<Vare, "createdAt" | "updatedAt">) {
+    const arr = getItems();
+    const idx = arr.findIndex((x) => x.id === next.id);
+    if (idx >= 0) {
+      arr[idx] = { ...arr[idx], ...next, updatedAt: nowIso() };
+    } else {
+      arr.unshift({ ...next, createdAt: nowIso(), updatedAt: nowIso() });
+    }
+    setItems(arr);
+  }
 
-  return { items, ...api };
+  function remove(id: string) {
+    const arr = getItems().filter((x) => x.id !== id);
+    setItems(arr);
+  }
+
+  function adjust(id: string, delta: number) {
+    const arr = getItems();
+    const idx = arr.findIndex((x) => x.id === id);
+    if (idx < 0) return;
+    const cur = arr[idx];
+    arr[idx] = { ...cur, stock: (cur.stock ?? 0) + delta, updatedAt: nowIso() };
+    setItems(arr);
+  }
+
+  function setAll(next: Vare[]) {
+    setItems(next);
+  }
+
+  return { items, upsert, remove, adjust, setAll };
 }
 
 export function useCustomers() {
+  useStorageSync();
   const [customers, setCustomersState] = useState<Customer[]>(() => getCustomers());
 
+  useEffect(() => setCustomersState(getCustomers()), []);
+
   useEffect(() => {
-    const on = () => setCustomersState(getCustomers());
-    window.addEventListener(EVT, on);
-    window.addEventListener("storage", on);
+    const onAny = () => setCustomersState(getCustomers());
+    window.addEventListener("app-storage", onAny);
+    window.addEventListener("storage", onAny);
     return () => {
-      window.removeEventListener(EVT, on);
-      window.removeEventListener("storage", on);
+      window.removeEventListener("app-storage", onAny);
+      window.removeEventListener("storage", onAny);
     };
   }, []);
 
-  const api = useMemo(
-    () => ({
-      setAll: (next: Customer[]) => setCustomers(next),
-      upsert: upsertCustomer,
-      remove: deleteCustomer,
-    }),
-    []
-  );
+  function upsert(next: Omit<Customer, "createdAt" | "updatedAt">) {
+    const arr = getCustomers();
+    const idx = arr.findIndex((x) => x.id === next.id);
+    if (idx >= 0) {
+      arr[idx] = { ...arr[idx], ...next, updatedAt: nowIso() };
+    } else {
+      arr.unshift({ ...next, createdAt: nowIso(), updatedAt: nowIso() });
+    }
+    setCustomers(arr);
+  }
 
-  return { customers, ...api };
+  function remove(id: string) {
+    const arr = getCustomers().filter((x) => x.id !== id);
+    setCustomers(arr);
+  }
+
+  function setAll(next: Customer[]) {
+    setCustomers(next);
+  }
+
+  return { customers, upsert, remove, setAll };
 }
 
 export function useSales() {
+  useStorageSync();
   const [sales, setSalesState] = useState<Sale[]>(() => getSales());
 
+  useEffect(() => setSalesState(getSales()), []);
+
   useEffect(() => {
-    const on = () => setSalesState(getSales());
-    window.addEventListener(EVT, on);
-    window.addEventListener("storage", on);
+    const onAny = () => setSalesState(getSales());
+    window.addEventListener("app-storage", onAny);
+    window.addEventListener("storage", onAny);
     return () => {
-      window.removeEventListener(EVT, on);
-      window.removeEventListener("storage", on);
+      window.removeEventListener("app-storage", onAny);
+      window.removeEventListener("storage", onAny);
     };
   }, []);
 
-  const api = useMemo(
-    () => ({
-      setAll: (next: Sale[]) => setSales(next),
-      add: addSale,
-    }),
-    []
-  );
+  const sumTotal = useMemo(() => sales.reduce((a, b) => a + (Number(b.total) || 0), 0), [sales]);
 
-  return { sales, ...api };
-}
+  function clearAll() {
+    setSales([]);
+  }
 
-/* =========================
-   Utils
-   ========================= */
-
-export function round2(n: number) {
-  return Math.round((n + Number.EPSILON) * 100) / 100;
-}
-
-export function fmtKr(n: number) {
-  const v = Number.isFinite(n) ? n : 0;
-  return `${v.toLocaleString("nb-NO", { maximumFractionDigits: 2 })} kr`;
+  return { sales, sumTotal, clearAll };
 }
