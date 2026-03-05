@@ -7,8 +7,9 @@ import { Varer } from "../pages/Varer";
 import { Salg } from "../pages/Salg";
 import { Kunder } from "../pages/Kunder";
 import { Gjeld } from "../pages/Gjeld";
+import { Backup } from "../pages/Backup";
 
-type TabKey = "oversikt" | "varer" | "salg" | "kunder" | "gjeld";
+type TabKey = "oversikt" | "varer" | "salg" | "kunder" | "gjeld" | "backup";
 
 export function App() {
   const [theme, setThemeState] = useState<Theme>(() => getTheme());
@@ -38,6 +39,8 @@ export function App() {
         return "Kunder";
       case "gjeld":
         return "Gjeld (til deg)";
+      case "backup":
+        return "Backup";
     }
   }, [tab]);
 
@@ -46,7 +49,8 @@ export function App() {
     if (tab === "varer") return <Varer />;
     if (tab === "salg") return <Salg />;
     if (tab === "kunder") return <Kunder />;
-    return <Gjeld />;
+    if (tab === "gjeld") return <Gjeld />;
+    return <Backup />;
   }, [tab]);
 
   return (
@@ -84,6 +88,9 @@ export function App() {
           </button>
           <button className={`tabBtn ${tab === "gjeld" ? "active" : ""}`} onClick={() => setTab("gjeld")} type="button">
             Gjeld
+          </button>
+          <button className={`tabBtn ${tab === "backup" ? "active" : ""}`} onClick={() => setTab("backup")} type="button">
+            Backup
           </button>
         </nav>
       </header>
