@@ -1,7 +1,9 @@
 // src/app/storage.ts
 import { useEffect, useMemo, useState } from "react";
 
-/* ---------------- Types ---------------- */
+/* =========================
+   Types
+========================= */
 
 export type Theme = "dark" | "light";
 
@@ -35,27 +37,30 @@ export type Sale = {
   unitPrice: number;
   total: number;
 
-  // valgfritt: du kan lagre både id og navn (for historikk selv om kunden endres senere)
+  // valgfritt kunde-link
   customerId?: string;
   customerName?: string;
 
-  // bakoverkompatibilitet hvis noen steder fortsatt bruker "customer" som fritekst
-  customer?: string;
-
   note?: string;
 };
+
+/* =========================
+   Storage keys + event
+========================= */
 
 const KEY_ITEMS = "sg_items_v1";
 const KEY_SALES = "sg_sales_v1";
 const KEY_CUSTOMERS = "sg_customers_v1";
 const KEY_THEME = "sg_theme_v1";
 
-// viktig: disse manglet (det er de build-feilene dine peker på)
-const KEY_SALE_DRAFT_CUSTOMER = "sg_sale_draft_customer_v1";
+// brukes for “Kunder -> Nytt salg” forhåndsvalg
+const KEY_SALE_DRAFT_CUST = "sg_sale_draft_customer_v1";
 
 const EVT = "sg_storage_changed";
 
-/* ---------------- Helpers ---------------- */
+/* =========================
+   Helpers
+========================= */
 
 function nowIso() {
   return new Date().toISOString();
@@ -78,7 +83,9 @@ export function uid(prefix = "id") {
   return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`;
 }
 
-/* ---------------- Theme ---------------- */
+/* =========================
+   Theme
+========================= */
 
 export function getTheme(): Theme {
   const t = safeParse<Theme>(localStorage.getItem(KEY_THEME), "dark");
@@ -94,27 +101,32 @@ export function applyThemeToDom(theme: Theme) {
   document.documentElement.setAttribute("data-theme", theme);
 }
 
-/* ---------------- Sale draft customer (fixer build-feilen) ---------------- */
-/**
- * Brukes når du går inn på en kunde og trykker "Nytt salg" -> Salg-siden skal forhåndsvelge kunden.
- * Lagrer kun customerId.
- */
+/* =========================
+   Sale draft customer (forhåndsvalg)
+========================= */
+
+type SaleDraftCustomer = { customerId: string };
+
 export function setSaleDraftCustomer(customerId: string) {
-  localStorage.setItem(KEY_SALE_DRAFT_CUSTOMER, JSON.stringify(customerId));
+  const payload: SaleDraftCustomer = { customerId };
+  localStorage.setItem(KEY_SALE_DRAFT_CUST, JSON.stringify(payload));
   notify();
 }
 
-export function getSaleDraftCustomer(): string | null {
-  const v = safeParse<string | null>(localStorage.getItem(KEY_SALE_DRAFT_CUSTOMER), null);
-  return v ? String(v) : null;
+export function getSaleDraftCustomer(): SaleDraftCustomer | null {
+  const v = safeParse<SaleDraftCustomer | null>(localStorage.getItem(KEY_SALE_DRAFT_CUST), null);
+  if (!v?.customerId) return null;
+  return v;
 }
 
 export function clearSaleDraftCustomer() {
-  localStorage.removeItem(KEY_SALE_DRAFT_CUSTOMER);
+  localStorage.removeItem(KEY_SALE_DRAFT_CUST);
   notify();
 }
 
-/* ---------------- Items ---------------- */
+/* =========================
+   Items
+========================= */
 
 export function getItems(): Vare[] {
   return safeParse<Vare[]>(localStorage.getItem(KEY_ITEMS), []);
@@ -126,12 +138,10 @@ export function setItems(items: Vare[]) {
 }
 
 export function upsertItem(
-  partial: Omit<Vare, "createdAt" | "updatedAt"> &
-    Partial<Pick<Vare, "createdAt" | "updatedAt">>
+  partial: Omit<Vare, "createdAt" | "updatedAt"> & Partial<Pick<Vare, "createdAt" | "updatedAt">>
 ) {
   const items = getItems();
   const existingIdx = items.findIndex((i) => i.id === partial.id);
-
   const ts = nowIso();
 
   if (existingIdx >= 0) {
@@ -173,7 +183,9 @@ export function adjustStock(id: string, delta: number) {
   setItems(items);
 }
 
-/* ---------------- Customers ---------------- */
+/* =========================
+   Customers
+========================= */
 
 export function getCustomers(): Customer[] {
   return safeParse<Customer[]>(localStorage.getItem(KEY_CUSTOMERS), []);
@@ -185,26 +197,26 @@ export function setCustomers(customers: Customer[]) {
 }
 
 export function upsertCustomer(
-  partial: Omit<Customer, "createdAt" | "updatedAt"> &
-    Partial<Pick<Customer, "createdAt" | "updatedAt">>
+  partial: Omit<Customer, "createdAt" | "updatedAt"> & Partial<Pick<Customer, "createdAt" | "updatedAt">>
 ) {
   const customers = getCustomers();
   const existingIdx = customers.findIndex((c) => c.id === partial.id);
   const ts = nowIso();
 
   if (existingIdx >= 0) {
-    customers[existingIdx] = {
+    const updated: Customer = {
       ...customers[existingIdx],
       ...partial,
       updatedAt: ts,
     } as Customer;
+    customers[existingIdx] = updated;
   } else {
     const created: Customer = {
       id: partial.id,
       name: partial.name ?? "",
-      phone: partial.phone ?? "",
-      address: partial.address ?? "",
-      note: partial.note ?? "",
+      phone: partial.phone,
+      address: partial.address,
+      note: partial.note,
       createdAt: ts,
       updatedAt: ts,
     };
@@ -219,7 +231,9 @@ export function deleteCustomer(id: string) {
   setCustomers(customers);
 }
 
-/* ---------------- Sales ---------------- */
+/* =========================
+   Sales
+========================= */
 
 export function getSales(): Sale[] {
   return safeParse<Sale[]>(localStorage.getItem(KEY_SALES), []);
@@ -247,26 +261,22 @@ export function addSale(s: Omit<Sale, "id" | "createdAt" | "total">) {
   return sale;
 }
 
-/* ---------------- Hooks ---------------- */
+/* =========================
+   Hooks
+========================= */
 
-function useStorageEvent<T>(getter: () => T) {
-  const [value, setValue] = useState<T>(() => getter());
+export function useItems() {
+  const [items, setItemsState] = useState<Vare[]>(() => getItems());
 
   useEffect(() => {
-    const on = () => setValue(getter());
+    const on = () => setItemsState(getItems());
     window.addEventListener(EVT, on);
     window.addEventListener("storage", on);
     return () => {
       window.removeEventListener(EVT, on);
       window.removeEventListener("storage", on);
     };
-  }, [getter]);
-
-  return value;
-}
-
-export function useItems() {
-  const items = useStorageEvent(getItems);
+  }, []);
 
   const api = useMemo(
     () => ({
@@ -282,7 +292,17 @@ export function useItems() {
 }
 
 export function useCustomers() {
-  const customers = useStorageEvent(getCustomers);
+  const [customers, setCustomersState] = useState<Customer[]>(() => getCustomers());
+
+  useEffect(() => {
+    const on = () => setCustomersState(getCustomers());
+    window.addEventListener(EVT, on);
+    window.addEventListener("storage", on);
+    return () => {
+      window.removeEventListener(EVT, on);
+      window.removeEventListener("storage", on);
+    };
+  }, []);
 
   const api = useMemo(
     () => ({
@@ -297,7 +317,17 @@ export function useCustomers() {
 }
 
 export function useSales() {
-  const sales = useStorageEvent(getSales);
+  const [sales, setSalesState] = useState<Sale[]>(() => getSales());
+
+  useEffect(() => {
+    const on = () => setSalesState(getSales());
+    window.addEventListener(EVT, on);
+    window.addEventListener("storage", on);
+    return () => {
+      window.removeEventListener(EVT, on);
+      window.removeEventListener("storage", on);
+    };
+  }, []);
 
   const api = useMemo(
     () => ({
@@ -310,7 +340,9 @@ export function useSales() {
   return { sales, ...api };
 }
 
-/* ---------------- Utils ---------------- */
+/* =========================
+   Utils
+========================= */
 
 export function round2(n: number) {
   return Math.round((n + Number.EPSILON) * 100) / 100;
