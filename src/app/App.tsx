@@ -2,11 +2,13 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { applyThemeToDom, getTheme, setTheme, Theme } from "./storage";
 
+import { Oversikt } from "../pages/Oversikt";
 import { Varer } from "../pages/Varer";
 import { Salg } from "../pages/Salg";
 import { Kunder } from "../pages/Kunder";
+import { Gjeld } from "../pages/Gjeld";
 
-type TabKey = "oversikt" | "varer" | "salg" | "kunder";
+type TabKey = "oversikt" | "varer" | "salg" | "kunder" | "gjeld";
 
 export function App() {
   const [theme, setThemeState] = useState<Theme>(() => getTheme());
@@ -25,29 +27,20 @@ export function App() {
   }
 
   const content = useMemo(() => {
-    if (tab === "oversikt") {
-      return (
-        <div className="card">
-          <div className="cardTitle">Oversikt</div>
-          <div className="cardSub">Velg en fane over for å jobbe med varer, salg og kunder.</div>
-        </div>
-      );
-    }
+    if (tab === "oversikt") return <Oversikt />;
     if (tab === "varer") return <Varer />;
     if (tab === "salg") return <Salg />;
-    return <Kunder />;
+    if (tab === "kunder") return <Kunder />;
+    return <Gjeld />;
   }, [tab]);
 
   return (
-    <div className="container">
+    <div className="app">
       <header className="header">
-        <div className="headerTop">
-          <div>
-            <h1 className="h1">Oversikt</h1>
-            <div className="subRow">
-              <div className="sub">Privat • Lokal lagring i nettleseren</div>
-            </div>
-          </div>
+        <h1 className="title">Oversikt</h1>
+
+        <div className="topbar">
+          <div className="subtitle">Privat • Lokal lagring i nettleseren</div>
 
           <button
             type="button"
@@ -56,27 +49,31 @@ export function App() {
             aria-label={`Bytt tema (nå: ${themeLabel})`}
             title="Bytt tema"
           >
-            {themeIcon} {themeLabel}
+            <span className="themeIcon">{themeIcon}</span>
+            <span className="themeText">{themeLabel}</span>
           </button>
         </div>
 
         <nav className="tabs">
-          <button className={`tab ${tab === "oversikt" ? "active" : ""}`} onClick={() => setTab("oversikt")} type="button">
+          <button className={`tabBtn ${tab === "oversikt" ? "active" : ""}`} onClick={() => setTab("oversikt")} type="button">
             Oversikt
           </button>
-          <button className={`tab ${tab === "varer" ? "active" : ""}`} onClick={() => setTab("varer")} type="button">
+          <button className={`tabBtn ${tab === "varer" ? "active" : ""}`} onClick={() => setTab("varer")} type="button">
             Varer
           </button>
-          <button className={`tab ${tab === "salg" ? "active" : ""}`} onClick={() => setTab("salg")} type="button">
+          <button className={`tabBtn ${tab === "salg" ? "active" : ""}`} onClick={() => setTab("salg")} type="button">
             Salg
           </button>
-          <button className={`tab ${tab === "kunder" ? "active" : ""}`} onClick={() => setTab("kunder")} type="button">
+          <button className={`tabBtn ${tab === "kunder" ? "active" : ""}`} onClick={() => setTab("kunder")} type="button">
             Kunder
+          </button>
+          <button className={`tabBtn ${tab === "gjeld" ? "active" : ""}`} onClick={() => setTab("gjeld")} type="button">
+            Gjeld
           </button>
         </nav>
       </header>
 
-      {content}
+      <main className="main">{content}</main>
     </div>
   );
 }
