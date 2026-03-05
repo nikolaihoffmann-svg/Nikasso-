@@ -85,6 +85,44 @@ export function fmtKr(n: number) {
 }
 
 /* =========================
+   Theme
+========================= */
+
+export function getTheme(): Theme {
+  const v = localStorage.getItem(LS_KEYS.theme);
+  return v === "light" ? "light" : "dark";
+}
+
+export function setTheme(t: Theme) {
+  localStorage.setItem(LS_KEYS.theme, t);
+  emitChange();
+}
+
+/** ✅ Dette var funksjonen App.tsx prøvde å importere */
+export function applyThemeToDom(theme: Theme) {
+  // Velg én av disse to variantene (begge funker). Jeg lar begge stå aktive for robusthet:
+  document.documentElement.dataset.theme = theme; // for CSS: html[data-theme="dark"]
+  document.documentElement.classList.toggle("theme-dark", theme === "dark");
+  document.documentElement.classList.toggle("theme-light", theme === "light");
+}
+
+export function useTheme(): [Theme, (t: Theme) => void] {
+  const [theme, setState] = useState<Theme>(() => getTheme());
+
+  useEffect(() => {
+    const onChange = () => setState(getTheme());
+    window.addEventListener("storage", onChange);
+    window.addEventListener(EVT, onChange);
+    return () => {
+      window.removeEventListener("storage", onChange);
+      window.removeEventListener(EVT, onChange);
+    };
+  }, []);
+
+  return [theme, setTheme];
+}
+
+/* =========================
    Items (Varer)
 ========================= */
 
@@ -114,13 +152,17 @@ export function setItems(next: Vare[]) {
 function upsertItemCore(item: Omit<Vare, "createdAt" | "updatedAt">) {
   const items = getItems();
   const i = items.findIndex((x) => x.id === item.id);
-  if (i >= 0) items[i] = { ...items[i], ...item, updatedAt: nowIso() };
-  else items.unshift({ ...item, createdAt: nowIso(), updatedAt: nowIso() });
+  if (i >= 0) {
+    items[i] = { ...items[i], ...item, updatedAt: nowIso() };
+  } else {
+    items.unshift({ ...item, createdAt: nowIso(), updatedAt: nowIso() });
+  }
   setItems(items);
 }
 
 function removeItemCore(id: string) {
-  setItems(getItems().filter((x) => x.id !== id));
+  const items = getItems().filter((x) => x.id !== id);
+  setItems(items);
 }
 
 function adjustItemStockCore(id: string, delta: number) {
@@ -186,13 +228,17 @@ export function setCustomers(next: Customer[]) {
 function upsertCustomerCore(c: Omit<Customer, "createdAt" | "updatedAt">) {
   const customers = getCustomers();
   const i = customers.findIndex((x) => x.id === c.id);
-  if (i >= 0) customers[i] = { ...customers[i], ...c, updatedAt: nowIso() };
-  else customers.unshift({ ...c, createdAt: nowIso(), updatedAt: nowIso() });
+  if (i >= 0) {
+    customers[i] = { ...customers[i], ...c, updatedAt: nowIso() };
+  } else {
+    customers.unshift({ ...c, createdAt: nowIso(), updatedAt: nowIso() });
+  }
   setCustomers(customers);
 }
 
 function removeCustomerCore(id: string) {
-  setCustomers(getCustomers().filter((x) => x.id !== id));
+  const customers = getCustomers().filter((x) => x.id !== id);
+  setCustomers(customers);
 }
 
 export function useCustomers() {
@@ -250,7 +296,12 @@ export function addSale(input: Omit<Sale, "id" | "createdAt" | "total">) {
   const sales = getSales();
   const createdAt = nowIso();
   const total = round2((Number(input.qty) || 0) * (Number(input.unitPrice) || 0));
-  const next: Sale = { id: uid("sale"), createdAt, total, ...input };
+  const next: Sale = {
+    id: uid("sale"),
+    createdAt,
+    total,
+    ...input,
+  };
   sales.unshift(next);
   setSales(sales);
 }
@@ -273,7 +324,7 @@ export function useSales() {
 
 /* =========================
    Sale draft customer (forhåndsvalg)
-   NB: Dette er ENKEL string, ikke objekt.
+   ✅ Dette er ENKEL string, ikke objekt.
 ========================= */
 
 export function setSaleDraftCustomer(customerId: string) {
@@ -290,43 +341,4 @@ export function getSaleDraftCustomer(): string | null {
 export function clearSaleDraftCustomer() {
   localStorage.removeItem(LS_KEYS.saleDraftCustomer);
   emitChange();
-}
-
-/* =========================
-   Theme
-========================= */
-
-export function getTheme(): Theme {
-  const v = localStorage.getItem(LS_KEYS.theme);
-  return v === "light" ? "light" : "dark";
-}
-
-export function setTheme(t: Theme) {
-  localStorage.setItem(LS_KEYS.theme, t);
-  emitChange();
-}
-
-/** Denne manglet hos deg – App.tsx importerer den */
-export function applyThemeToDom(theme: Theme) {
-  // Du kan style på begge måter: data-attribute + class.
-  // Velg det du liker i CSS (du kan bruke begge).
-  document.documentElement.setAttribute("data-theme", theme);
-  document.documentElement.classList.toggle("dark", theme === "dark");
-  document.documentElement.classList.toggle("light", theme === "light");
-}
-
-export function useTheme(): [Theme, (t: Theme) => void] {
-  const [theme, setState] = useState<Theme>(() => getTheme());
-
-  useEffect(() => {
-    const onChange = () => setState(getTheme());
-    window.addEventListener("storage", onChange);
-    window.addEventListener(EVT, onChange);
-    return () => {
-      window.removeEventListener("storage", onChange);
-      window.removeEventListener(EVT, onChange);
-    };
-  }, []);
-
-  return [theme, setTheme];
 }
