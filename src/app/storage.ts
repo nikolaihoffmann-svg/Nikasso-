@@ -114,17 +114,13 @@ export function setItems(next: Vare[]) {
 function upsertItemCore(item: Omit<Vare, "createdAt" | "updatedAt">) {
   const items = getItems();
   const i = items.findIndex((x) => x.id === item.id);
-  if (i >= 0) {
-    items[i] = { ...items[i], ...item, updatedAt: nowIso() };
-  } else {
-    items.unshift({ ...item, createdAt: nowIso(), updatedAt: nowIso() });
-  }
+  if (i >= 0) items[i] = { ...items[i], ...item, updatedAt: nowIso() };
+  else items.unshift({ ...item, createdAt: nowIso(), updatedAt: nowIso() });
   setItems(items);
 }
 
 function removeItemCore(id: string) {
-  const items = getItems().filter((x) => x.id !== id);
-  setItems(items);
+  setItems(getItems().filter((x) => x.id !== id));
 }
 
 function adjustItemStockCore(id: string, delta: number) {
@@ -190,17 +186,13 @@ export function setCustomers(next: Customer[]) {
 function upsertCustomerCore(c: Omit<Customer, "createdAt" | "updatedAt">) {
   const customers = getCustomers();
   const i = customers.findIndex((x) => x.id === c.id);
-  if (i >= 0) {
-    customers[i] = { ...customers[i], ...c, updatedAt: nowIso() };
-  } else {
-    customers.unshift({ ...c, createdAt: nowIso(), updatedAt: nowIso() });
-  }
+  if (i >= 0) customers[i] = { ...customers[i], ...c, updatedAt: nowIso() };
+  else customers.unshift({ ...c, createdAt: nowIso(), updatedAt: nowIso() });
   setCustomers(customers);
 }
 
 function removeCustomerCore(id: string) {
-  const customers = getCustomers().filter((x) => x.id !== id);
-  setCustomers(customers);
+  setCustomers(getCustomers().filter((x) => x.id !== id));
 }
 
 export function useCustomers() {
@@ -245,7 +237,6 @@ export function getSales(): Sale[] {
     createdAt: String(x.createdAt ?? nowIso()),
   }));
 
-  // Nyeste først
   normalized.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
   return normalized;
 }
@@ -259,12 +250,7 @@ export function addSale(input: Omit<Sale, "id" | "createdAt" | "total">) {
   const sales = getSales();
   const createdAt = nowIso();
   const total = round2((Number(input.qty) || 0) * (Number(input.unitPrice) || 0));
-  const next: Sale = {
-    id: uid("sale"),
-    createdAt,
-    total,
-    ...input,
-  };
+  const next: Sale = { id: uid("sale"), createdAt, total, ...input };
   sales.unshift(next);
   setSales(sales);
 }
@@ -307,7 +293,7 @@ export function clearSaleDraftCustomer() {
 }
 
 /* =========================
-   Theme (valgfritt – hvis du bruker)
+   Theme
 ========================= */
 
 export function getTheme(): Theme {
@@ -318,6 +304,15 @@ export function getTheme(): Theme {
 export function setTheme(t: Theme) {
   localStorage.setItem(LS_KEYS.theme, t);
   emitChange();
+}
+
+/** Denne manglet hos deg – App.tsx importerer den */
+export function applyThemeToDom(theme: Theme) {
+  // Du kan style på begge måter: data-attribute + class.
+  // Velg det du liker i CSS (du kan bruke begge).
+  document.documentElement.setAttribute("data-theme", theme);
+  document.documentElement.classList.toggle("dark", theme === "dark");
+  document.documentElement.classList.toggle("light", theme === "light");
 }
 
 export function useTheme(): [Theme, (t: Theme) => void] {
