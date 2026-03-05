@@ -1,6 +1,18 @@
 // src/pages/Salg.tsx
 import React, { useEffect, useMemo, useState } from "react";
-import { addSale, fmtKr, getItems, round2, setItems, useItems, useSales, Vare } from "../app/storage";
+import {
+  addSale,
+  clearSaleDraftCustomer,
+  fmtKr,
+  getItems,
+  getSaleDraftCustomer,
+  round2,
+  setItems,
+  useCustomers,
+  useItems,
+  useSales,
+  Vare,
+} from "../app/storage";
 
 function toNum(v: string) {
   const n = Number(String(v).replace(",", "."));
@@ -26,40 +38,51 @@ function Modal(props: { open: boolean; title: string; children: React.ReactNode;
 
 export function Salg() {
   const { items } = useItems();
+  const { customers } = useCustomers();
   const { sales } = useSales();
 
   const [itemId, setItemId] = useState<string>("");
   const [qty, setQty] = useState<string>("1");
-  const [customer, setCustomer] = useState<string>("");
+  const [customerId, setCustomerId] = useState<string>(""); // ✅ dropdown (valgfri)
   const [unitPrice, setUnitPrice] = useState<string>("");
 
   const [lowPopup, setLowPopup] = useState<{ item: Vare; newStock: number } | null>(null);
 
-  const selected = useMemo(() => items.find((i) => i.id === itemId) ?? null, [items, itemId]);
+  const selectedItem = useMemo(() => items.find((i) => i.id === itemId) ?? null, [items, itemId]);
+  const selectedCustomer = useMemo(() => customers.find((c) => c.id === customerId) ?? null, [customers, customerId]);
 
-  // autopopulate price when item changes (only if user hasn't typed)
+  // Hvis vi kom fra "Kunder → nytt salg"
   useEffect(() => {
-    if (!selected) return;
-    if (unitPrice.trim() === "") setUnitPrice(String(selected.price ?? 0));
+    const draft = getSaleDraftCustomer();
+    if (draft?.customerId) {
+      setCustomerId(draft.customerId);
+      clearSaleDraftCustomer();
+    }
+  }, []);
+
+  // autopopulate pris ved valg av vare (kun hvis feltet er tomt)
+  useEffect(() => {
+    if (!selectedItem) return;
+    if (unitPrice.trim() === "") setUnitPrice(String(selectedItem.price ?? 0));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected]);
+  }, [selectedItem]);
 
   const total = useMemo(() => {
     const q = Math.trunc(toNum(qty));
-    const p = toNum(unitPrice || (selected?.price ? String(selected.price) : "0"));
+    const p = toNum(unitPrice || (selectedItem?.price ? String(selectedItem.price) : "0"));
     return round2(q * p);
-  }, [qty, unitPrice, selected]);
+  }, [qty, unitPrice, selectedItem]);
 
   function doSale() {
-    if (!selected) return alert("Velg en vare først.");
+    if (!selectedItem) return alert("Velg en vare først.");
 
     const q = Math.trunc(toNum(qty));
     if (q <= 0) return alert("Antall må være minst 1.");
 
-    const p = toNum(unitPrice || String(selected.price ?? 0));
+    const p = toNum(unitPrice || String(selectedItem.price ?? 0));
 
     const itemsNow = getItems();
-    const idx = itemsNow.findIndex((x) => x.id === selected.id);
+    const idx = itemsNow.findIndex((x) => x.id === selectedItem.id);
     if (idx < 0) return alert("Fant ikke varen i lageret.");
 
     const newStock = (itemsNow[idx].stock ?? 0) - q;
@@ -67,20 +90,21 @@ export function Salg() {
     setItems(itemsNow);
 
     addSale({
-      itemId: selected.id,
-      itemName: selected.name,
+      itemId: selectedItem.id,
+      itemName: selectedItem.name,
       qty: q,
       unitPrice: round2(p),
-      customer: customer.trim() ? customer.trim() : undefined,
+      customerId: selectedCustomer?.id,
+      customerName: selectedCustomer?.name,
     });
 
     const min = itemsNow[idx].minStock ?? 0;
     if (min > 0 && newStock <= min) setLowPopup({ item: itemsNow[idx], newStock });
 
     setQty("1");
-    setCustomer("");
     setUnitPrice("");
     setItemId("");
+    // kundevalg lar vi stå (ofte samme kunde flere salg)
   }
 
   return (
@@ -89,6 +113,21 @@ export function Salg() {
       <div className="cardSub">Registrer salg. Lager trekkes automatisk, og du får varsel når lager når minimum (per vare).</div>
 
       <div className="fieldGrid">
+        <div>
+          <label className="label">Kunde (valgfritt)</label>
+          <select className="input" value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
+            <option value="">Ingen / anonymt salg…</option>
+            {customers
+              .slice()
+              .sort((a, b) => (a.name || "").localeCompare(b.name || "", "nb-NO", { sensitivity: "base" }))
+              .map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+          </select>
+        </div>
+
         <div>
           <label className="label">Vare</label>
           <select className="input" value={itemId} onChange={(e) => setItemId(e.target.value)}>
@@ -113,18 +152,13 @@ export function Salg() {
               inputMode="decimal"
               value={unitPrice}
               onChange={(e) => setUnitPrice(e.target.value)}
-              placeholder={selected ? String(selected.price ?? 0) : "0"}
+              placeholder={selectedItem ? String(selectedItem.price ?? 0) : "0"}
             />
           </div>
           <div>
             <label className="label">Sum</label>
             <input className="input" value={fmtKr(total)} readOnly />
           </div>
-        </div>
-
-        <div>
-          <label className="label">Kunde (valgfritt)</label>
-          <input className="input" value={customer} onChange={(e) => setCustomer(e.target.value)} placeholder="Navn / referanse" />
         </div>
 
         <div className="btnRow">
@@ -139,17 +173,17 @@ export function Salg() {
       <div className="card" style={{ marginTop: 0 }}>
         <div className="cardTitle">Siste salg</div>
         <div className="list">
-          {sales.slice(0, 20).map((s) => (
+          {sales.slice(0, 25).map((s) => (
             <div key={s.id} className="item">
               <div className="itemTop">
                 <div>
                   <p className="itemTitle">{s.itemName}</p>
                   <div className="itemMeta">
                     Antall: <b>{s.qty}</b> • Pris: <b>{fmtKr(s.unitPrice)}</b> • Sum: <b>{fmtKr(s.total)}</b>
-                    {s.customer ? (
+                    {s.customerName ? (
                       <>
                         {" "}
-                        • Kunde: <b>{s.customer}</b>
+                        • Kunde: <b>{s.customerName}</b>
                       </>
                     ) : null}
                   </div>
