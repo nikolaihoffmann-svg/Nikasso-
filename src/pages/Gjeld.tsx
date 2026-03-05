@@ -1,13 +1,6 @@
 // src/pages/Gjeld.tsx
 import React, { useMemo, useState } from "react";
-import {
-  fmtKr,
-  uid,
-  useReceivables,
-  receivablePaidSum,
-  receivableRemaining,
-  Receivable,
-} from "../app/storage";
+import { fmtKr, uid, useReceivables, receivablePaidSum, receivableRemaining, Receivable } from "../app/storage";
 
 function toNum(v: string) {
   const n = Number(String(v).replace(",", "."));
@@ -39,7 +32,7 @@ function Modal(props: { open: boolean; title: string; children: React.ReactNode;
 }
 
 export function Gjeld() {
-  const { receivables, upsert, remove, addPayment, removePayment, setPaid } = useReceivables();
+  const { receivables, upsert, remove, addPayment } = useReceivables();
 
   const [title, setTitle] = useState("Gjeld");
   const [debtorName, setDebtorName] = useState("");
@@ -58,7 +51,7 @@ export function Gjeld() {
     const qq = q.trim().toLowerCase();
     if (!qq) return receivables;
     return receivables.filter((r) => {
-      const hay = `${r.debtorName} ${r.title ?? ""} ${r.note ?? ""} ${r.dueDate ?? ""}`.toLowerCase();
+      const hay = `${r.title ?? ""} ${r.debtorName} ${r.note ?? ""} ${r.dueDate ?? ""}`.toLowerCase();
       return hay.includes(qq);
     });
   }, [receivables, q]);
@@ -78,12 +71,11 @@ export function Gjeld() {
   }, [receivables]);
 
   function add() {
+    const t = title.trim() || "Gjeld";
     const n = debtorName.trim();
     if (!n) return alert("Navn kan ikke være tomt.");
     const a = toNum(amount);
     if (a <= 0) return alert("Beløp må være over 0.");
-
-    const t = title.trim() || "Gjeld";
 
     upsert({
       id: uid("rcv"),
@@ -114,10 +106,7 @@ export function Gjeld() {
     const a = toNum(payAmount);
     if (a <= 0) return alert("Innbetaling må være over 0.");
 
-    // lag ISO ved "midt på dagen" for å unngå tidsone-krøll
     const iso = payDate ? new Date(`${payDate}T12:00:00`).toISOString() : undefined;
-
-    // ✅ riktig rekkefølge: (id, amount, dateIso?, note?)
     addPayment(payFor.id, a, iso, payNote.trim() || undefined);
     setPayFor(null);
   }
@@ -136,27 +125,26 @@ export function Gjeld() {
           <div className="row3">
             <div>
               <label className="label">Tittel</label>
-              <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="F.eks. Lån, Faktura, Diverse" />
-            </div>
-            <div>
-              <label className="label">Hvem skylder?</label>
-              <input className="input" value={debtorName} onChange={(e) => setDebtorName(e.target.value)} placeholder="Navn / referanse" />
+              <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Gjeld / Lån / Faktura..." />
             </div>
             <div>
               <label className="label">Beløp (kr)</label>
               <input className="input" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} />
             </div>
-          </div>
-
-          <div className="row3">
             <div>
               <label className="label">Forfallsdato</label>
               <input className="input" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
             </div>
-            <div style={{ gridColumn: "span 2" as any }}>
-              <label className="label">Notat</label>
-              <input className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Valgfritt" />
-            </div>
+          </div>
+
+          <div>
+            <label className="label">Hvem skylder?</label>
+            <input className="input" value={debtorName} onChange={(e) => setDebtorName(e.target.value)} placeholder="Navn / referanse" />
+          </div>
+
+          <div>
+            <label className="label">Notat</label>
+            <input className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Valgfritt" />
           </div>
 
           <div className="btnRow">
@@ -184,7 +172,8 @@ export function Gjeld() {
               <div className="itemTop">
                 <div>
                   <p className="itemTitle">
-                    {r.debtorName} • {r.title}
+                    {r.title ? `${r.title} – ` : ""}
+                    {r.debtorName}
                   </p>
 
                   <div className="itemMeta">
@@ -192,9 +181,10 @@ export function Gjeld() {
                     {r.dueDate ? (
                       <>
                         {" "}
-                        • Forfall: <b>{new Date(r.dueDate).toLocaleDateString("nb-NO")}</b>
+                        • Forfall: <b>{r.dueDate}</b>
                       </>
-                    ) : null}{" "}
+                    ) : null}
+                    {" "}
                     • Status: <b>{rem <= 0 ? "Betalt" : overdue ? "Forfalt" : "Utestående"}</b>
                   </div>
 
@@ -205,22 +195,15 @@ export function Gjeld() {
                   ) : null}
 
                   {Array.isArray(r.payments) && r.payments.length > 0 ? (
-                    <div className="itemMeta" style={{ marginTop: 10 }}>
+                    <div className="itemMeta" style={{ marginTop: 8 }}>
                       <b>Innbetalinger:</b>
-                      {r.payments
-                        .slice()
-                        .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""))
-                        .map((p) => (
-                          <div key={p.id} style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                            <span>
-                              • {new Date(p.createdAt).toLocaleDateString("nb-NO")} – <b>{fmtKr(p.amount)}</b>
-                              {p.note ? <> ({p.note})</> : null}
-                            </span>
-                            <button className="btn btnGhost" type="button" onClick={() => removePayment(r.id, p.id)}>
-                              Slett innbetaling
-                            </button>
-                          </div>
-                        ))}
+                      {r.payments.slice(0, 6).map((p) => (
+                        <div key={p.id} style={{ marginTop: 4 }}>
+                          • {new Date(p.createdAt).toLocaleDateString("nb-NO")} – <b>{fmtKr(p.amount)}</b>
+                          {p.note ? <> ({p.note})</> : null}
+                        </div>
+                      ))}
+                      {r.payments.length > 6 ? <div style={{ marginTop: 4, opacity: 0.9 }}>… +{r.payments.length - 6} til</div> : null}
                     </div>
                   ) : null}
                 </div>
@@ -230,22 +213,11 @@ export function Gjeld() {
                 <button className="btn btnPrimary" type="button" onClick={() => openPayment(r)}>
                   Registrer innbetaling
                 </button>
-
-                {rem > 0 ? (
-                  <button className="btn" type="button" onClick={() => setPaid(r.id, true)}>
-                    Sett ferdig betalt
-                  </button>
-                ) : (
-                  <button className="btn" type="button" onClick={() => setPaid(r.id, false)}>
-                    Gjør ubetalt
-                  </button>
-                )}
-
                 <button
                   className="btn btnDanger"
                   type="button"
                   onClick={() => {
-                    if (confirm(`Slette "${r.debtorName} • ${r.title}"?`)) remove(r.id);
+                    if (confirm(`Slette "${r.title ? r.title + " – " : ""}${r.debtorName}"?`)) remove(r.id);
                   }}
                 >
                   Slett
@@ -262,10 +234,7 @@ export function Gjeld() {
         {payFor ? (
           <div className="fieldGrid" style={{ marginTop: 0 }}>
             <div className="itemMeta" style={{ marginTop: 0 }}>
-              <b>
-                {payFor.debtorName} • {payFor.title}
-              </b>{" "}
-              • Gjenstår nå: <b>{fmtKr(Math.max(0, receivableRemaining(payFor)))}</b>
+              <b>{payFor.title ? `${payFor.title} – ` : ""}{payFor.debtorName}</b> • Gjenstår nå: <b>{fmtKr(Math.max(0, receivableRemaining(payFor)))}</b>
             </div>
 
             <div className="row3">
