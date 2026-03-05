@@ -29,7 +29,7 @@ export function App() {
       return (
         <div className="card">
           <div className="cardTitle">Oversikt</div>
-          <div className="cardSub">Velg en fane under for å jobbe med varer, salg og kunder.</div>
+          <div className="cardSub">Velg en fane over for å jobbe med varer, salg og kunder.</div>
         </div>
       );
     }
@@ -39,12 +39,15 @@ export function App() {
   }, [tab]);
 
   return (
-    <div className="app">
+    <div className="container">
       <header className="header">
-        <h1 className="title">Oversikt</h1>
-
-        <div className="topbar">
-          <div className="subtitle">Privat • Lokal lagring i nettleseren</div>
+        <div className="headerTop">
+          <div>
+            <h1 className="h1">Oversikt</h1>
+            <div className="subRow">
+              <div className="sub">Privat • Lokal lagring i nettleseren</div>
+            </div>
+          </div>
 
           <button
             type="button"
@@ -53,28 +56,27 @@ export function App() {
             aria-label={`Bytt tema (nå: ${themeLabel})`}
             title="Bytt tema"
           >
-            <span className="themeIcon">{themeIcon}</span>
-            <span className="themeText">{themeLabel}</span>
+            {themeIcon} {themeLabel}
           </button>
         </div>
 
         <nav className="tabs">
-          <button className={`tabBtn ${tab === "oversikt" ? "active" : ""}`} onClick={() => setTab("oversikt")} type="button">
+          <button className={`tab ${tab === "oversikt" ? "active" : ""}`} onClick={() => setTab("oversikt")} type="button">
             Oversikt
           </button>
-          <button className={`tabBtn ${tab === "varer" ? "active" : ""}`} onClick={() => setTab("varer")} type="button">
+          <button className={`tab ${tab === "varer" ? "active" : ""}`} onClick={() => setTab("varer")} type="button">
             Varer
           </button>
-          <button className={`tabBtn ${tab === "salg" ? "active" : ""}`} onClick={() => setTab("salg")} type="button">
+          <button className={`tab ${tab === "salg" ? "active" : ""}`} onClick={() => setTab("salg")} type="button">
             Salg
           </button>
-          <button className={`tabBtn ${tab === "kunder" ? "active" : ""}`} onClick={() => setTab("kunder")} type="button">
+          <button className={`tab ${tab === "kunder" ? "active" : ""}`} onClick={() => setTab("kunder")} type="button">
             Kunder
           </button>
         </nav>
       </header>
 
-      <main className="main">{content}</main>
+      {content}
     </div>
   );
 }
