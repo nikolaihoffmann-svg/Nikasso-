@@ -107,6 +107,8 @@ export function Gjeld() {
     if (a <= 0) return alert("Innbetaling må være over 0.");
 
     const iso = payDate ? new Date(`${payDate}T12:00:00`).toISOString() : undefined;
+
+    // ✅ riktig rekkefølge: (id, amount, dateIso, note)
     addPayment(payFor.id, a, iso, payNote.trim() || undefined);
     setPayFor(null);
   }
@@ -121,36 +123,37 @@ export function Gjeld() {
 
       <div className="card" style={{ marginTop: 0 }}>
         <div className="cardTitle">Legg til gjeld</div>
+
         <div className="fieldGrid">
           <div className="row3">
             <div>
               <label className="label">Tittel</label>
-              <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Gjeld / Lån / Faktura..." />
+              <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="F.eks Lån / Faktura / Diverse" />
+            </div>
+            <div>
+              <label className="label">Hvem skylder?</label>
+              <input className="input" value={debtorName} onChange={(e) => setDebtorName(e.target.value)} placeholder="Navn / referanse" />
             </div>
             <div>
               <label className="label">Beløp (kr)</label>
               <input className="input" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} />
             </div>
+          </div>
+
+          <div className="row3">
             <div>
               <label className="label">Forfallsdato</label>
               <input className="input" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
             </div>
-          </div>
-
-          <div>
-            <label className="label">Hvem skylder?</label>
-            <input className="input" value={debtorName} onChange={(e) => setDebtorName(e.target.value)} placeholder="Navn / referanse" />
-          </div>
-
-          <div>
-            <label className="label">Notat</label>
-            <input className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Valgfritt" />
-          </div>
-
-          <div className="btnRow">
-            <button className="btn btnPrimary" type="button" onClick={add}>
-              + Legg til
-            </button>
+            <div>
+              <label className="label">Notat</label>
+              <input className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Valgfritt" />
+            </div>
+            <div style={{ display: "flex", alignItems: "flex-end" }}>
+              <button className="btn btnPrimary" type="button" onClick={add} style={{ width: "100%" }}>
+                + Legg til
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -172,8 +175,7 @@ export function Gjeld() {
               <div className="itemTop">
                 <div>
                   <p className="itemTitle">
-                    {r.title ? `${r.title} – ` : ""}
-                    {r.debtorName}
+                    {r.debtorName} {r.title ? <span style={{ opacity: 0.7, fontWeight: 600 }}>• {r.title}</span> : null}
                   </p>
 
                   <div className="itemMeta">
@@ -183,8 +185,7 @@ export function Gjeld() {
                         {" "}
                         • Forfall: <b>{r.dueDate}</b>
                       </>
-                    ) : null}
-                    {" "}
+                    ) : null}{" "}
                     • Status: <b>{rem <= 0 ? "Betalt" : overdue ? "Forfalt" : "Utestående"}</b>
                   </div>
 
@@ -217,7 +218,7 @@ export function Gjeld() {
                   className="btn btnDanger"
                   type="button"
                   onClick={() => {
-                    if (confirm(`Slette "${r.title ? r.title + " – " : ""}${r.debtorName}"?`)) remove(r.id);
+                    if (confirm(`Slette "${r.debtorName}"?`)) remove(r.id);
                   }}
                 >
                   Slett
@@ -234,7 +235,7 @@ export function Gjeld() {
         {payFor ? (
           <div className="fieldGrid" style={{ marginTop: 0 }}>
             <div className="itemMeta" style={{ marginTop: 0 }}>
-              <b>{payFor.title ? `${payFor.title} – ` : ""}{payFor.debtorName}</b> • Gjenstår nå: <b>{fmtKr(Math.max(0, receivableRemaining(payFor)))}</b>
+              <b>{payFor.debtorName}</b> • Gjenstår nå: <b>{fmtKr(Math.max(0, receivableRemaining(payFor)))}</b>
             </div>
 
             <div className="row3">
