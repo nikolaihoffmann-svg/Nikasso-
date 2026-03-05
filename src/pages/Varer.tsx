@@ -38,26 +38,31 @@ export function Varer() {
 
   const filtered = useMemo(() => {
     const qq = q.trim().toLowerCase();
-    const list = items.slice().sort((a, b) => (a.name || "").localeCompare(b.name || "", "nb-NO", { sensitivity: "base" }));
-    if (!qq) return list;
-    return list.filter((i) => i.name.toLowerCase().includes(qq));
+    if (!qq) return items;
+    return items.filter((i) => i.name.toLowerCase().includes(qq));
   }, [items, q]);
 
   const stats = useMemo(() => {
     const count = items.length;
-    const totalStock = items.reduce((a, b) => a + (Number(b.stock) || 0), 0);
 
-    const costTotal = round2(items.reduce((a, b) => a + (Number(b.cost) || 0) * (Number(b.stock) || 0), 0));
-    const saleTotal = round2(items.reduce((a, b) => a + (Number(b.price) || 0) * (Number(b.stock) || 0), 0));
-    const profitPotential = round2(saleTotal - costTotal);
+    const totalStock = items.reduce((a, b) => a + (b.stock || 0), 0);
+    const totalCostValue = items.reduce((a, b) => a + (b.cost || 0) * (b.stock || 0), 0);
+    const totalSaleValue = items.reduce((a, b) => a + (b.price || 0) * (b.stock || 0), 0);
+    const totalPotentialProfit = items.reduce((a, b) => a + ((b.price || 0) - (b.cost || 0)) * (b.stock || 0), 0);
 
-    const lowCount = items.reduce((a, b) => {
-      const min = Number(b.minStock ?? 0);
-      const st = Number(b.stock ?? 0);
-      return a + (min > 0 && st <= min ? 1 : 0);
-    }, 0);
+    const lowCount = items.reduce(
+      (a, b) => a + ((b.stock ?? 0) <= (b.minStock ?? 0) && (b.minStock ?? 0) > 0 ? 1 : 0),
+      0
+    );
 
-    return { count, totalStock, costTotal, saleTotal, profitPotential, lowCount };
+    return {
+      count,
+      totalStock,
+      totalCostValue: round2(totalCostValue),
+      totalSaleValue: round2(totalSaleValue),
+      totalPotentialProfit: round2(totalPotentialProfit),
+      lowCount,
+    };
   }, [items]);
 
   function addItem() {
@@ -106,7 +111,7 @@ export function Varer() {
         const normalized = next
           .map((x: any) => ({
             id: String(x.id ?? uid("item")),
-            name: String(x.name ?? "").trim(),
+            name: String(x.name ?? ""),
             price: Number(x.price ?? 0),
             cost: Number(x.cost ?? 0),
             stock: Number(x.stock ?? 0),
@@ -114,7 +119,7 @@ export function Varer() {
             createdAt: String(x.createdAt ?? new Date().toISOString()),
             updatedAt: String(x.updatedAt ?? new Date().toISOString()),
           }))
-          .filter((x) => x.name.length > 0);
+          .filter((x) => x.name.trim().length > 0);
 
         setAll(normalized);
       } catch {
@@ -125,17 +130,28 @@ export function Varer() {
   }
 
   function isLow(i: Vare) {
-    const min = Number(i.minStock ?? 0);
+    const min = i.minStock ?? 0;
     if (min <= 0) return false;
-    return Number(i.stock ?? 0) <= min;
+    return (i.stock ?? 0) <= min;
+  }
+
+  function costValue(i: Vare) {
+    return round2((i.cost || 0) * (i.stock || 0));
+  }
+  function saleValue(i: Vare) {
+    return round2((i.price || 0) * (i.stock || 0));
+  }
+  function potentialProfit(i: Vare) {
+    return round2(((i.price || 0) - (i.cost || 0)) * (i.stock || 0));
   }
 
   return (
     <div className="card">
       <div className="cardTitle">Varer / Lager</div>
       <div className="cardSub">
-        Antall varer: <b>{stats.count}</b> • Lager totalt: <b>{stats.totalStock}</b> • Lagerverdi (kost): <b>{fmtKr(stats.costTotal)}</b> •
-        Lagerverdi (salgsverdi): <b>{fmtKr(stats.saleTotal)}</b> • Profitt-potensial: <b>{fmtKr(stats.profitPotential)}</b>
+        Varer: <b>{stats.count}</b> • Lager (stk): <b>{stats.totalStock}</b> • Lagerverdi (kost):{" "}
+        <b>{fmtKr(stats.totalCostValue)}</b> • Lagerverdi (salgsverdi): <b>{fmtKr(stats.totalSaleValue)}</b> • Potensiell profitt:{" "}
+        <b>{fmtKr(stats.totalPotentialProfit)}</b>
         {stats.lowCount > 0 ? (
           <>
             {" "}
@@ -146,10 +162,10 @@ export function Varer() {
 
       <div className="btnRow">
         <button className="btn" type="button" onClick={exportJson}>
-          Eksporter
+          Eksporter varer
         </button>
         <button className="btn" type="button" onClick={importJson}>
-          Importer
+          Importer varer
         </button>
       </div>
 
@@ -161,12 +177,7 @@ export function Varer() {
         <div className="fieldGrid">
           <div>
             <label className="label">Navn</label>
-            <input
-              className="input"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Navn (f.eks. Bremseklosser foran)"
-            />
+            <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Navn (f.eks. Bremseklosser foran)" />
           </div>
 
           <div className="row3">
@@ -204,57 +215,54 @@ export function Varer() {
       </div>
 
       <div className="list">
-        {filtered.map((i) => {
-          const st = Number(i.stock ?? 0);
-          const costTotal = round2(st * Number(i.cost ?? 0));
-          const saleTotal = round2(st * Number(i.price ?? 0));
-          const profitPotential = round2(saleTotal - costTotal);
+        {filtered.map((i) => (
+          <div key={i.id} className={isLow(i) ? "item low" : "item"}>
+            <div className="itemTop">
+              <div>
+                <p className="itemTitle">{i.name}</p>
 
-          return (
-            <div key={i.id} className={isLow(i) ? "item low" : "item"}>
-              <div className="itemTop">
-                <div>
-                  <p className="itemTitle">{i.name}</p>
-
-                  <div className="itemMeta">
-                    Lager: <b>{i.stock}</b> • Min: <b>{i.minStock}</b> • Kost/stk: <b>{fmtKr(i.cost)}</b> • Pris/stk: <b>{fmtKr(i.price)}</b>
-                  </div>
-
-                  <div className="itemMeta" style={{ marginTop: 6 }}>
-                    Kost totalt: <b>{fmtKr(costTotal)}</b> • Salgsverdi totalt: <b>{fmtKr(saleTotal)}</b> • Profitt-potensial:{" "}
-                    <b>{fmtKr(profitPotential)}</b>
-                  </div>
-
-                  {isLow(i) ? <div className="lowTag">⚠️ Lavt lager (≤ {i.minStock})</div> : null}
+                <div className="itemMeta">
+                  Lager: <b>{i.stock}</b> stk • Min: <b>{i.minStock}</b>
                 </div>
 
-                <div className="stockBtns">
-                  <button className="stockBtn" type="button" onClick={() => adjust(i.id, -1)} title="Trekk 1">
-                    −1
-                  </button>
-                  <button className="stockBtn" type="button" onClick={() => adjust(i.id, 1)} title="Legg til 1">
-                    +1
-                  </button>
+                <div className="itemMeta" style={{ marginTop: 6 }}>
+                  Pris: <b>{fmtKr(i.price)}</b> • Kost: <b>{fmtKr(i.cost)}</b>
                 </div>
+
+                <div className="itemMeta" style={{ marginTop: 6 }}>
+                  Kostverdi: <b>{fmtKr(costValue(i))}</b> • Salgsverdi: <b>{fmtKr(saleValue(i))}</b> • Pot. profitt:{" "}
+                  <b>{fmtKr(potentialProfit(i))}</b>
+                </div>
+
+                {isLow(i) ? <div className="lowTag">⚠️ Lavt lager (≤ {i.minStock})</div> : null}
               </div>
 
-              <div className="itemActions">
-                <button className="btn" type="button" onClick={() => setEdit(i)}>
-                  Rediger
+              <div className="stockBtns">
+                <button className="stockBtn" type="button" onClick={() => adjust(i.id, -1)} title="Trekk 1">
+                  −1
                 </button>
-                <button
-                  className="btn btnDanger"
-                  type="button"
-                  onClick={() => {
-                    if (confirm(`Slette "${i.name}"?`)) remove(i.id);
-                  }}
-                >
-                  Slett
+                <button className="stockBtn" type="button" onClick={() => adjust(i.id, 1)} title="Legg til 1">
+                  +1
                 </button>
               </div>
             </div>
-          );
-        })}
+
+            <div className="itemActions">
+              <button className="btn" type="button" onClick={() => setEdit(i)}>
+                Rediger
+              </button>
+              <button
+                className="btn btnDanger"
+                type="button"
+                onClick={() => {
+                  if (confirm(`Slette "${i.name}"?`)) remove(i.id);
+                }}
+              >
+                Slett
+              </button>
+            </div>
+          </div>
+        ))}
 
         {filtered.length === 0 ? <div className="item">Ingen treff.</div> : null}
       </div>
