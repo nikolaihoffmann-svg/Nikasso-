@@ -1,44 +1,110 @@
 // src/pages/Backup.tsx
-import React from "react";
-import { clearAllData, importAllFromFile, downloadExportAll } from "../app/storage";
+import React, { useRef, useState } from "react";
 
-export function Backup() {
+type Props = {
+  onExportAll: () => void;
+  onImportReplace: (file: File) => void | Promise<void>;
+  onImportMerge: (file: File) => void | Promise<void>;
+  onClearAll: () => void;
+};
+
+export function Backup(props: Props) {
+  const fileRefReplace = useRef<HTMLInputElement | null>(null);
+  const fileRefMerge = useRef<HTMLInputElement | null>(null);
+
+  const [busy, setBusy] = useState(false);
+
+  async function handleImport(file: File | undefined, mode: "replace" | "merge") {
+    if (!file) return;
+    try {
+      setBusy(true);
+      if (mode === "replace") await props.onImportReplace(file);
+      else await props.onImportMerge(file);
+      alert("Import ferdig ✅");
+    } catch (e: any) {
+      alert(`Import feilet: ${e?.message ?? String(e)}`);
+    } finally {
+      setBusy(false);
+      // reset input så du kan velge samme fil igjen
+      if (mode === "replace" && fileRefReplace.current) fileRefReplace.current.value = "";
+      if (mode === "merge" && fileRefMerge.current) fileRefMerge.current.value = "";
+    }
+  }
+
+  function confirmClear() {
+    if (!confirm("Slette ALL data (varer, kunder, salg, gjeld)? Dette kan ikke angres.")) return;
+    props.onClearAll();
+    alert("Alt slettet.");
+  }
+
   return (
     <div className="card">
-      <div className="cardTitle">Backup / Restore</div>
+      <div className="cardTitle">Backup / Export</div>
       <div className="cardSub">
-        Eksporter eller importer <b>alt</b> (varer, kunder, salg, gjeld, tema).
+        Eksporter eller importer <b>absolutt all data</b> (varer, kunder, salg, gjeld).
       </div>
 
       <div className="btnRow">
-        <button className="btn btnPrimary" type="button" onClick={downloadExportAll}>
-          Eksporter ALT (JSON)
-        </button>
-
-        <button className="btn" type="button" onClick={importAllFromFile}>
-          Importer ALT (JSON)
+        {/* ✅ viktig: wrapper, ellers TS2322 (MouseEvent blir filename) */}
+        <button className="btn btnPrimary" type="button" onClick={() => props.onExportAll()} disabled={busy}>
+          Export all (JSON)
         </button>
 
         <button
-          className="btn btnDanger"
+          className="btn"
           type="button"
-          onClick={() => {
-            if (confirm("Slette ALL data i appen? Dette kan ikke angres.")) {
-              clearAllData();
-              alert("All data slettet.");
-            }
-          }}
+          onClick={() => fileRefReplace.current?.click()}
+          disabled={busy}
+          title="Import: erstatt alt med filens innhold"
         >
-          Slett all data
+          Import (replace)
+        </button>
+
+        <button
+          className="btn"
+          type="button"
+          onClick={() => fileRefMerge.current?.click()}
+          disabled={busy}
+          title="Import: slå sammen med eksisterende data"
+        >
+          Import (merge)
+        </button>
+
+        <button className="btn btnDanger" type="button" onClick={confirmClear} disabled={busy}>
+          Slett alt
         </button>
       </div>
 
-      <div style={{ height: 12 }} />
+      {/* Hidden inputs */}
+      <input
+        ref={fileRefReplace}
+        type="file"
+        accept="application/json"
+        style={{ display: "none" }}
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          // ✅ wrapper (ikke send event videre)
+          handleImport(f, "replace");
+        }}
+      />
 
-      <div className="card" style={{ marginTop: 0 }}>
+      <input
+        ref={fileRefMerge}
+        type="file"
+        accept="application/json"
+        style={{ display: "none" }}
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          handleImport(f, "merge");
+        }}
+      />
+
+      <div className="card" style={{ marginTop: 18 }}>
         <div className="cardTitle">Tips</div>
         <div className="cardSub" style={{ marginBottom: 0 }}>
-          Ta en export før du gjør store endringer. Filen kan lagres i iCloud/Google Drive og importeres igjen senere.
+          1) Ta export før større endringer. <br />
+          2) “Replace” brukes når du vil gjenopprette helt fra backup. <br />
+          3) “Merge” er nyttig hvis du vil legge inn data fra en annen enhet uten å miste det du har.
         </div>
       </div>
     </div>
