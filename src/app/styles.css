@@ -68,8 +68,8 @@ body {
 
 body {
   margin: 0;
-  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica,
-    Arial, "Apple Color Emoji", "Segoe UI Emoji";
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial,
+    "Apple Color Emoji", "Segoe UI Emoji";
   background: radial-gradient(1200px 800px at 15% 10%, rgba(47, 107, 255, 0.18), transparent 60%),
     radial-gradient(900px 700px at 70% 20%, rgba(49, 208, 127, 0.12), transparent 60%),
     linear-gradient(180deg, var(--bg), var(--bg2));
@@ -509,4 +509,54 @@ textarea {
 
 .toastOk {
   border-color: rgba(49, 208, 127, 0.55);
+}
+
+/* ---- Patch: aliases / sikker layout ---- */
+
+.main {
+  margin-top: 0;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.title {
+  font-size: 52px;
+  line-height: 1.05;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  margin: 4px 0 6px 0;
+}
+
+.subtitle {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+/* hvis noen filer bruker tabBtn */
+.tabBtn {
+  padding: 12px 18px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, var(--card), transparent);
+  color: var(--text);
+  cursor: pointer;
+  box-shadow: var(--shadow2);
+  transition: transform 0.08s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.tabBtn:hover {
+  border-color: var(--border2);
+  background: linear-gradient(180deg, var(--card2), transparent);
+}
+.tabBtn:active {
+  transform: translateY(1px);
+}
+.tabBtn.active {
+  border-color: rgba(47, 107, 255, 0.55);
+  background: linear-gradient(180deg, rgba(47, 107, 255, 0.35), rgba(47, 107, 255, 0.10));
+  box-shadow: 0 14px 40px rgba(47, 107, 255, 0.18);
 }
