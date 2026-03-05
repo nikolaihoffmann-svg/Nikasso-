@@ -43,7 +43,7 @@ export function Salg() {
 
   const [itemId, setItemId] = useState<string>("");
   const [qty, setQty] = useState<string>("1");
-  const [customerId, setCustomerId] = useState<string>(""); // dropdown (valgfri)
+  const [customerId, setCustomerId] = useState<string>("");
   const [unitPrice, setUnitPrice] = useState<string>("");
 
   const [lowPopup, setLowPopup] = useState<{ item: Vare; newStock: number } | null>(null);
@@ -51,11 +51,11 @@ export function Salg() {
   const selectedItem = useMemo(() => items.find((i) => i.id === itemId) ?? null, [items, itemId]);
   const selectedCustomer = useMemo(() => customers.find((c) => c.id === customerId) ?? null, [customers, customerId]);
 
-  // Hvis vi kom fra "Kunder → nytt salg"
+  // ✅ Hvis vi kom fra "Kunder → nytt salg" (draft er string)
   useEffect(() => {
-    const draftCustomerId = getSaleDraftCustomer(); // <-- string | null
-    if (draftCustomerId) {
-      setCustomerId(draftCustomerId);
+    const draft = getSaleDraftCustomer();
+    if (draft) {
+      setCustomerId(draft);
       clearSaleDraftCustomer();
     }
   }, []);
