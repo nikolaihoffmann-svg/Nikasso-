@@ -26,7 +26,11 @@ export type Sale = {
   qty: number;
   unitPrice: number;
   total: number;
-  customer?: string; // foreløpig fritekst (kan kobles til kunderegister senere)
+
+  // NYTT: kobling mot kunderegister (valgfritt)
+  customerId?: string;
+  customerName?: string;
+
   note?: string;
 };
 
@@ -48,6 +52,9 @@ const KEY_ITEMS = "sg_items_v1";
 const KEY_SALES = "sg_sales_v1";
 const KEY_THEME = "sg_theme_v1";
 const KEY_CUSTOMERS = "sg_customers_v1";
+
+// draft “forhåndsvalgt kunde” når du starter salg fra kundekortet
+const KEY_SALE_DRAFT_CUSTOMER = "sg_sale_draft_customer_v1";
 
 const EVT = "sg_storage_changed";
 
@@ -92,6 +99,26 @@ export function setTheme(theme: Theme) {
 
 export function applyThemeToDom(theme: Theme) {
   document.documentElement.setAttribute("data-theme", theme);
+}
+
+/* =========================================================
+   Draft: start salg fra kunde
+========================================================= */
+
+export function setSaleDraftCustomer(customerId: string) {
+  localStorage.setItem(KEY_SALE_DRAFT_CUSTOMER, JSON.stringify({ customerId }));
+  notify();
+}
+
+export function getSaleDraftCustomer(): { customerId: string } | null {
+  const v = safeParse<any>(localStorage.getItem(KEY_SALE_DRAFT_CUSTOMER), null);
+  if (v && typeof v.customerId === "string" && v.customerId.trim()) return { customerId: v.customerId };
+  return null;
+}
+
+export function clearSaleDraftCustomer() {
+  localStorage.removeItem(KEY_SALE_DRAFT_CUSTOMER);
+  notify();
 }
 
 /* =========================================================
