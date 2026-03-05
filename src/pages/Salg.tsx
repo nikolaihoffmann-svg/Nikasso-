@@ -39,20 +39,20 @@ function Modal(props: { open: boolean; title: string; children: React.ReactNode;
 export function Salg() {
   const { items } = useItems();
   const { customers } = useCustomers();
-  const { sales, setPaid, remove } = useSales();
+  const { sales, setPaid } = useSales();
 
   const [itemId, setItemId] = useState<string>("");
   const [qty, setQty] = useState<string>("1");
   const [customerId, setCustomerId] = useState<string>("");
   const [unitPrice, setUnitPrice] = useState<string>("");
-  const [paidNow, setPaidNow] = useState<boolean>(false);
+
+  const [paid, setPaidState] = useState<boolean>(true);
 
   const [lowPopup, setLowPopup] = useState<{ item: Vare; newStock: number } | null>(null);
 
   const selectedItem = useMemo(() => items.find((i) => i.id === itemId) ?? null, [items, itemId]);
   const selectedCustomer = useMemo(() => customers.find((c) => c.id === customerId) ?? null, [customers, customerId]);
 
-  // draft kunde fra "Kunder -> nytt salg"
   useEffect(() => {
     const draft = getSaleDraftCustomer();
     if (draft) {
@@ -61,7 +61,6 @@ export function Salg() {
     }
   }, []);
 
-  // autopopulate pris ved valg av vare
   useEffect(() => {
     if (!selectedItem) return;
     if (unitPrice.trim() === "") setUnitPrice(String(selectedItem.price ?? 0));
@@ -73,12 +72,6 @@ export function Salg() {
     const p = toNum(unitPrice || (selectedItem?.price ? String(selectedItem.price) : "0"));
     return round2(q * p);
   }, [qty, unitPrice, selectedItem]);
-
-  const outstanding = useMemo(() => {
-    const unpaid = sales.filter((s) => !s.paid);
-    const sum = round2(unpaid.reduce((a, s) => a + (Number(s.total) || 0), 0));
-    return { count: unpaid.length, sum };
-  }, [sales]);
 
   function doSale() {
     if (!selectedItem) return alert("Velg en vare først.");
@@ -101,9 +94,10 @@ export function Salg() {
       itemName: selectedItem.name,
       qty: q,
       unitPrice: round2(p),
+      unitCostAtSale: Number(selectedItem.cost ?? 0), // ✅ historikk
       customerId: selectedCustomer?.id,
       customerName: selectedCustomer?.name,
-      paid: paidNow,
+      paid,
     });
 
     const min = itemsNow[idx].minStock ?? 0;
@@ -112,15 +106,15 @@ export function Salg() {
     setQty("1");
     setUnitPrice("");
     setItemId("");
-    setPaidNow(false);
     // kundevalg lar vi stå
+    setPaidState(true);
   }
 
   return (
     <div className="card">
       <div className="cardTitle">Salg</div>
       <div className="cardSub">
-        Utestående salg: <b>{fmtKr(outstanding.sum)}</b> ({outstanding.count} ikke betalt)
+        Registrer salg. Lager trekkes automatisk. Profitt blir korrekt fordi vi lagrer vare-kost på salgstidspunktet.
       </div>
 
       <div className="fieldGrid">
@@ -173,10 +167,10 @@ export function Salg() {
         </div>
 
         <div>
-          <label className="label">Betalt nå?</label>
-          <select className="input" value={paidNow ? "yes" : "no"} onChange={(e) => setPaidNow(e.target.value === "yes")}>
-            <option value="no">Nei (utestående)</option>
-            <option value="yes">Ja (markér betalt)</option>
+          <label className="label">Betalingsstatus</label>
+          <select className="input" value={paid ? "paid" : "unpaid"} onChange={(e) => setPaidState(e.target.value === "paid")}>
+            <option value="paid">Betalt</option>
+            <option value="unpaid">Ikke betalt (utestående)</option>
           </select>
         </div>
 
@@ -192,8 +186,8 @@ export function Salg() {
       <div className="card" style={{ marginTop: 0 }}>
         <div className="cardTitle">Siste salg</div>
         <div className="list">
-          {sales.slice(0, 30).map((s) => (
-            <div key={s.id} className={!s.paid ? "item low" : "item"}>
+          {sales.slice(0, 25).map((s) => (
+            <div key={s.id} className="item">
               <div className="itemTop">
                 <div>
                   <p className="itemTitle">{s.itemName}</p>
@@ -205,32 +199,22 @@ export function Salg() {
                         • Kunde: <b>{s.customerName}</b>
                       </>
                     ) : null}
+                    {" • "}
+                    Status: <b>{s.paid ? "Betalt" : "Utestående"}</b>
                   </div>
                   <div className="itemMeta" style={{ marginTop: 6 }}>
-                    {new Date(s.createdAt).toLocaleString("nb-NO")} • Status:{" "}
-                    <b>{s.paid ? "Betalt" : "Ikke betalt"}</b>
+                    {new Date(s.createdAt).toLocaleString("nb-NO")}
+                  </div>
+
+                  <div className="btnRow">
+                    <button className="btn" type="button" onClick={() => setPaid(s.id, !s.paid)}>
+                      Sett {s.paid ? "Utestående" : "Betalt"}
+                    </button>
                   </div>
                 </div>
               </div>
-
-              <div className="itemActions">
-                <button className="btn btnPrimary" type="button" onClick={() => setPaid(s.id, !s.paid)}>
-                  {s.paid ? "Marker ikke betalt" : "Marker betalt"}
-                </button>
-
-                <button
-                  className="btn btnDanger"
-                  type="button"
-                  onClick={() => {
-                    if (confirm("Slette dette salget?")) remove(s.id);
-                  }}
-                >
-                  Slett
-                </button>
-              </div>
             </div>
           ))}
-
           {sales.length === 0 ? <div className="item">Ingen salg enda.</div> : null}
         </div>
       </div>
