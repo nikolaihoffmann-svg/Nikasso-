@@ -1,6 +1,6 @@
 // src/pages/Kunder.tsx
 import React, { useMemo, useState } from "react";
-import { Customer, setSaleDraftCustomer, uid, useCustomers, useSales, fmtKr } from "../app/storage";
+import { Customer, Sale, fmtKr, setSaleDraftCustomer, uid, useCustomers, useSales } from "../app/storage";
 
 function Modal(props: { open: boolean; title: string; children: React.ReactNode; onClose: () => void }) {
   if (!props.open) return null;
@@ -109,7 +109,7 @@ export function Kunder() {
           }))
           .filter((x) => x.name.length > 0);
 
-        setAll(normalized); // “erstatt alt”
+        setAll(normalized);
       } catch {
         alert("Kunne ikke importere filen (ugyldig JSON).");
       }
@@ -248,7 +248,7 @@ function CustomerDetails(props: {
   customer: Customer;
   onSave: (next: Omit<Customer, "createdAt" | "updatedAt">) => void;
   onStartSale: () => void;
-  sales: any[];
+  sales: Sale[];
 }) {
   const [name, setName] = useState(props.customer.name);
   const [phone, setPhone] = useState(props.customer.phone ?? "");
@@ -256,13 +256,11 @@ function CustomerDetails(props: {
   const [note, setNote] = useState(props.customer.note ?? "");
 
   const customerSales = useMemo(() => {
-    return props.sales
-      .filter((s: any) => s.customerId === props.customer.id)
-      .slice(0, 15);
+    return props.sales.filter((s) => s.customerId === props.customer.id).slice(0, 15);
   }, [props.sales, props.customer.id]);
 
   const totalSpent = useMemo(() => {
-    return customerSales.reduce((a: number, b: any) => a + (Number(b.total) || 0), 0);
+    return customerSales.reduce((a, b) => a + (Number(b.total) || 0), 0);
   }, [customerSales]);
 
   return (
@@ -320,14 +318,13 @@ function CustomerDetails(props: {
         </div>
 
         <div className="list">
-          {customerSales.map((s: any) => (
+          {customerSales.map((s) => (
             <div key={s.id} className="item">
               <div className="itemTop">
                 <div>
                   <p className="itemTitle">{s.itemName}</p>
                   <div className="itemMeta">
-                    Antall: <b>{s.qty}</b> • Sum: <b>{fmtKr(s.total)}</b> •{" "}
-                    {new Date(s.createdAt).toLocaleString("nb-NO")}
+                    Antall: <b>{s.qty}</b> • Sum: <b>{fmtKr(s.total)}</b> • {new Date(s.createdAt).toLocaleString("nb-NO")}
                   </div>
                 </div>
               </div>
