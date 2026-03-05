@@ -36,6 +36,9 @@ export type Sale = {
   unitPrice: number;
   total: number;
 
+  /** ✅ For 100% korrekt historikk */
+  unitCostAtSale?: number;
+
   customerId?: string;
   customerName?: string;
 
@@ -273,19 +276,28 @@ export function useCustomers() {
 export function getSales(): Sale[] {
   const raw = safeJsonParse<any[]>(localStorage.getItem(LS_KEYS.sales), []);
 
-  const normalized: Sale[] = (raw || []).map((x) => ({
-    id: String(x.id ?? uid("sale")),
-    itemId: String(x.itemId ?? ""),
-    itemName: String(x.itemName ?? ""),
-    qty: Number(x.qty ?? 0),
-    unitPrice: Number(x.unitPrice ?? 0),
-    total: Number(x.total ?? 0),
-    customerId: x.customerId ? String(x.customerId) : undefined,
-    customerName: x.customerName ? String(x.customerName) : undefined,
-    paid: Boolean(x.paid ?? false),
-    paidAt: x.paidAt ? String(x.paidAt) : undefined,
-    createdAt: String(x.createdAt ?? nowIso()),
-  }));
+  const normalized: Sale[] = (raw || []).map((x) => {
+    const qty = Number(x.qty ?? 0);
+    const unitPrice = Number(x.unitPrice ?? 0);
+    const total = Number.isFinite(Number(x.total)) ? Number(x.total) : round2(qty * unitPrice);
+
+    const paid = Boolean(x.paid ?? false);
+
+    return {
+      id: String(x.id ?? uid("sale")),
+      itemId: String(x.itemId ?? ""),
+      itemName: String(x.itemName ?? ""),
+      qty,
+      unitPrice,
+      total,
+      unitCostAtSale: Number.isFinite(Number(x.unitCostAtSale)) ? Number(x.unitCostAtSale) : undefined,
+      customerId: x.customerId ? String(x.customerId) : undefined,
+      customerName: x.customerName ? String(x.customerName) : undefined,
+      paid,
+      paidAt: x.paidAt ? String(x.paidAt) : paid ? nowIso() : undefined,
+      createdAt: String(x.createdAt ?? nowIso()),
+    };
+  });
 
   normalized.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
   return normalized;
@@ -296,11 +308,15 @@ export function setSales(next: Sale[]) {
   emitChange();
 }
 
-export function addSale(input: Omit<Sale, "id" | "createdAt" | "total" | "paidAt"> & { paid?: boolean }) {
+export function addSale(
+  input: Omit<Sale, "id" | "createdAt" | "total" | "paidAt"> & {
+    paid?: boolean;
+  }
+) {
   const sales = getSales();
   const createdAt = nowIso();
   const total = round2((Number(input.qty) || 0) * (Number(input.unitPrice) || 0));
-  const paid = Boolean(input.paid ?? false);
+  const paid = Boolean(input.paid ?? true);
 
   const next: Sale = {
     id: uid("sale"),
@@ -310,6 +326,7 @@ export function addSale(input: Omit<Sale, "id" | "createdAt" | "total" | "paidAt
     itemName: input.itemName,
     qty: input.qty,
     unitPrice: input.unitPrice,
+    unitCostAtSale: Number.isFinite(Number(input.unitCostAtSale)) ? Number(input.unitCostAtSale) : undefined,
     customerId: input.customerId,
     customerName: input.customerName,
     paid,
@@ -387,7 +404,9 @@ export function setReceivables(next: Receivable[]) {
   emitChange();
 }
 
-export function upsertReceivable(r: Omit<Receivable, "createdAt" | "updatedAt" | "paidAt"> & { paid?: boolean }) {
+export function upsertReceivable(
+  r: Omit<Receivable, "createdAt" | "updatedAt" | "paidAt"> & { paid?: boolean }
+) {
   const list = getReceivables();
   const i = list.findIndex((x) => x.id === r.id);
   const ts = nowIso();
@@ -477,7 +496,7 @@ export function clearSaleDraftCustomer() {
 }
 
 /* =========================
-   ✅ Export / Import ALL
+   Export / Import ALL
 ========================= */
 
 function normalizeItems(input: any[]): Vare[] {
@@ -514,7 +533,6 @@ function normalizeSales(input: any[]): Sale[] {
     const qty = Number(x.qty ?? 0);
     const unitPrice = Number(x.unitPrice ?? 0);
     const total = Number.isFinite(Number(x.total)) ? Number(x.total) : round2(qty * unitPrice);
-
     const paid = Boolean(x.paid ?? false);
 
     return {
@@ -524,6 +542,7 @@ function normalizeSales(input: any[]): Sale[] {
       qty,
       unitPrice,
       total,
+      unitCostAtSale: Number.isFinite(Number(x.unitCostAtSale)) ? Number(x.unitCostAtSale) : undefined,
       customerId: x.customerId ? String(x.customerId) : undefined,
       customerName: x.customerName ? String(x.customerName) : undefined,
       paid,
@@ -579,7 +598,6 @@ export function downloadExportAll() {
 }
 
 export function importAllFromObject(obj: any) {
-  // Godtar både {items,...} og ren array på enkeltfelt (men vi forventer helst BackupAll)
   const items = normalizeItems(Array.isArray(obj?.items) ? obj.items : []);
   const customers = normalizeCustomers(Array.isArray(obj?.customers) ? obj.customers : []);
   const sales = normalizeSales(Array.isArray(obj?.sales) ? obj.sales : []);
