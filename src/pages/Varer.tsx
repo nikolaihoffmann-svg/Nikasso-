@@ -31,7 +31,8 @@ export function Varer() {
   const [price, setPrice] = useState("0");
   const [cost, setCost] = useState("0");
   const [stock, setStock] = useState("0");
-  const [minStock, setMinStock] = useState("0");
+  // ✅ Default min-lager = 10
+  const [minStock, setMinStock] = useState("10");
 
   const [q, setQ] = useState("");
   const [edit, setEdit] = useState<Vare | null>(null);
@@ -78,7 +79,8 @@ export function Varer() {
     setPrice("0");
     setCost("0");
     setStock("0");
-    setMinStock("0");
+    // ✅ resetter tilbake til 10 etter lagt til
+    setMinStock("10");
   }
 
   function exportJson() {
@@ -111,7 +113,7 @@ export function Varer() {
             price: Number(x.price ?? 0),
             cost: Number(x.cost ?? 0),
             stock: Number(x.stock ?? 0),
-            minStock: Number(x.minStock ?? 0),
+            minStock: Number(x.minStock ?? 10), // ✅ default 10 om mangler i import
             createdAt: String(x.createdAt ?? new Date().toISOString()),
             updatedAt: String(x.updatedAt ?? new Date().toISOString()),
           }))
@@ -273,7 +275,7 @@ function EditForm(props: { item: Vare; onSave: (next: Omit<Vare, "createdAt" | "
   const [price, setPrice] = useState(String(props.item.price ?? 0));
   const [cost, setCost] = useState(String(props.item.cost ?? 0));
   const [stock, setStock] = useState(String(props.item.stock ?? 0));
-  const [minStock, setMinStock] = useState(String(props.item.minStock ?? 0));
+  const [minStock, setMinStock] = useState(String(props.item.minStock ?? 10)); // ✅ om tom, default 10
 
   return (
     <div>
