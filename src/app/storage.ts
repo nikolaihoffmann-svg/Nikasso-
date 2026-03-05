@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 
 /* =========================
    Types
-========================= */
+   ========================= */
 
 export type Theme = "dark" | "light";
 
@@ -31,36 +31,38 @@ export type Customer = {
 export type Sale = {
   id: string;
   createdAt: string;
-
   itemId: string;
   itemName: string;
   qty: number;
   unitPrice: number;
   total: number;
 
-  // Kunde er valgfritt
+  // Ny løsning (brukes av Salg.tsx / Kunder.tsx)
   customerId?: string;
   customerName?: string;
+
+  // Legacy (for gamle lagrede salg)
+  customer?: string;
 
   note?: string;
 };
 
-/** Når man trykker "Nytt salg" på en kunde, forhåndsvelger vi den kunden i Salg-siden */
-export type SaleDraftCustomer = {
-  customerId: string;
-};
+type SaleDraftCustomer = { customerId: string; setAt: string };
 
 /* =========================
-   Storage keys + event
-========================= */
+   Storage keys / events
+   ========================= */
 
 const KEY_ITEMS = "sg_items_v1";
 const KEY_SALES = "sg_sales_v1";
 const KEY_CUSTOMERS = "sg_customers_v1";
 const KEY_THEME = "sg_theme_v1";
 const KEY_SALE_DRAFT_CUSTOMER = "sg_sale_draft_customer_v1";
-
 const EVT = "sg_storage_changed";
+
+/* =========================
+   Helpers
+   ========================= */
 
 function nowIso() {
   return new Date().toISOString();
@@ -85,7 +87,7 @@ export function uid(prefix = "id") {
 
 /* =========================
    Theme
-========================= */
+   ========================= */
 
 export function getTheme(): Theme {
   const t = safeParse<Theme>(localStorage.getItem(KEY_THEME), "dark");
@@ -103,32 +105,32 @@ export function applyThemeToDom(theme: Theme) {
 
 /* =========================
    Items
-========================= */
+   ========================= */
 
-function normalizeItem(x: any): Vare | null {
-  const name = String(x?.name ?? "").trim();
-  if (!name) return null;
-
+function normalizeItems(raw: any[]): Vare[] {
   const ts = nowIso();
-  return {
-    id: String(x?.id ?? uid("item")),
-    name,
-    price: Number(x?.price ?? 0) || 0,
-    cost: Number(x?.cost ?? 0) || 0,
-    stock: Number.isFinite(Number(x?.stock)) ? Number(x.stock) : 0,
-    // default minStock = 10 hvis mangler/ugyldig
-    minStock: Number.isFinite(Number(x?.minStock)) ? Number(x.minStock) : 10,
-    createdAt: String(x?.createdAt ?? ts),
-    updatedAt: String(x?.updatedAt ?? ts),
-  };
+  return (raw ?? [])
+    .map((x: any) => {
+      const createdAt = String(x?.createdAt ?? ts);
+      const updatedAt = String(x?.updatedAt ?? ts);
+      const minStock = Number.isFinite(Number(x?.minStock)) ? Number(x.minStock) : 10; // default 10
+      return {
+        id: String(x?.id ?? uid("item")),
+        name: String(x?.name ?? ""),
+        price: Number(x?.price ?? 0),
+        cost: Number(x?.cost ?? 0),
+        stock: Number(x?.stock ?? 0),
+        minStock,
+        createdAt,
+        updatedAt,
+      } as Vare;
+    })
+    .filter((v) => v.name.trim().length > 0);
 }
 
 export function getItems(): Vare[] {
-  const raw = safeParse<any[]>(localStorage.getItem(KEY_ITEMS), []);
-  const normalized = raw
-    .map((x) => normalizeItem(x))
-    .filter(Boolean) as Vare[];
-  return normalized;
+  const parsed = safeParse<any[]>(localStorage.getItem(KEY_ITEMS), []);
+  return normalizeItems(Array.isArray(parsed) ? parsed : []);
 }
 
 export function setItems(items: Vare[]) {
@@ -141,33 +143,29 @@ export function upsertItem(
 ) {
   const items = getItems();
   const existingIdx = items.findIndex((i) => i.id === partial.id);
+
   const ts = nowIso();
 
   if (existingIdx >= 0) {
     const updated: Vare = {
       ...items[existingIdx],
       ...partial,
-      // fallbacks
-      name: String(partial.name ?? items[existingIdx].name ?? "").trim(),
-      price: Number(partial.price ?? items[existingIdx].price ?? 0) || 0,
-      cost: Number(partial.cost ?? items[existingIdx].cost ?? 0) || 0,
-      stock: Number.isFinite(Number(partial.stock)) ? Number(partial.stock) : (items[existingIdx].stock ?? 0),
-      minStock: Number.isFinite(Number(partial.minStock))
-        ? Number(partial.minStock)
-        : (items[existingIdx].minStock ?? 10),
+      // sikker default
+      minStock:
+        Number.isFinite(Number((partial as any).minStock)) ? Number((partial as any).minStock) : items[existingIdx].minStock ?? 10,
       updatedAt: ts,
-    };
+    } as Vare;
     items[existingIdx] = updated;
   } else {
     const created: Vare = {
-      id: String(partial.id),
-      name: String(partial.name ?? "").trim(),
-      price: Number(partial.price ?? 0) || 0,
-      cost: Number(partial.cost ?? 0) || 0,
-      stock: Number.isFinite(Number(partial.stock)) ? Number(partial.stock) : 0,
-      minStock: Number.isFinite(Number(partial.minStock)) ? Number(partial.minStock) : 10,
-      createdAt: partial.createdAt ?? ts,
-      updatedAt: partial.updatedAt ?? ts,
+      id: partial.id,
+      name: partial.name ?? "",
+      price: partial.price ?? 0,
+      cost: partial.cost ?? 0,
+      stock: partial.stock ?? 0,
+      minStock: Number.isFinite(Number((partial as any).minStock)) ? Number((partial as any).minStock) : 10, // default 10
+      createdAt: ts,
+      updatedAt: ts,
     };
     items.unshift(created);
   }
@@ -186,40 +184,36 @@ export function adjustStock(id: string, delta: number) {
   if (idx < 0) return;
 
   const ts = nowIso();
-  items[idx] = { ...items[idx], stock: (items[idx].stock ?? 0) + delta, updatedAt: ts };
+  items[idx] = {
+    ...items[idx],
+    stock: (items[idx].stock ?? 0) + delta,
+    updatedAt: ts,
+  };
   setItems(items);
 }
 
 /* =========================
    Customers
-========================= */
+   ========================= */
 
-function normalizeCustomer(x: any): Customer | null {
-  const name = String(x?.name ?? "").trim().replace(/\s+/g, " ");
-  if (!name) return null;
-
+function normalizeCustomers(raw: any[]): Customer[] {
   const ts = nowIso();
-  const phone = x?.phone ? String(x.phone).trim() : undefined;
-  const address = x?.address ? String(x.address).trim() : undefined;
-  const note = x?.note ? String(x.note).trim() : undefined;
-
-  return {
-    id: String(x?.id ?? uid("cust")),
-    name,
-    phone: phone || undefined,
-    address: address || undefined,
-    note: note || undefined,
-    createdAt: String(x?.createdAt ?? ts),
-    updatedAt: String(x?.updatedAt ?? ts),
-  };
+  return (raw ?? [])
+    .map((x: any) => ({
+      id: String(x?.id ?? uid("cust")),
+      name: String(x?.name ?? "").trim(),
+      phone: x?.phone ? String(x.phone).trim() : undefined,
+      address: x?.address ? String(x.address).trim() : undefined,
+      note: x?.note ? String(x.note).trim() : undefined,
+      createdAt: String(x?.createdAt ?? ts),
+      updatedAt: String(x?.updatedAt ?? ts),
+    }))
+    .filter((c) => c.name.length > 0);
 }
 
 export function getCustomers(): Customer[] {
-  const raw = safeParse<any[]>(localStorage.getItem(KEY_CUSTOMERS), []);
-  const normalized = raw
-    .map((x) => normalizeCustomer(x))
-    .filter(Boolean) as Customer[];
-  return normalized;
+  const parsed = safeParse<any[]>(localStorage.getItem(KEY_CUSTOMERS), []);
+  return normalizeCustomers(Array.isArray(parsed) ? parsed : []);
 }
 
 export function setCustomers(customers: Customer[]) {
@@ -231,30 +225,24 @@ export function upsertCustomer(
   partial: Omit<Customer, "createdAt" | "updatedAt"> & Partial<Pick<Customer, "createdAt" | "updatedAt">>
 ) {
   const customers = getCustomers();
-  const existingIdx = customers.findIndex((c) => c.id === partial.id);
+  const idx = customers.findIndex((c) => c.id === partial.id);
   const ts = nowIso();
 
-  const name = String(partial.name ?? "").trim().replace(/\s+/g, " ");
-
-  if (existingIdx >= 0) {
-    customers[existingIdx] = {
-      ...customers[existingIdx],
+  if (idx >= 0) {
+    customers[idx] = {
+      ...customers[idx],
       ...partial,
-      name: name || customers[existingIdx].name,
-      phone: partial.phone ? String(partial.phone).trim() : partial.phone,
-      address: partial.address ? String(partial.address).trim() : partial.address,
-      note: partial.note ? String(partial.note).trim() : partial.note,
       updatedAt: ts,
-    };
+    } as Customer;
   } else {
     customers.unshift({
-      id: String(partial.id),
-      name,
-      phone: partial.phone ? String(partial.phone).trim() : undefined,
-      address: partial.address ? String(partial.address).trim() : undefined,
-      note: partial.note ? String(partial.note).trim() : undefined,
-      createdAt: partial.createdAt ?? ts,
-      updatedAt: partial.updatedAt ?? ts,
+      id: partial.id,
+      name: (partial.name ?? "").trim(),
+      phone: partial.phone?.trim() || undefined,
+      address: partial.address?.trim() || undefined,
+      note: partial.note?.trim() || undefined,
+      createdAt: ts,
+      updatedAt: ts,
     });
   }
 
@@ -268,45 +256,44 @@ export function deleteCustomer(id: string) {
 
 /* =========================
    Sales
-========================= */
+   ========================= */
 
-function normalizeSale(x: any): Sale | null {
-  const itemId = String(x?.itemId ?? "").trim();
-  const itemName = String(x?.itemName ?? "").trim();
-  if (!itemId || !itemName) return null;
-
+function normalizeSales(raw: any[]): Sale[] {
   const ts = nowIso();
+  return (raw ?? [])
+    .map((x: any) => {
+      const createdAt = String(x?.createdAt ?? ts);
+      const qty = Number(x?.qty ?? 0);
+      const unitPrice = Number(x?.unitPrice ?? 0);
+      const total =
+        Number.isFinite(Number(x?.total)) ? Number(x.total) : round2((Number.isFinite(qty) ? qty : 0) * (Number.isFinite(unitPrice) ? unitPrice : 0));
 
-  // gammel schema-støtte:
-  // - customer: "Per" -> blir customerName
-  const legacyCustomerName = x?.customer ? String(x.customer).trim() : undefined;
+      // Legacy støtte:
+      const legacyCustomer = typeof x?.customer === "string" ? x.customer : undefined;
+      const customerName = typeof x?.customerName === "string" ? x.customerName : legacyCustomer;
 
-  const qty = Number(x?.qty ?? 0);
-  const unitPrice = Number(x?.unitPrice ?? 0);
-  const total = Number.isFinite(Number(x?.total))
-    ? Number(x.total)
-    : round2((Number(unitPrice) || 0) * (Number(qty) || 0));
+      return {
+        id: String(x?.id ?? uid("sale")),
+        createdAt,
+        itemId: String(x?.itemId ?? ""),
+        itemName: String(x?.itemName ?? ""),
+        qty: Number.isFinite(qty) ? qty : 0,
+        unitPrice: Number.isFinite(unitPrice) ? unitPrice : 0,
+        total: Number.isFinite(total) ? total : 0,
 
-  return {
-    id: String(x?.id ?? uid("sale")),
-    createdAt: String(x?.createdAt ?? ts),
-    itemId,
-    itemName,
-    qty: Number.isFinite(qty) ? qty : 0,
-    unitPrice: Number.isFinite(unitPrice) ? unitPrice : 0,
-    total: Number.isFinite(total) ? total : 0,
-    customerId: x?.customerId ? String(x.customerId) : undefined,
-    customerName: x?.customerName ? String(x.customerName).trim() : legacyCustomerName,
-    note: x?.note ? String(x.note) : undefined,
-  };
+        customerId: typeof x?.customerId === "string" && x.customerId.length ? x.customerId : undefined,
+        customerName: customerName && customerName.length ? customerName : undefined,
+
+        customer: legacyCustomer,
+        note: typeof x?.note === "string" ? x.note : undefined,
+      } as Sale;
+    })
+    .filter((s) => s.itemId.length > 0 && s.itemName.trim().length > 0);
 }
 
 export function getSales(): Sale[] {
-  const raw = safeParse<any[]>(localStorage.getItem(KEY_SALES), []);
-  const normalized = raw
-    .map((x) => normalizeSale(x))
-    .filter(Boolean) as Sale[];
-  return normalized;
+  const parsed = safeParse<any[]>(localStorage.getItem(KEY_SALES), []);
+  return normalizeSales(Array.isArray(parsed) ? parsed : []);
 }
 
 export function setSales(sales: Sale[]) {
@@ -324,9 +311,6 @@ export function addSale(s: Omit<Sale, "id" | "createdAt" | "total">) {
     createdAt,
     total,
     ...s,
-    // hygiene
-    customerId: s.customerId ? String(s.customerId) : undefined,
-    customerName: s.customerName ? String(s.customerName).trim() : undefined,
   };
 
   sales.unshift(sale);
@@ -335,11 +319,11 @@ export function addSale(s: Omit<Sale, "id" | "createdAt" | "total">) {
 }
 
 /* =========================
-   Sale draft (customer preselect)
-========================= */
+   Sale draft customer (forhåndsvalg)
+   ========================= */
 
 export function setSaleDraftCustomer(customerId: string) {
-  const payload: SaleDraftCustomer = { customerId };
+  const payload: SaleDraftCustomer = { customerId, setAt: nowIso() };
   localStorage.setItem(KEY_SALE_DRAFT_CUSTOMER, JSON.stringify(payload));
   notify();
 }
@@ -347,7 +331,7 @@ export function setSaleDraftCustomer(customerId: string) {
 export function getSaleDraftCustomer(): SaleDraftCustomer | null {
   const parsed = safeParse<SaleDraftCustomer | null>(localStorage.getItem(KEY_SALE_DRAFT_CUSTOMER), null);
   if (!parsed?.customerId) return null;
-  return { customerId: String(parsed.customerId) };
+  return parsed;
 }
 
 export function clearSaleDraftCustomer() {
@@ -357,7 +341,7 @@ export function clearSaleDraftCustomer() {
 
 /* =========================
    Hooks
-========================= */
+   ========================= */
 
 export function useItems() {
   const [items, setItemsState] = useState<Vare[]>(() => getItems());
@@ -436,7 +420,7 @@ export function useSales() {
 
 /* =========================
    Utils
-========================= */
+   ========================= */
 
 export function round2(n: number) {
   return Math.round((n + Number.EPSILON) * 100) / 100;
