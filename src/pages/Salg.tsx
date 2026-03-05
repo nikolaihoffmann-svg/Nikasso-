@@ -51,9 +51,9 @@ export function Salg() {
   const selectedItem = useMemo(() => items.find((i) => i.id === itemId) ?? null, [items, itemId]);
   const selectedCustomer = useMemo(() => customers.find((c) => c.id === customerId) ?? null, [customers, customerId]);
 
-  // Hvis vi kom fra "Kunder → nytt salg": draft er en string id
+  // Hvis vi kom fra "Kunder → nytt salg"
   useEffect(() => {
-    const draftCustomerId = getSaleDraftCustomer();
+    const draftCustomerId = getSaleDraftCustomer(); // <-- string | null
     if (draftCustomerId) {
       setCustomerId(draftCustomerId);
       clearSaleDraftCustomer();
@@ -104,15 +104,13 @@ export function Salg() {
     setQty("1");
     setUnitPrice("");
     setItemId("");
-    // kundevalg lar vi stå (ofte samme kunde flere salg)
+    // kundevalg lar vi stå
   }
 
   return (
     <div className="card">
       <div className="cardTitle">Salg</div>
-      <div className="cardSub">
-        Registrer salg. Lager trekkes automatisk, og du får varsel når lager når minimum (per vare).
-      </div>
+      <div className="cardSub">Registrer salg. Lager trekkes automatisk, og du får varsel når lager når minimum (per vare).</div>
 
       <div className="fieldGrid">
         <div>
