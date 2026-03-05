@@ -1,6 +1,6 @@
 // src/pages/Salg.tsx
-import React, { useMemo, useState } from "react";
-import { fmtKr, round2, sellItem, useItems, useSales, Vare } from "../app/storage";
+import React, { useEffect, useMemo, useState } from "react";
+import { addSale, fmtKr, getItems, round2, setItems, useItems, useSales, Vare } from "../app/storage";
 
 function toNum(v: string) {
   const n = Number(String(v).replace(",", "."));
@@ -33,16 +33,14 @@ export function Salg() {
   const [customer, setCustomer] = useState<string>("");
   const [unitPrice, setUnitPrice] = useState<string>("");
 
-  const [lowPopup, setLowPopup] = useState<{ item: Vare; newStock: number; min: number } | null>(null);
+  const [lowPopup, setLowPopup] = useState<{ item: Vare; newStock: number } | null>(null);
 
   const selected = useMemo(() => items.find((i) => i.id === itemId) ?? null, [items, itemId]);
 
   // autopopulate price when item changes (only if user hasn't typed)
-  React.useEffect(() => {
+  useEffect(() => {
     if (!selected) return;
-    if (unitPrice.trim() === "") {
-      setUnitPrice(String(selected.price ?? 0));
-    }
+    if (unitPrice.trim() === "") setUnitPrice(String(selected.price ?? 0));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected]);
 
@@ -53,39 +51,31 @@ export function Salg() {
   }, [qty, unitPrice, selected]);
 
   function doSale() {
-    if (!selected) {
-      alert("Velg en vare først.");
-      return;
-    }
+    if (!selected) return alert("Velg en vare først.");
 
     const q = Math.trunc(toNum(qty));
-    if (q <= 0) {
-      alert("Antall må være minst 1.");
-      return;
-    }
+    if (q <= 0) return alert("Antall må være minst 1.");
 
     const p = toNum(unitPrice || String(selected.price ?? 0));
 
-    const res = sellItem({
+    const itemsNow = getItems();
+    const idx = itemsNow.findIndex((x) => x.id === selected.id);
+    if (idx < 0) return alert("Fant ikke varen i lageret.");
+
+    const newStock = (itemsNow[idx].stock ?? 0) - q;
+    itemsNow[idx] = { ...itemsNow[idx], stock: newStock, updatedAt: new Date().toISOString() };
+    setItems(itemsNow);
+
+    addSale({
       itemId: selected.id,
+      itemName: selected.name,
       qty: q,
-      unitPrice: p,
+      unitPrice: round2(p),
       customer: customer.trim() ? customer.trim() : undefined,
     });
 
-    if (!res.ok) {
-      alert(res.error);
-      return;
-    }
-
-    // popup når lager HAVNER på/under minimum (krysser terskelen)
-    if (res.lowStock) {
-      setLowPopup({
-        item: res.lowStock.item,
-        newStock: res.lowStock.newStock,
-        min: res.lowStock.minStock,
-      });
-    }
+    const min = itemsNow[idx].minStock ?? 0;
+    if (min > 0 && newStock <= min) setLowPopup({ item: itemsNow[idx], newStock });
 
     setQty("1");
     setCustomer("");
@@ -181,7 +171,7 @@ export function Salg() {
               <b>{lowPopup.item.name}</b>
             </div>
             <div>
-              Ny beholdning: <b>{lowPopup.newStock}</b> • Minimum: <b>{lowPopup.min}</b>
+              Ny beholdning: <b>{lowPopup.newStock}</b> • Minimum: <b>{lowPopup.item.minStock}</b>
             </div>
             <div style={{ marginTop: 10, opacity: 0.9 }}>
               Tips: Gå til <b>Varer</b> og øk lager, eller juster minimum per vare.
