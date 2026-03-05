@@ -1,6 +1,14 @@
 // src/pages/Oversikt.tsx
 import React, { useMemo } from "react";
-import { fmtKr, useCustomers, useItems, useReceivables, useSales } from "../app/storage";
+import {
+  calcOutstanding,
+  downloadAllDataJson,
+  fmtKr,
+  useCustomers,
+  useItems,
+  useReceivables,
+  useSales,
+} from "../app/storage";
 
 function isAfter(dateIso: string, from: Date) {
   const d = new Date(dateIso);
@@ -14,7 +22,7 @@ function startOfMonth(d = new Date()) {
 export function Oversikt() {
   const { items } = useItems();
   const { customers } = useCustomers();
-  const { sales, setPaid } = useSales();
+  const { sales, settle } = useSales();
   const { receivables } = useReceivables();
 
   const byItemId = useMemo(() => {
@@ -23,7 +31,6 @@ export function Oversikt() {
     return m;
   }, [items]);
 
-  const now = useMemo(() => new Date(), []);
   const from7 = useMemo(() => new Date(Date.now() - 7 * 24 * 60 * 60 * 1000), []);
   const from30 = useMemo(() => new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), []);
   const fromMonth = useMemo(() => startOfMonth(new Date()), []);
@@ -52,8 +59,11 @@ export function Oversikt() {
       return list.reduce((a, b) => a + calcProfitForSale(b), 0);
     }
 
-    const unpaidSalesTotal = all.reduce((a, s) => a + (!s.paid ? (Number(s.total) || 0) : 0), 0);
-    const unpaidReceivablesTotal = receivables.reduce((a, r) => a + (!r.paid ? (Number(r.amount) || 0) : 0), 0);
+    const unpaidSalesTotal = all.reduce((a, s) => a + calcOutstanding(Number(s.total) || 0, s.payments), 0);
+    const unpaidReceivablesTotal = receivables.reduce(
+      (a, r) => a + calcOutstanding(Number(r.amount) || 0, r.payments),
+      0
+    );
 
     return {
       s7,
@@ -85,11 +95,16 @@ export function Oversikt() {
         (s.customerId ? customers.find((c) => c.id === s.customerId)?.name : null) ||
         "Anonym";
 
-      const prev = map.get(key) || { customerId: s.customerId, customerName: name, revenue: 0, profit: 0, unpaid: 0, count: 0 };
+      const prev =
+        map.get(key) || { customerId: s.customerId, customerName: name, revenue: 0, profit: 0, unpaid: 0, count: 0 };
+
       prev.revenue += Number(s.total) || 0;
       prev.profit += calcProfitForSale(s);
       prev.count += 1;
-      if (!s.paid) prev.unpaid += Number(s.total) || 0;
+
+      const u = calcOutstanding(Number(s.total) || 0, s.payments);
+      prev.unpaid += u;
+
       map.set(key, prev);
     }
 
@@ -111,11 +126,16 @@ export function Oversikt() {
         (s.customerId ? customers.find((c) => c.id === s.customerId)?.name : null) ||
         "Anonym";
 
-      const prev = map.get(key) || { customerId: s.customerId, customerName: name, revenue: 0, profit: 0, unpaid: 0, count: 0 };
+      const prev =
+        map.get(key) || { customerId: s.customerId, customerName: name, revenue: 0, profit: 0, unpaid: 0, count: 0 };
+
       prev.revenue += Number(s.total) || 0;
       prev.profit += calcProfitForSale(s);
       prev.count += 1;
-      if (!s.paid) prev.unpaid += Number(s.total) || 0;
+
+      const u = calcOutstanding(Number(s.total) || 0, s.payments);
+      prev.unpaid += u;
+
       map.set(key, prev);
     }
 
@@ -125,13 +145,49 @@ export function Oversikt() {
   }, [sales, customers, byItemId]);
 
   const lastUnpaid = useMemo(() => {
-    return sales.filter((s) => !s.paid).slice(0, 10);
+    return sales.filter((s) => calcOutstanding(Number(s.total) || 0, s.payments) > 0).slice(0, 10);
   }, [sales]);
+
+  const lager = useMemo(() => {
+    const rows = items
+      .map((i) => {
+        const stock = Number(i.stock) || 0;
+        const cost = Number(i.cost) || 0;
+        const price = Number(i.price) || 0;
+        const costTotal = cost * stock;
+        const saleTotal = price * stock;
+        const potential = (price - cost) * stock;
+
+        return {
+          id: i.id,
+          name: i.name,
+          stock,
+          cost,
+          price,
+          costTotal,
+          saleTotal,
+          potential,
+        };
+      })
+      .sort((a, b) => b.costTotal - a.costTotal);
+
+    const sumCost = rows.reduce((a, r) => a + r.costTotal, 0);
+    const sumSale = rows.reduce((a, r) => a + r.saleTotal, 0);
+    const sumPotential = rows.reduce((a, r) => a + r.potential, 0);
+
+    return { rows, sumCost, sumSale, sumPotential };
+  }, [items]);
 
   return (
     <div className="card">
       <div className="cardTitle">Oversikt</div>
       <div className="cardSub">Salg, profitt, utestående (salg) og gjeld til deg (egen).</div>
+
+      <div className="btnRow">
+        <button className="btn" type="button" onClick={() => downloadAllDataJson("sg-alle-data")}>
+          Eksporter ALT (varer + kunder + salg + gjeld)
+        </button>
+      </div>
 
       {/* Period stats */}
       <div className="list">
@@ -162,10 +218,37 @@ export function Oversikt() {
         <div className="item">
           <p className="itemTitle">Utestående</p>
           <div className="itemMeta">
-            Utestående salg (ikke betalt): <b>{fmtKr(period.unpaidSalesTotal)}</b>
+            Utestående salg (etter delbetaling): <b>{fmtKr(period.unpaidSalesTotal)}</b>
             <br />
-            Gjeld til deg (egen, ikke betalt): <b>{fmtKr(period.unpaidReceivablesTotal)}</b>
+            Gjeld til deg (egen, etter delbetaling): <b>{fmtKr(period.unpaidReceivablesTotal)}</b>
           </div>
+        </div>
+      </div>
+
+      {/* Lager */}
+      <div className="card">
+        <div className="cardTitle">Lagerverdi</div>
+        <div className="cardSub">
+          Samlet kost: <b>{fmtKr(lager.sumCost)}</b> • Samlet salgsverdi: <b>{fmtKr(lager.sumSale)}</b> • Potensiell
+          profitt: <b>{fmtKr(lager.sumPotential)}</b>
+        </div>
+
+        <div className="list">
+          {lager.rows.length === 0 ? (
+            <div className="item">Ingen varer registrert.</div>
+          ) : (
+            lager.rows.slice(0, 50).map((r) => (
+              <div key={r.id} className="item">
+                <p className="itemTitle">{r.name}</p>
+                <div className="itemMeta">
+                  Lager: <b>{r.stock}</b> • Kost/stk: <b>{fmtKr(r.cost)}</b> • Salg/stk: <b>{fmtKr(r.price)}</b>
+                  <br />
+                  Kostverdi: <b>{fmtKr(r.costTotal)}</b> • Salgsverdi: <b>{fmtKr(r.saleTotal)}</b> • Potensiell profitt:{" "}
+                  <b>{fmtKr(r.potential)}</b>
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </div>
 
@@ -182,18 +265,8 @@ export function Oversikt() {
               <div key={(c.customerId ?? "anon") + "_30"} className="item">
                 <p className="itemTitle">{c.customerName}</p>
                 <div className="itemMeta">
-                  Solgt: <b>{fmtKr(c.revenue)}</b> • Profitt: <b>{fmtKr(c.profit)}</b> • Salg: <b>{c.count}</b>
-                  {c.unpaid > 0 ? (
-                    <>
-                      {" "}
-                      • Utestående: <b>{fmtKr(c.unpaid)}</b>
-                    </>
-                  ) : (
-                    <>
-                      {" "}
-                      • Utestående: <b>{fmtKr(0)}</b>
-                    </>
-                  )}
+                  Solgt: <b>{fmtKr(c.revenue)}</b> • Profitt: <b>{fmtKr(c.profit)}</b> • Salg: <b>{c.count}</b> •
+                  Utestående: <b>{fmtKr(c.unpaid)}</b>
                 </div>
               </div>
             ))
@@ -225,38 +298,55 @@ export function Oversikt() {
       {/* Quick unpaid list */}
       <div className="card">
         <div className="cardTitle">Siste utestående salg</div>
-        <div className="cardSub">Hurtigmarker betalt direkte her.</div>
+        <div className="cardSub">Hurtig “oppgjør” – legger inn siste restbeløp som betaling.</div>
 
         <div className="list">
           {lastUnpaid.length === 0 ? (
             <div className="item">Ingen utestående salg 🎉</div>
           ) : (
-            lastUnpaid.map((s) => (
-              <div key={s.id} className="item">
-                <div className="itemTop">
-                  <div>
-                    <p className="itemTitle">{s.itemName}</p>
-                    <div className="itemMeta">
-                      Sum: <b>{fmtKr(s.total)}</b>
-                      {s.customerName ? (
-                        <>
-                          {" "}
-                          • Kunde: <b>{s.customerName}</b>
-                        </>
-                      ) : null}
-                      {" • "}
-                      {new Date(s.createdAt).toLocaleString("nb-NO")}
-                    </div>
+            lastUnpaid.map((s) => {
+              const rest = calcOutstanding(Number(s.total) || 0, s.payments);
+              return (
+                <div key={s.id} className="item">
+                  <div className="itemTop">
+                    <div>
+                      <p className="itemTitle">{s.itemName}</p>
+                      <div className="itemMeta">
+                        Total: <b>{fmtKr(s.total)}</b> • Utestående: <b>{fmtKr(rest)}</b>
+                        {s.customerName ? (
+                          <>
+                            {" "}
+                            • Kunde: <b>{s.customerName}</b>
+                          </>
+                        ) : null}
+                        {" • "}
+                        {new Date(s.createdAt).toLocaleString("nb-NO")}
+                      </div>
 
-                    <div className="btnRow">
-                      <button className="btn btnPrimary" type="button" onClick={() => setPaid(s.id, true)}>
-                        Sett betalt
-                      </button>
+                      <div className="btnRow">
+                        <button className="btn btnPrimary" type="button" onClick={() => settle(s.id)}>
+                          Oppgjør (sett betalt)
+                        </button>
+                      </div>
+
+                      {(s.payments?.length ?? 0) > 0 ? (
+                        <div className="itemMeta" style={{ marginTop: 10 }}>
+                          Betalinger:
+                          <br />
+                          {(s.payments ?? []).slice().reverse().map((p) => (
+                            <span key={p.id}>
+                              • {fmtKr(p.amount)} ({new Date(p.dateIso).toLocaleDateString("nb-NO")})
+                              {p.note ? ` – ${p.note}` : ""}
+                              <br />
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       </div>
