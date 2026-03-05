@@ -26,6 +26,21 @@ export function App() {
     setThemeState((t) => (t === "dark" ? "light" : "dark"));
   }
 
+  const title = useMemo(() => {
+    switch (tab) {
+      case "oversikt":
+        return "Oversikt";
+      case "varer":
+        return "Varer";
+      case "salg":
+        return "Salg";
+      case "kunder":
+        return "Kunder";
+      case "gjeld":
+        return "Gjeld (til deg)";
+    }
+  }, [tab]);
+
   const content = useMemo(() => {
     if (tab === "oversikt") return <Oversikt />;
     if (tab === "varer") return <Varer />;
@@ -37,7 +52,7 @@ export function App() {
   return (
     <div className="app">
       <header className="header">
-        <h1 className="title">Oversikt</h1>
+        <div className="title">{title}</div>
 
         <div className="topbar">
           <div className="subtitle">Privat • Lokal lagring i nettleseren</div>
