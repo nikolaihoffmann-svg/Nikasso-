@@ -1,15 +1,14 @@
 // src/app/App.tsx
 import React, { useEffect, useMemo, useState } from "react";
-import { applyThemeToDom, getTheme, setTheme, Theme } from "./storage";
+import { applyThemeToDom, getTheme, setTheme, Theme, downloadExportAll, importAllFromFile, clearAllData } from "./storage";
 
 import { Oversikt } from "../pages/Oversikt";
 import { Varer } from "../pages/Varer";
 import { Salg } from "../pages/Salg";
 import { Kunder } from "../pages/Kunder";
 import { Gjeld } from "../pages/Gjeld";
-import { Backup } from "../pages/Backup";
 
-type TabKey = "oversikt" | "varer" | "salg" | "kunder" | "gjeld" | "backup";
+type TabKey = "oversikt" | "varer" | "salg" | "kunder" | "gjeld";
 
 export function App() {
   const [theme, setThemeState] = useState<Theme>(() => getTheme());
@@ -20,82 +19,72 @@ export function App() {
     setTheme(theme);
   }, [theme]);
 
-  const themeLabel = theme === "dark" ? "Mørk" : "Lys";
-  const themeIcon = theme === "dark" ? "🌙" : "☀️";
-
   function toggleTheme() {
     setThemeState((t) => (t === "dark" ? "light" : "dark"));
   }
-
-  const title = useMemo(() => {
-    switch (tab) {
-      case "oversikt":
-        return "Oversikt";
-      case "varer":
-        return "Varer";
-      case "salg":
-        return "Salg";
-      case "kunder":
-        return "Kunder";
-      case "gjeld":
-        return "Gjeld (til deg)";
-      case "backup":
-        return "Backup";
-    }
-  }, [tab]);
 
   const content = useMemo(() => {
     if (tab === "oversikt") return <Oversikt />;
     if (tab === "varer") return <Varer />;
     if (tab === "salg") return <Salg />;
     if (tab === "kunder") return <Kunder />;
-    if (tab === "gjeld") return <Gjeld />;
-    return <Backup />;
+    return <Gjeld />;
   }, [tab]);
 
   return (
-    <div className="app">
+    <div className="container">
       <header className="header">
-        <div className="title">{title}</div>
+        <div className="headerTop">
+          <div>
+            <div className="h1">Oversikt</div>
+            <div className="subRow">
+              <div className="sub">Privat • Lokal lagring i nettleseren</div>
+            </div>
+          </div>
 
-        <div className="topbar">
-          <div className="subtitle">Privat • Lokal lagring i nettleseren</div>
+          <div className="btnRow" style={{ marginTop: 0, justifyContent: "flex-end" }}>
+            <button className="btn" type="button" onClick={downloadExportAll}>
+              Eksporter ALT
+            </button>
+            <button className="btn" type="button" onClick={importAllFromFile}>
+              Importer ALT
+            </button>
+            <button
+              className="btn btnDanger"
+              type="button"
+              onClick={() => {
+                if (confirm("Slette ALL data i nettleseren? (Varer, kunder, salg, gjeld)")) clearAllData();
+              }}
+            >
+              Nullstill
+            </button>
 
-          <button
-            type="button"
-            className="themeBtn"
-            onClick={toggleTheme}
-            aria-label={`Bytt tema (nå: ${themeLabel})`}
-            title="Bytt tema"
-          >
-            <span className="themeIcon">{themeIcon}</span>
-            <span className="themeText">{themeLabel}</span>
-          </button>
+            <button className="themeBtn" type="button" onClick={toggleTheme} title="Bytt tema">
+              {theme === "dark" ? "🌙 Mørk" : "☀️ Lys"}
+            </button>
+          </div>
         </div>
 
         <nav className="tabs">
-          <button className={`tabBtn ${tab === "oversikt" ? "active" : ""}`} onClick={() => setTab("oversikt")} type="button">
+          <button className={`tab ${tab === "oversikt" ? "active" : ""}`} onClick={() => setTab("oversikt")} type="button">
             Oversikt
           </button>
-          <button className={`tabBtn ${tab === "varer" ? "active" : ""}`} onClick={() => setTab("varer")} type="button">
+          <button className={`tab ${tab === "varer" ? "active" : ""}`} onClick={() => setTab("varer")} type="button">
             Varer
           </button>
-          <button className={`tabBtn ${tab === "salg" ? "active" : ""}`} onClick={() => setTab("salg")} type="button">
+          <button className={`tab ${tab === "salg" ? "active" : ""}`} onClick={() => setTab("salg")} type="button">
             Salg
           </button>
-          <button className={`tabBtn ${tab === "kunder" ? "active" : ""}`} onClick={() => setTab("kunder")} type="button">
+          <button className={`tab ${tab === "kunder" ? "active" : ""}`} onClick={() => setTab("kunder")} type="button">
             Kunder
           </button>
-          <button className={`tabBtn ${tab === "gjeld" ? "active" : ""}`} onClick={() => setTab("gjeld")} type="button">
+          <button className={`tab ${tab === "gjeld" ? "active" : ""}`} onClick={() => setTab("gjeld")} type="button">
             Gjeld
-          </button>
-          <button className={`tabBtn ${tab === "backup" ? "active" : ""}`} onClick={() => setTab("backup")} type="button">
-            Backup
           </button>
         </nav>
       </header>
 
-      <main className="main">{content}</main>
+      {content}
     </div>
   );
 }
