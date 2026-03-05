@@ -1,13 +1,8 @@
 // src/pages/Kunder.tsx
 import React, { useMemo, useState } from "react";
-import { Customer, uid, useCustomers } from "../app/storage";
+import { Customer, setSaleDraftCustomer, uid, useCustomers, useSales, fmtKr } from "../app/storage";
 
-function Modal(props: {
-  open: boolean;
-  title: string;
-  children: React.ReactNode;
-  onClose: () => void;
-}) {
+function Modal(props: { open: boolean; title: string; children: React.ReactNode; onClose: () => void }) {
   if (!props.open) return null;
   return (
     <div className="modalBackdrop" role="dialog" aria-modal="true" onClick={props.onClose}>
@@ -30,6 +25,7 @@ function normalizeName(s: string) {
 
 export function Kunder() {
   const { customers, upsert, remove, setAll } = useCustomers();
+  const { sales } = useSales();
 
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -48,7 +44,6 @@ export function Kunder() {
   const filtered = useMemo(() => {
     const qq = q.trim().toLowerCase();
     if (!qq) return sorted;
-
     return sorted.filter((c) => {
       const hay = `${c.name} ${c.phone ?? ""} ${c.address ?? ""} ${c.note ?? ""}`.toLowerCase();
       return hay.includes(qq);
@@ -57,10 +52,7 @@ export function Kunder() {
 
   function addCustomer() {
     const n = normalizeName(name);
-    if (!n) {
-      alert("Kundenavn kan ikke være tomt.");
-      return;
-    }
+    if (!n) return alert("Kundenavn kan ikke være tomt.");
 
     const exists = customers.some((c) => normalizeName(c.name).toLowerCase() === n.toLowerCase());
     if (exists) {
@@ -117,13 +109,17 @@ export function Kunder() {
           }))
           .filter((x) => x.name.length > 0);
 
-        // "Erstatt alt"
-        setAll(normalized);
+        setAll(normalized); // “erstatt alt”
       } catch {
         alert("Kunne ikke importere filen (ugyldig JSON).");
       }
     };
     input.click();
+  }
+
+  function startSaleForCustomer(c: Customer) {
+    setSaleDraftCustomer(c.id);
+    alert(`Klar! Gå til "Salg" fanen – kunden "${c.name}" er forhåndsvalgt.`);
   }
 
   return (
@@ -188,25 +184,20 @@ export function Kunder() {
             <div className="itemTop">
               <div>
                 <p className="itemTitle">{c.name}</p>
-
                 <div className="itemMeta">
                   {c.phone ? (
                     <>
                       Tlf: <b>{c.phone}</b>
                     </>
                   ) : null}
-
                   {c.address ? (
                     <>
-                      {c.phone ? " • " : ""}
-                      Adr: <b>{c.address}</b>
+                      {c.phone ? " • " : ""}Adr: <b>{c.address}</b>
                     </>
                   ) : null}
-
                   {c.note ? (
                     <>
-                      {(c.phone || c.address) ? " • " : ""}
-                      Notat: <b>{c.note}</b>
+                      {(c.phone || c.address) ? " • " : ""}Notat: <b>{c.note}</b>
                     </>
                   ) : null}
                 </div>
@@ -214,8 +205,11 @@ export function Kunder() {
             </div>
 
             <div className="itemActions">
+              <button className="btn btnPrimary" type="button" onClick={() => startSaleForCustomer(c)}>
+                Nytt salg
+              </button>
               <button className="btn" type="button" onClick={() => setEdit(c)}>
-                Rediger
+                Detaljer
               </button>
               <button
                 className="btn btnDanger"
@@ -233,14 +227,16 @@ export function Kunder() {
         {filtered.length === 0 ? <div className="item">Ingen treff.</div> : null}
       </div>
 
-      <Modal open={!!edit} title="Rediger kunde" onClose={() => setEdit(null)}>
+      <Modal open={!!edit} title="Kundedetaljer" onClose={() => setEdit(null)}>
         {edit ? (
-          <EditCustomerForm
+          <CustomerDetails
             customer={edit}
             onSave={(next) => {
               upsert(next);
               setEdit(null);
             }}
+            onStartSale={() => startSaleForCustomer(edit)}
+            sales={sales}
           />
         ) : null}
       </Modal>
@@ -248,14 +244,26 @@ export function Kunder() {
   );
 }
 
-function EditCustomerForm(props: {
+function CustomerDetails(props: {
   customer: Customer;
   onSave: (next: Omit<Customer, "createdAt" | "updatedAt">) => void;
+  onStartSale: () => void;
+  sales: any[];
 }) {
   const [name, setName] = useState(props.customer.name);
   const [phone, setPhone] = useState(props.customer.phone ?? "");
   const [address, setAddress] = useState(props.customer.address ?? "");
   const [note, setNote] = useState(props.customer.note ?? "");
+
+  const customerSales = useMemo(() => {
+    return props.sales
+      .filter((s: any) => s.customerId === props.customer.id)
+      .slice(0, 15);
+  }, [props.sales, props.customer.id]);
+
+  const totalSpent = useMemo(() => {
+    return customerSales.reduce((a: number, b: any) => a + (Number(b.total) || 0), 0);
+  }, [customerSales]);
 
   return (
     <div className="fieldGrid">
@@ -297,6 +305,36 @@ function EditCustomerForm(props: {
         >
           Lagre
         </button>
+
+        <button className="btn" type="button" onClick={props.onStartSale}>
+          Nytt salg til kunde
+        </button>
+      </div>
+
+      <div style={{ height: 10 }} />
+
+      <div className="card" style={{ marginTop: 0 }}>
+        <div className="cardTitle">Salg på denne kunden</div>
+        <div className="cardSub">
+          Viser siste {customerSales.length} • Sum: <b>{fmtKr(totalSpent)}</b>
+        </div>
+
+        <div className="list">
+          {customerSales.map((s: any) => (
+            <div key={s.id} className="item">
+              <div className="itemTop">
+                <div>
+                  <p className="itemTitle">{s.itemName}</p>
+                  <div className="itemMeta">
+                    Antall: <b>{s.qty}</b> • Sum: <b>{fmtKr(s.total)}</b> •{" "}
+                    {new Date(s.createdAt).toLocaleString("nb-NO")}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+          {customerSales.length === 0 ? <div className="item">Ingen salg registrert på denne kunden enda.</div> : null}
+        </div>
       </div>
     </div>
   );
