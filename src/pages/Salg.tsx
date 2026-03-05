@@ -51,9 +51,9 @@ export function Salg() {
   const selectedItem = useMemo(() => items.find((i) => i.id === itemId) ?? null, [items, itemId]);
   const selectedCustomer = useMemo(() => customers.find((c) => c.id === customerId) ?? null, [customers, customerId]);
 
-  // ✅ Hvis vi kom fra "Kunder → nytt salg": draft = string customerId
+  // Hvis vi kom fra "Kunder → nytt salg": draft er en string id
   useEffect(() => {
-    const draftCustomerId = getSaleDraftCustomer(); // string | null
+    const draftCustomerId = getSaleDraftCustomer();
     if (draftCustomerId) {
       setCustomerId(draftCustomerId);
       clearSaleDraftCustomer();
@@ -81,7 +81,6 @@ export function Salg() {
 
     const p = toNum(unitPrice || String(selectedItem.price ?? 0));
 
-    // oppdater lager
     const itemsNow = getItems();
     const idx = itemsNow.findIndex((x) => x.id === selectedItem.id);
     if (idx < 0) return alert("Fant ikke varen i lageret.");
@@ -90,7 +89,6 @@ export function Salg() {
     itemsNow[idx] = { ...itemsNow[idx], stock: newStock, updatedAt: new Date().toISOString() };
     setItems(itemsNow);
 
-    // lagre salg
     addSale({
       itemId: selectedItem.id,
       itemName: selectedItem.name,
@@ -100,20 +98,21 @@ export function Salg() {
       customerName: selectedCustomer?.name,
     });
 
-    // varsel lav beholdning
     const min = itemsNow[idx].minStock ?? 0;
     if (min > 0 && newStock <= min) setLowPopup({ item: itemsNow[idx], newStock });
 
     setQty("1");
     setUnitPrice("");
     setItemId("");
-    // ✅ kundevalg lar vi stå (ofte samme kunde flere salg)
+    // kundevalg lar vi stå (ofte samme kunde flere salg)
   }
 
   return (
     <div className="card">
       <div className="cardTitle">Salg</div>
-      <div className="cardSub">Registrer salg. Lager trekkes automatisk, og du får varsel når lager når minimum (per vare).</div>
+      <div className="cardSub">
+        Registrer salg. Lager trekkes automatisk, og du får varsel når lager når minimum (per vare).
+      </div>
 
       <div className="fieldGrid">
         <div>
