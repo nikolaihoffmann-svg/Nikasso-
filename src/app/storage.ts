@@ -10,10 +10,10 @@ export type Theme = "dark" | "light";
 export type Vare = {
   id: string;
   name: string;
-  price: number;
-  cost: number;
-  stock: number;
-  minStock: number;
+  price: number; // salg
+  cost: number; // kost
+  stock: number; // lager
+  minStock: number; // minimum (varsel)
   createdAt: string;
   updatedAt: string;
 };
@@ -28,11 +28,11 @@ export type Customer = {
   updatedAt: string;
 };
 
-export type Payment = {
+export type SalePayment = {
   id: string;
-  createdAt: string; // innbetalingsdato
   amount: number;
   note?: string;
+  createdAt: string; // ISO
 };
 
 export type Sale = {
@@ -45,32 +45,17 @@ export type Sale = {
   customerId?: string;
   customerName?: string;
   createdAt: string;
-
-  // utestående/innbetalinger (valgfritt – kan brukes på “utestående salg” senere)
-  payments?: Payment[];
-};
-
-export type Receivable = {
-  id: string;
-  debtorName: string;
-  amount: number; // opprinnelig beløp
-  dueDate?: string; // yyyy-mm-dd
-  note?: string;
-  createdAt: string;
-  updatedAt: string;
-
-  payments?: Payment[]; // delbetalinger
+  payments?: SalePayment[]; // ✅ delbetalinger
 };
 
 /* =========================
-   Keys + helpers
+   Helpers
 ========================= */
 
 const LS_KEYS = {
   items: "sg.items.v1",
   customers: "sg.customers.v1",
   sales: "sg.sales.v1",
-  receivables: "sg.receivables.v1",
   saleDraftCustomer: "sg.saleDraftCustomer.v1",
   theme: "sg.theme.v1",
 } as const;
@@ -107,18 +92,6 @@ export function fmtKr(n: number) {
   return new Intl.NumberFormat("nb-NO", { style: "currency", currency: "NOK" }).format(v);
 }
 
-function normalizePayments(raw: any): Payment[] {
-  const arr: any[] = Array.isArray(raw) ? raw : [];
-  return arr
-    .map((p) => ({
-      id: String(p.id ?? uid("pay")),
-      createdAt: String(p.createdAt ?? nowIso()),
-      amount: Number(p.amount ?? 0),
-      note: p.note ? String(p.note) : undefined,
-    }))
-    .filter((p) => (Number(p.amount) || 0) > 0);
-}
-
 /* =========================
    Theme
 ========================= */
@@ -134,20 +107,24 @@ export function setTheme(t: Theme) {
 }
 
 export function applyThemeToDom(theme: Theme) {
-  document.documentElement.dataset.theme = theme; // CSS: :root[data-theme="light"]
+  document.documentElement.dataset.theme = theme;
+  document.documentElement.classList.toggle("theme-dark", theme === "dark");
+  document.documentElement.classList.toggle("theme-light", theme === "light");
 }
 
 export function useTheme(): [Theme, (t: Theme) => void] {
   const [theme, setState] = useState<Theme>(() => getTheme());
+
   useEffect(() => {
-    const on = () => setState(getTheme());
-    window.addEventListener("storage", on);
-    window.addEventListener(EVT, on);
+    const onChange = () => setState(getTheme());
+    window.addEventListener("storage", onChange);
+    window.addEventListener(EVT, onChange);
     return () => {
-      window.removeEventListener("storage", on);
-      window.removeEventListener(EVT, on);
+      window.removeEventListener("storage", onChange);
+      window.removeEventListener(EVT, onChange);
     };
   }, []);
+
   return [theme, setTheme];
 }
 
@@ -157,7 +134,7 @@ export function useTheme(): [Theme, (t: Theme) => void] {
 
 export function getItems(): Vare[] {
   const raw = safeJsonParse<any[]>(localStorage.getItem(LS_KEYS.items), []);
-  return (raw || [])
+  const normalized: Vare[] = (raw || [])
     .map((x) => ({
       id: String(x.id ?? uid("item")),
       name: String(x.name ?? "").trim(),
@@ -169,6 +146,8 @@ export function getItems(): Vare[] {
       updatedAt: String(x.updatedAt ?? nowIso()),
     }))
     .filter((x) => x.name.length > 0);
+
+  return normalized;
 }
 
 export function setItems(next: Vare[]) {
@@ -192,19 +171,21 @@ function adjustItemStockCore(id: string, delta: number) {
   const items = getItems();
   const i = items.findIndex((x) => x.id === id);
   if (i < 0) return;
-  items[i] = { ...items[i], stock: (items[i].stock ?? 0) + delta, updatedAt: nowIso() };
+  const nextStock = (items[i].stock ?? 0) + delta;
+  items[i] = { ...items[i], stock: nextStock, updatedAt: nowIso() };
   setItems(items);
 }
 
 export function useItems() {
   const [items, setState] = useState<Vare[]>(() => getItems());
+
   useEffect(() => {
-    const on = () => setState(getItems());
-    window.addEventListener("storage", on);
-    window.addEventListener(EVT, on);
+    const onChange = () => setState(getItems());
+    window.addEventListener("storage", onChange);
+    window.addEventListener(EVT, onChange);
     return () => {
-      window.removeEventListener("storage", on);
-      window.removeEventListener(EVT, on);
+      window.removeEventListener("storage", onChange);
+      window.removeEventListener(EVT, onChange);
     };
   }, []);
 
@@ -226,7 +207,7 @@ export function useItems() {
 
 export function getCustomers(): Customer[] {
   const raw = safeJsonParse<any[]>(localStorage.getItem(LS_KEYS.customers), []);
-  return (raw || [])
+  const normalized: Customer[] = (raw || [])
     .map((x) => ({
       id: String(x.id ?? uid("cust")),
       name: String(x.name ?? "").trim(),
@@ -237,6 +218,8 @@ export function getCustomers(): Customer[] {
       updatedAt: String(x.updatedAt ?? nowIso()),
     }))
     .filter((x) => x.name.length > 0);
+
+  return normalized;
 }
 
 export function setCustomers(next: Customer[]) {
@@ -258,13 +241,14 @@ function removeCustomerCore(id: string) {
 
 export function useCustomers() {
   const [customers, setState] = useState<Customer[]>(() => getCustomers());
+
   useEffect(() => {
-    const on = () => setState(getCustomers());
-    window.addEventListener("storage", on);
-    window.addEventListener(EVT, on);
+    const onChange = () => setState(getCustomers());
+    window.addEventListener("storage", onChange);
+    window.addEventListener(EVT, onChange);
     return () => {
-      window.removeEventListener("storage", on);
-      window.removeEventListener(EVT, on);
+      window.removeEventListener("storage", onChange);
+      window.removeEventListener(EVT, onChange);
     };
   }, []);
 
@@ -295,7 +279,14 @@ export function getSales(): Sale[] {
     customerId: x.customerId ? String(x.customerId) : undefined,
     customerName: x.customerName ? String(x.customerName) : undefined,
     createdAt: String(x.createdAt ?? nowIso()),
-    payments: normalizePayments(x.payments),
+    payments: Array.isArray(x.payments)
+      ? x.payments.map((p: any) => ({
+          id: String(p.id ?? uid("pay")),
+          amount: Number(p.amount ?? 0),
+          note: p.note ? String(p.note) : undefined,
+          createdAt: String(p.createdAt ?? nowIso()),
+        }))
+      : [],
   }));
 
   normalized.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
@@ -311,163 +302,64 @@ export function addSale(input: Omit<Sale, "id" | "createdAt" | "total">) {
   const sales = getSales();
   const createdAt = nowIso();
   const total = round2((Number(input.qty) || 0) * (Number(input.unitPrice) || 0));
-
   const next: Sale = {
     id: uid("sale"),
     createdAt,
     total,
+    payments: Array.isArray(input.payments) ? input.payments : [],
     ...input,
-    payments: Array.isArray((input as any).payments) ? normalizePayments((input as any).payments) : [],
   };
-
   sales.unshift(next);
   setSales(sales);
 }
 
-export function addSalePayment(saleId: string, amount: number, note?: string, createdAt?: string) {
-  const sales = getSales();
-  const i = sales.findIndex((s) => s.id === saleId);
-  if (i < 0) return;
-
-  const pay: Payment = {
-    id: uid("pay"),
-    createdAt: createdAt ?? nowIso(),
-    amount: round2(amount),
-    note: note?.trim() ? note.trim() : undefined,
-  };
-
-  const prev = Array.isArray(sales[i].payments) ? sales[i].payments! : [];
-  sales[i] = { ...sales[i], payments: [pay, ...prev] };
-  setSales(sales);
-}
-
-export function salePaidSum(s: Sale) {
-  const pays = Array.isArray(s.payments) ? s.payments : [];
-  return round2(pays.reduce((a, p) => a + (Number(p.amount) || 0), 0));
-}
-
-export function saleRemaining(s: Sale) {
-  return round2((Number(s.total) || 0) - salePaidSum(s));
-}
-
 export function useSales() {
   const [sales, setState] = useState<Sale[]>(() => getSales());
+
   useEffect(() => {
-    const on = () => setState(getSales());
-    window.addEventListener("storage", on);
-    window.addEventListener(EVT, on);
+    const onChange = () => setState(getSales());
+    window.addEventListener("storage", onChange);
+    window.addEventListener(EVT, onChange);
     return () => {
-      window.removeEventListener("storage", on);
-      window.removeEventListener(EVT, on);
+      window.removeEventListener("storage", onChange);
+      window.removeEventListener(EVT, onChange);
     };
   }, []);
 
   return useMemo(() => ({ sales }), [sales]);
 }
 
-/* =========================
-   Receivables (Gjeld til meg)
-========================= */
+/* ===== Delbetaling helpers ===== */
 
-export function getReceivables(): Receivable[] {
-  const raw = safeJsonParse<any[]>(localStorage.getItem(LS_KEYS.receivables), []);
-  const normalized: Receivable[] = (raw || []).map((x) => ({
-    id: String(x.id ?? uid("rcv")),
-    debtorName: String(x.debtorName ?? "").trim(),
-    amount: Number(x.amount ?? 0),
-    dueDate: x.dueDate ? String(x.dueDate) : undefined,
-    note: x.note ? String(x.note) : undefined,
-    createdAt: String(x.createdAt ?? nowIso()),
-    updatedAt: String(x.updatedAt ?? nowIso()),
-    payments: normalizePayments(x.payments),
-  }));
-
-  // nyeste først
-  normalized.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
-  return normalized.filter((r) => r.debtorName.length > 0 && (Number(r.amount) || 0) >= 0);
+export function salePaidSum(s: Sale): number {
+  const arr = Array.isArray(s.payments) ? s.payments : [];
+  return round2(arr.reduce((a, p) => a + (Number(p.amount) || 0), 0));
 }
 
-export function setReceivables(next: Receivable[]) {
-  localStorage.setItem(LS_KEYS.receivables, JSON.stringify(next));
-  emitChange();
+export function saleRemaining(s: Sale): number {
+  const total = Number(s.total) || 0;
+  return round2(total - salePaidSum(s));
 }
 
-function upsertReceivableCore(r: Omit<Receivable, "createdAt" | "updatedAt">) {
-  const list = getReceivables();
-  const i = list.findIndex((x) => x.id === r.id);
-  const ts = nowIso();
-
-  if (i >= 0) {
-    list[i] = {
-      ...list[i],
-      ...r,
-      payments: normalizePayments((r as any).payments ?? list[i].payments),
-      updatedAt: ts,
-    };
-  } else {
-    list.unshift({
-      ...r,
-      payments: normalizePayments((r as any).payments),
-      createdAt: ts,
-      updatedAt: ts,
-    });
-  }
-
-  setReceivables(list);
-}
-
-function removeReceivableCore(id: string) {
-  setReceivables(getReceivables().filter((x) => x.id !== id));
-}
-
-export function addReceivablePayment(receivableId: string, amount: number, note?: string, createdAt?: string) {
-  const list = getReceivables();
-  const i = list.findIndex((x) => x.id === receivableId);
+export function addSalePayment(saleId: string, amount: number, note?: string, createdAt?: string) {
+  const sales = getSales();
+  const i = sales.findIndex((x) => x.id === saleId);
   if (i < 0) return;
 
-  const pay: Payment = {
+  const pay: SalePayment = {
     id: uid("pay"),
-    createdAt: createdAt ?? nowIso(),
-    amount: round2(amount),
+    amount: round2(Number(amount) || 0),
     note: note?.trim() ? note.trim() : undefined,
+    createdAt: createdAt ?? nowIso(),
   };
 
-  const prev = Array.isArray(list[i].payments) ? list[i].payments! : [];
-  list[i] = { ...list[i], payments: [pay, ...prev], updatedAt: nowIso() };
-  setReceivables(list);
-}
+  const existing = Array.isArray(sales[i].payments) ? sales[i].payments! : [];
+  sales[i] = {
+    ...sales[i],
+    payments: [pay, ...existing],
+  };
 
-export function receivablePaidSum(r: Receivable) {
-  const pays = Array.isArray(r.payments) ? r.payments : [];
-  return round2(pays.reduce((a, p) => a + (Number(p.amount) || 0), 0));
-}
-
-export function receivableRemaining(r: Receivable) {
-  return round2((Number(r.amount) || 0) - receivablePaidSum(r));
-}
-
-export function useReceivables() {
-  const [receivables, setState] = useState<Receivable[]>(() => getReceivables());
-  useEffect(() => {
-    const on = () => setState(getReceivables());
-    window.addEventListener("storage", on);
-    window.addEventListener(EVT, on);
-    return () => {
-      window.removeEventListener("storage", on);
-      window.removeEventListener(EVT, on);
-    };
-  }, []);
-
-  return useMemo(
-    () => ({
-      receivables,
-      upsert: (r: Omit<Receivable, "createdAt" | "updatedAt">) => upsertReceivableCore(r),
-      remove: (id: string) => removeReceivableCore(id),
-      addPayment: (id: string, amount: number, note?: string, createdAt?: string) => addReceivablePayment(id, amount, note, createdAt),
-      setAll: (all: Receivable[]) => setReceivables(all),
-    }),
-    [receivables]
-  );
+  setSales(sales);
 }
 
 /* =========================
@@ -487,77 +379,5 @@ export function getSaleDraftCustomer(): string | null {
 
 export function clearSaleDraftCustomer() {
   localStorage.removeItem(LS_KEYS.saleDraftCustomer);
-  emitChange();
-}
-
-/* =========================
-   Export / Import ALT
-========================= */
-
-export function exportAllData() {
-  return {
-    version: 1,
-    exportedAt: nowIso(),
-    items: getItems(),
-    customers: getCustomers(),
-    sales: getSales(),
-    receivables: getReceivables(),
-    theme: getTheme(),
-  };
-}
-
-export function downloadExportAll() {
-  const payload = exportAllData();
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `sg-backup-${new Date().toISOString().slice(0, 10)}.json`;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-export function importAll(payload: any) {
-  const items = Array.isArray(payload?.items) ? payload.items : [];
-  const customers = Array.isArray(payload?.customers) ? payload.customers : [];
-  const sales = Array.isArray(payload?.sales) ? payload.sales : [];
-  const receivables = Array.isArray(payload?.receivables) ? payload.receivables : [];
-
-  setItems(getItems().constructor === Array ? items : items); // bare for å være robust
-  setCustomers(customers);
-  setSales(sales);
-  setReceivables(receivables);
-
-  const t = payload?.theme === "light" ? "light" : "dark";
-  setTheme(t);
-  applyThemeToDom(t);
-}
-
-export function importAllFromFile() {
-  const input = document.createElement("input");
-  input.type = "file";
-  input.accept = "application/json";
-  input.onchange = async () => {
-    const file = input.files?.[0];
-    if (!file) return;
-    const text = await file.text();
-    try {
-      const parsed = JSON.parse(text);
-      importAll(parsed);
-      alert("Import fullført ✅");
-    } catch {
-      alert("Kunne ikke importere (ugyldig JSON).");
-    }
-  };
-  input.click();
-}
-
-export function clearAllData() {
-  localStorage.removeItem(LS_KEYS.items);
-  localStorage.removeItem(LS_KEYS.customers);
-  localStorage.removeItem(LS_KEYS.sales);
-  localStorage.removeItem(LS_KEYS.receivables);
-  localStorage.removeItem(LS_KEYS.saleDraftCustomer);
-  localStorage.removeItem(LS_KEYS.theme);
   emitChange();
 }
