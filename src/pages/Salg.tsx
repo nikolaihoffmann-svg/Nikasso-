@@ -2,9 +2,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   addSale,
-  addSalePayment,
-  removeSalePayment,
-  setSalePaid,
   clearSaleDraftCustomer,
   fmtKr,
   getItems,
@@ -45,7 +42,7 @@ function Modal(props: { open: boolean; title: string; children: React.ReactNode;
 export function Salg() {
   const { items } = useItems();
   const { customers } = useCustomers();
-  const { sales } = useSales();
+  const { sales, addPayment } = useSales();
 
   const [itemId, setItemId] = useState<string>("");
   const [qty, setQty] = useState<string>("1");
@@ -63,7 +60,6 @@ export function Salg() {
   const selectedItem = useMemo(() => items.find((i) => i.id === itemId) ?? null, [items, itemId]);
   const selectedCustomer = useMemo(() => customers.find((c) => c.id === customerId) ?? null, [customers, customerId]);
 
-  // ✅ forhåndsvalg kunde fra Kunder-siden
   useEffect(() => {
     const draft = getSaleDraftCustomer();
     if (draft) {
@@ -72,7 +68,6 @@ export function Salg() {
     }
   }, []);
 
-  // autopopulate pris ved valg av vare (kun hvis feltet er tomt)
   useEffect(() => {
     if (!selectedItem) return;
     if (unitPrice.trim() === "") setUnitPrice(String(selectedItem.price ?? 0));
@@ -91,10 +86,8 @@ export function Salg() {
 
   function doSale() {
     if (!selectedItem) return alert("Velg en vare først.");
-
     const q = Math.trunc(toNum(qty));
     if (q <= 0) return alert("Antall må være minst 1.");
-
     const p = toNum(unitPrice || String(selectedItem.price ?? 0));
 
     const itemsNow = getItems();
@@ -105,18 +98,15 @@ export function Salg() {
     itemsNow[idx] = { ...itemsNow[idx], stock: newStock, updatedAt: new Date().toISOString() };
     setItems(itemsNow);
 
-    // ✅ viktig for korrekt profitt-historikk:
-    const unitCostAtSale = Number(selectedItem.cost ?? 0);
-
     addSale({
       itemId: selectedItem.id,
       itemName: selectedItem.name,
       qty: q,
       unitPrice: round2(p),
-      unitCostAtSale, // ✅
       customerId: selectedCustomer?.id,
       customerName: selectedCustomer?.name,
-      payments: [], // ✅ delbetalinger starter tomt
+      payments: [],
+      // NB: unitCostAtSale settes best i addSale-kallet hvis du vil ha 100% historikk – vi kan legge det inn når du vil.
     });
 
     const min = itemsNow[idx].minStock ?? 0;
@@ -125,7 +115,6 @@ export function Salg() {
     setQty("1");
     setUnitPrice("");
     setItemId("");
-    // kundevalg lar vi stå
   }
 
   function openPayment(s: Sale) {
@@ -142,9 +131,8 @@ export function Salg() {
 
     const iso = payDate ? new Date(`${payDate}T12:00:00`).toISOString() : undefined;
 
-    // ✅ riktig rekkefølge: (saleId, amount, dateIso?, note?)
-    addSalePayment(paySale.id, a, iso, payNote.trim() || undefined);
-
+    // ✅ riktig rekkefølge: (saleId, amount, dateIso, note)
+    addPayment(paySale.id, a, iso, payNote.trim() || undefined);
     setPaySale(null);
   }
 
@@ -221,17 +209,11 @@ export function Salg() {
           {sales.slice(0, 25).map((s) => {
             const paid = salePaidSum(s);
             const rem = Math.max(0, saleRemaining(s));
-
-            const payments = Array.isArray(s.payments)
-              ? s.payments.slice().sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""))
-              : [];
-
             return (
               <div key={s.id} className={rem > 0 ? "item low" : "item"}>
                 <div className="itemTop">
                   <div>
                     <p className="itemTitle">{s.itemName}</p>
-
                     <div className="itemMeta">
                       Antall: <b>{s.qty}</b> • Pris: <b>{fmtKr(s.unitPrice)}</b> • Sum: <b>{fmtKr(s.total)}</b>
                       {s.customerName ? (
@@ -241,27 +223,20 @@ export function Salg() {
                         </>
                       ) : null}
                     </div>
-
                     <div className="itemMeta" style={{ marginTop: 6 }}>
-                      Innbetalt: <b>{fmtKr(paid)}</b> • Utestående: <b>{fmtKr(rem)}</b> •{" "}
-                      {new Date(s.createdAt).toLocaleString("nb-NO")}
+                      Innbetalt: <b>{fmtKr(paid)}</b> • Utestående: <b>{fmtKr(rem)}</b> • {new Date(s.createdAt).toLocaleString("nb-NO")}
                     </div>
 
-                    {payments.length > 0 ? (
-                      <div className="itemMeta" style={{ marginTop: 10 }}>
+                    {Array.isArray(s.payments) && s.payments.length > 0 ? (
+                      <div className="itemMeta" style={{ marginTop: 8 }}>
                         <b>Innbetalinger:</b>
-                        {payments.slice(0, 6).map((p) => (
-                          <div key={p.id} style={{ marginTop: 6, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                            <span>
-                              • {new Date(p.createdAt).toLocaleDateString("nb-NO")} – <b>{fmtKr(p.amount)}</b>
-                              {p.note ? <> ({p.note})</> : null}
-                            </span>
-                            <button className="btn btnGhost" type="button" onClick={() => removeSalePayment(s.id, p.id)}>
-                              Slett innbetaling
-                            </button>
+                        {s.payments.slice(0, 4).map((p) => (
+                          <div key={p.id} style={{ marginTop: 4 }}>
+                            • {new Date(p.createdAt).toLocaleDateString("nb-NO")} – <b>{fmtKr(p.amount)}</b>
+                            {p.note ? <> ({p.note})</> : null}
                           </div>
                         ))}
-                        {payments.length > 6 ? <div style={{ marginTop: 6, opacity: 0.9 }}>… +{payments.length - 6} til</div> : null}
+                        {s.payments.length > 4 ? <div style={{ marginTop: 4, opacity: 0.9 }}>… +{s.payments.length - 4} til</div> : null}
                       </div>
                     ) : null}
                   </div>
@@ -269,17 +244,12 @@ export function Salg() {
 
                 <div className="itemActions">
                   {rem > 0 ? (
-                    <>
-                      <button className="btn btnPrimary" type="button" onClick={() => openPayment(s)}>
-                        Registrer innbetaling
-                      </button>
-                      <button className="btn" type="button" onClick={() => setSalePaid(s.id, true)}>
-                        Sett ferdig betalt
-                      </button>
-                    </>
+                    <button className="btn btnPrimary" type="button" onClick={() => openPayment(s)}>
+                      Registrer innbetaling
+                    </button>
                   ) : (
-                    <button className="btn" type="button" onClick={() => setSalePaid(s.id, false)}>
-                      Gjør ubetalt
+                    <button className="btn" type="button" disabled>
+                      Betalt
                     </button>
                   )}
                 </div>
