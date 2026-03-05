@@ -1,6 +1,6 @@
 // src/pages/Gjeld.tsx
 import React, { useMemo, useState } from "react";
-import { fmtKr, uid, useReceivables, Receivable } from "../app/storage";
+import { fmtKr, uid, useReceivables, receivablePaidSum, receivableRemaining, Receivable } from "../app/storage";
 
 function toNum(v: string) {
   const n = Number(String(v).replace(",", "."));
@@ -14,15 +14,37 @@ function isOverdue(dueDate?: string) {
   return d.getTime() < Date.now();
 }
 
+function Modal(props: { open: boolean; title: string; children: React.ReactNode; onClose: () => void }) {
+  if (!props.open) return null;
+  return (
+    <div className="modalBackdrop" role="dialog" aria-modal="true" onClick={props.onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modalHeader">
+          <p className="modalTitle">{props.title}</p>
+          <button className="iconBtn" type="button" onClick={props.onClose} aria-label="Lukk">
+            ✕
+          </button>
+        </div>
+        <div className="modalBody">{props.children}</div>
+      </div>
+    </div>
+  );
+}
+
 export function Gjeld() {
-  const { receivables, upsert, remove, setPaid } = useReceivables();
+  const { receivables, upsert, remove, addPayment } = useReceivables();
 
   const [debtorName, setDebtorName] = useState("");
   const [amount, setAmount] = useState("0");
-  const [dueDate, setDueDate] = useState(""); // yyyy-mm-dd
+  const [dueDate, setDueDate] = useState("");
   const [note, setNote] = useState("");
 
   const [q, setQ] = useState("");
+
+  const [payFor, setPayFor] = useState<Receivable | null>(null);
+  const [payAmount, setPayAmount] = useState("0");
+  const [payDate, setPayDate] = useState<string>(new Date().toISOString().slice(0, 10)); // yyyy-mm-dd
+  const [payNote, setPayNote] = useState("");
 
   const filtered = useMemo(() => {
     const qq = q.trim().toLowerCase();
@@ -34,20 +56,21 @@ export function Gjeld() {
   }, [receivables, q]);
 
   const stats = useMemo(() => {
-    const unpaid = receivables.filter((r) => !r.paid);
-    const paid = receivables.filter((r) => r.paid);
+    const totalOriginal = receivables.reduce((a, r) => a + (Number(r.amount) || 0), 0);
+    const totalPaid = receivables.reduce((a, r) => a + receivablePaidSum(r), 0);
+    const totalRemaining = receivables.reduce((a, r) => a + Math.max(0, receivableRemaining(r)), 0);
 
-    const unpaidTotal = unpaid.reduce((a, r) => a + (Number(r.amount) || 0), 0);
-    const paidTotal = paid.reduce((a, r) => a + (Number(r.amount) || 0), 0);
-    const overdueTotal = unpaid.reduce((a, r) => a + (isOverdue(r.dueDate) ? (Number(r.amount) || 0) : 0), 0);
+    const overdueRemaining = receivables.reduce((a, r) => {
+      const rem = Math.max(0, receivableRemaining(r));
+      if (rem > 0 && isOverdue(r.dueDate)) return a + rem;
+      return a;
+    }, 0);
 
     return {
-      count: receivables.length,
-      unpaidCount: unpaid.length,
-      paidCount: paid.length,
-      unpaidTotal,
-      paidTotal,
-      overdueTotal,
+      totalOriginal,
+      totalPaid,
+      totalRemaining,
+      overdueRemaining,
     };
   }, [receivables]);
 
@@ -63,7 +86,7 @@ export function Gjeld() {
       amount: a,
       dueDate: dueDate.trim() ? dueDate.trim() : undefined,
       note: note.trim() ? note.trim() : undefined,
-      paid: false,
+      payments: [],
     });
 
     setDebtorName("");
@@ -72,12 +95,31 @@ export function Gjeld() {
     setNote("");
   }
 
+  function openPayment(r: Receivable) {
+    setPayFor(r);
+    setPayAmount(String(Math.max(0, receivableRemaining(r)) || 0));
+    setPayNote("");
+    setPayDate(new Date().toISOString().slice(0, 10));
+  }
+
+  function savePayment() {
+    if (!payFor) return;
+    const a = toNum(payAmount);
+    if (a <= 0) return alert("Innbetaling må være over 0.");
+
+    // lag ISO ved midnatt lokal, så det blir pent i UI
+    const iso = payDate ? new Date(`${payDate}T12:00:00`).toISOString() : undefined;
+
+    addPayment(payFor.id, a, payNote.trim() || undefined, iso);
+    setPayFor(null);
+  }
+
   return (
     <div className="card">
       <div className="cardTitle">Gjeld til meg</div>
       <div className="cardSub">
-        Totalt utestående: <b>{fmtKr(stats.unpaidTotal)}</b> • Forfalt (utestående): <b>{fmtKr(stats.overdueTotal)}</b> • Betalt historikk:{" "}
-        <b>{fmtKr(stats.paidTotal)}</b>
+        Utestående: <b>{fmtKr(stats.totalRemaining)}</b> • Forfalt (utestående): <b>{fmtKr(stats.overdueRemaining)}</b> • Innbetalt:{" "}
+        <b>{fmtKr(stats.totalPaid)}</b> • Totalt opprettet: <b>{fmtKr(stats.totalOriginal)}</b>
       </div>
 
       <div className="card" style={{ marginTop: 0 }}>
@@ -119,28 +161,53 @@ export function Gjeld() {
 
       <div className="list">
         {filtered.map((r) => {
-          const overdue = !r.paid && isOverdue(r.dueDate);
+          const paid = receivablePaidSum(r);
+          const rem = Math.max(0, receivableRemaining(r));
+          const overdue = rem > 0 && isOverdue(r.dueDate);
+
           return (
             <div key={r.id} className={overdue ? "item low" : "item"}>
               <div className="itemTop">
                 <div>
                   <p className="itemTitle">{r.debtorName}</p>
+
                   <div className="itemMeta">
-                    Beløp: <b>{fmtKr(r.amount)}</b> • Status: <b>{r.paid ? "Betalt" : overdue ? "Forfalt" : "Utestående"}</b>
+                    Opprinnelig: <b>{fmtKr(r.amount)}</b> • Innbetalt: <b>{fmtKr(paid)}</b> • Gjenstår: <b>{fmtKr(rem)}</b>
                     {r.dueDate ? (
                       <>
                         {" "}
                         • Forfall: <b>{r.dueDate}</b>
                       </>
                     ) : null}
+                    {" "}
+                    • Status: <b>{rem <= 0 ? "Betalt" : overdue ? "Forfalt" : "Utestående"}</b>
                   </div>
+
                   {r.note ? <div className="itemMeta">Notat: <b>{r.note}</b></div> : null}
+
+                  {Array.isArray(r.payments) && r.payments.length > 0 ? (
+                    <div className="itemMeta" style={{ marginTop: 8 }}>
+                      <b>Innbetalinger:</b>
+                      {r.payments.slice(0, 6).map((p) => (
+                        <div key={p.id} style={{ marginTop: 4 }}>
+                          • {new Date(p.createdAt).toLocaleDateString("nb-NO")} – <b>{fmtKr(p.amount)}</b>
+                          {p.note ? (
+                            <>
+                              {" "}
+                              ({p.note})
+                            </>
+                          ) : null}
+                        </div>
+                      ))}
+                      {r.payments.length > 6 ? <div style={{ marginTop: 4, opacity: 0.9 }}>… +{r.payments.length - 6} til</div> : null}
+                    </div>
+                  ) : null}
                 </div>
               </div>
 
               <div className="itemActions">
-                <button className="btn btnPrimary" type="button" onClick={() => setPaid(r.id, !r.paid)}>
-                  Sett {r.paid ? "utestående" : "betalt"}
+                <button className="btn btnPrimary" type="button" onClick={() => openPayment(r)}>
+                  Registrer innbetaling
                 </button>
                 <button
                   className="btn btnDanger"
@@ -158,6 +225,40 @@ export function Gjeld() {
 
         {filtered.length === 0 ? <div className="item">Ingen treff.</div> : null}
       </div>
+
+      <Modal open={!!payFor} title="Registrer innbetaling" onClose={() => setPayFor(null)}>
+        {payFor ? (
+          <div className="fieldGrid" style={{ marginTop: 0 }}>
+            <div className="itemMeta" style={{ marginTop: 0 }}>
+              <b>{payFor.debtorName}</b> • Gjenstår nå: <b>{fmtKr(Math.max(0, receivableRemaining(payFor)))}</b>
+            </div>
+
+            <div className="row3">
+              <div>
+                <label className="label">Dato</label>
+                <input className="input" type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} />
+              </div>
+              <div>
+                <label className="label">Beløp (kr)</label>
+                <input className="input" inputMode="decimal" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} />
+              </div>
+              <div>
+                <label className="label">Notat</label>
+                <input className="input" value={payNote} onChange={(e) => setPayNote(e.target.value)} placeholder="Valgfritt" />
+              </div>
+            </div>
+
+            <div className="btnRow">
+              <button className="btn btnPrimary" type="button" onClick={savePayment}>
+                Lagre innbetaling
+              </button>
+              <button className="btn" type="button" onClick={() => setPayFor(null)}>
+                Avbryt
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
     </div>
   );
 }
