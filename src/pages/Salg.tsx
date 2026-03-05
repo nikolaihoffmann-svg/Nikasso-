@@ -1,6 +1,6 @@
 // src/pages/Salg.tsx
 import React, { useMemo, useState } from "react";
-import { addSale, fmtKr, getItems, round2, setItems, useItems, useSales, Vare } from "../app/storage";
+import { fmtKr, round2, sellItem, useItems, useSales, Vare } from "../app/storage";
 
 function toNum(v: string) {
   const n = Number(String(v).replace(",", "."));
@@ -33,7 +33,7 @@ export function Salg() {
   const [customer, setCustomer] = useState<string>("");
   const [unitPrice, setUnitPrice] = useState<string>("");
 
-  const [lowPopup, setLowPopup] = useState<{ item: Vare; newStock: number } | null>(null);
+  const [lowPopup, setLowPopup] = useState<{ item: Vare; newStock: number; min: number } | null>(null);
 
   const selected = useMemo(() => items.find((i) => i.id === itemId) ?? null, [items, itemId]);
 
@@ -43,7 +43,8 @@ export function Salg() {
     if (unitPrice.trim() === "") {
       setUnitPrice(String(selected.price ?? 0));
     }
-  }, [selected]); // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected]);
 
   const total = useMemo(() => {
     const q = Math.trunc(toNum(qty));
@@ -64,29 +65,26 @@ export function Salg() {
     }
 
     const p = toNum(unitPrice || String(selected.price ?? 0));
-    const itemsNow = getItems();
-    const idx = itemsNow.findIndex((x) => x.id === selected.id);
-    if (idx < 0) {
-      alert("Fant ikke varen i lageret.");
-      return;
-    }
 
-    const newStock = (itemsNow[idx].stock ?? 0) - q;
-    itemsNow[idx] = { ...itemsNow[idx], stock: newStock, updatedAt: new Date().toISOString() };
-    setItems(itemsNow);
-
-    addSale({
+    const res = sellItem({
       itemId: selected.id,
-      itemName: selected.name,
       qty: q,
-      unitPrice: round2(p),
+      unitPrice: p,
       customer: customer.trim() ? customer.trim() : undefined,
     });
 
-    // popup if hits or goes below min
-    const min = itemsNow[idx].minStock ?? 0;
-    if (min > 0 && newStock <= min) {
-      setLowPopup({ item: itemsNow[idx], newStock });
+    if (!res.ok) {
+      alert(res.error);
+      return;
+    }
+
+    // popup når lager HAVNER på/under minimum (krysser terskelen)
+    if (res.lowStock) {
+      setLowPopup({
+        item: res.lowStock.item,
+        newStock: res.lowStock.newStock,
+        min: res.lowStock.minStock,
+      });
     }
 
     setQty("1");
@@ -98,7 +96,7 @@ export function Salg() {
   return (
     <div className="card">
       <div className="cardTitle">Salg</div>
-      <div className="cardSub">Registrer salg. Lager trekkes automatisk, og du får varsel når lager når minimum.</div>
+      <div className="cardSub">Registrer salg. Lager trekkes automatisk, og du får varsel når lager når minimum (per vare).</div>
 
       <div className="fieldGrid">
         <div>
@@ -120,7 +118,13 @@ export function Salg() {
           </div>
           <div>
             <label className="label">Pris pr stk (kr)</label>
-            <input className="input" inputMode="decimal" value={unitPrice} onChange={(e) => setUnitPrice(e.target.value)} placeholder={selected ? String(selected.price ?? 0) : "0"} />
+            <input
+              className="input"
+              inputMode="decimal"
+              value={unitPrice}
+              onChange={(e) => setUnitPrice(e.target.value)}
+              placeholder={selected ? String(selected.price ?? 0) : "0"}
+            />
           </div>
           <div>
             <label className="label">Sum</label>
@@ -177,7 +181,7 @@ export function Salg() {
               <b>{lowPopup.item.name}</b>
             </div>
             <div>
-              Ny beholdning: <b>{lowPopup.newStock}</b> • Minimum: <b>{lowPopup.item.minStock}</b>
+              Ny beholdning: <b>{lowPopup.newStock}</b> • Minimum: <b>{lowPopup.min}</b>
             </div>
             <div style={{ marginTop: 10, opacity: 0.9 }}>
               Tips: Gå til <b>Varer</b> og øk lager, eller juster minimum per vare.
