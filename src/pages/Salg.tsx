@@ -43,7 +43,7 @@ export function Salg() {
 
   const [itemId, setItemId] = useState<string>("");
   const [qty, setQty] = useState<string>("1");
-  const [customerId, setCustomerId] = useState<string>(""); // ✅ dropdown (valgfri)
+  const [customerId, setCustomerId] = useState<string>(""); // dropdown (valgfri)
   const [unitPrice, setUnitPrice] = useState<string>("");
 
   const [lowPopup, setLowPopup] = useState<{ item: Vare; newStock: number } | null>(null);
@@ -51,11 +51,11 @@ export function Salg() {
   const selectedItem = useMemo(() => items.find((i) => i.id === itemId) ?? null, [items, itemId]);
   const selectedCustomer = useMemo(() => customers.find((c) => c.id === customerId) ?? null, [customers, customerId]);
 
-  // Hvis vi kom fra "Kunder → nytt salg"
+  // ✅ Hvis vi kom fra "Kunder → nytt salg": draft = string customerId
   useEffect(() => {
-    const draft = getSaleDraftCustomer();
-    if (draft?.customerId) {
-      setCustomerId(draft.customerId);
+    const draftCustomerId = getSaleDraftCustomer(); // string | null
+    if (draftCustomerId) {
+      setCustomerId(draftCustomerId);
       clearSaleDraftCustomer();
     }
   }, []);
@@ -81,6 +81,7 @@ export function Salg() {
 
     const p = toNum(unitPrice || String(selectedItem.price ?? 0));
 
+    // oppdater lager
     const itemsNow = getItems();
     const idx = itemsNow.findIndex((x) => x.id === selectedItem.id);
     if (idx < 0) return alert("Fant ikke varen i lageret.");
@@ -89,6 +90,7 @@ export function Salg() {
     itemsNow[idx] = { ...itemsNow[idx], stock: newStock, updatedAt: new Date().toISOString() };
     setItems(itemsNow);
 
+    // lagre salg
     addSale({
       itemId: selectedItem.id,
       itemName: selectedItem.name,
@@ -98,13 +100,14 @@ export function Salg() {
       customerName: selectedCustomer?.name,
     });
 
+    // varsel lav beholdning
     const min = itemsNow[idx].minStock ?? 0;
     if (min > 0 && newStock <= min) setLowPopup({ item: itemsNow[idx], newStock });
 
     setQty("1");
     setUnitPrice("");
     setItemId("");
-    // kundevalg lar vi stå (ofte samme kunde flere salg)
+    // ✅ kundevalg lar vi stå (ofte samme kunde flere salg)
   }
 
   return (
