@@ -31,17 +31,23 @@ export type Customer = {
 export type Sale = {
   id: string;
   createdAt: string;
+
   itemId: string;
   itemName: string;
   qty: number;
   unitPrice: number;
   total: number;
 
-  // valgfritt kunde-link
+  // Kunde er valgfritt
   customerId?: string;
   customerName?: string;
 
   note?: string;
+};
+
+/** Når man trykker "Nytt salg" på en kunde, forhåndsvelger vi den kunden i Salg-siden */
+export type SaleDraftCustomer = {
+  customerId: string;
 };
 
 /* =========================
@@ -52,15 +58,9 @@ const KEY_ITEMS = "sg_items_v1";
 const KEY_SALES = "sg_sales_v1";
 const KEY_CUSTOMERS = "sg_customers_v1";
 const KEY_THEME = "sg_theme_v1";
-
-// brukes for “Kunder -> Nytt salg” forhåndsvalg
-const KEY_SALE_DRAFT_CUST = "sg_sale_draft_customer_v1";
+const KEY_SALE_DRAFT_CUSTOMER = "sg_sale_draft_customer_v1";
 
 const EVT = "sg_storage_changed";
-
-/* =========================
-   Helpers
-========================= */
 
 function nowIso() {
   return new Date().toISOString();
@@ -102,34 +102,33 @@ export function applyThemeToDom(theme: Theme) {
 }
 
 /* =========================
-   Sale draft customer (forhåndsvalg)
-========================= */
-
-type SaleDraftCustomer = { customerId: string };
-
-export function setSaleDraftCustomer(customerId: string) {
-  const payload: SaleDraftCustomer = { customerId };
-  localStorage.setItem(KEY_SALE_DRAFT_CUST, JSON.stringify(payload));
-  notify();
-}
-
-export function getSaleDraftCustomer(): SaleDraftCustomer | null {
-  const v = safeParse<SaleDraftCustomer | null>(localStorage.getItem(KEY_SALE_DRAFT_CUST), null);
-  if (!v?.customerId) return null;
-  return v;
-}
-
-export function clearSaleDraftCustomer() {
-  localStorage.removeItem(KEY_SALE_DRAFT_CUST);
-  notify();
-}
-
-/* =========================
    Items
 ========================= */
 
+function normalizeItem(x: any): Vare | null {
+  const name = String(x?.name ?? "").trim();
+  if (!name) return null;
+
+  const ts = nowIso();
+  return {
+    id: String(x?.id ?? uid("item")),
+    name,
+    price: Number(x?.price ?? 0) || 0,
+    cost: Number(x?.cost ?? 0) || 0,
+    stock: Number.isFinite(Number(x?.stock)) ? Number(x.stock) : 0,
+    // default minStock = 10 hvis mangler/ugyldig
+    minStock: Number.isFinite(Number(x?.minStock)) ? Number(x.minStock) : 10,
+    createdAt: String(x?.createdAt ?? ts),
+    updatedAt: String(x?.updatedAt ?? ts),
+  };
+}
+
 export function getItems(): Vare[] {
-  return safeParse<Vare[]>(localStorage.getItem(KEY_ITEMS), []);
+  const raw = safeParse<any[]>(localStorage.getItem(KEY_ITEMS), []);
+  const normalized = raw
+    .map((x) => normalizeItem(x))
+    .filter(Boolean) as Vare[];
+  return normalized;
 }
 
 export function setItems(items: Vare[]) {
@@ -148,19 +147,27 @@ export function upsertItem(
     const updated: Vare = {
       ...items[existingIdx],
       ...partial,
+      // fallbacks
+      name: String(partial.name ?? items[existingIdx].name ?? "").trim(),
+      price: Number(partial.price ?? items[existingIdx].price ?? 0) || 0,
+      cost: Number(partial.cost ?? items[existingIdx].cost ?? 0) || 0,
+      stock: Number.isFinite(Number(partial.stock)) ? Number(partial.stock) : (items[existingIdx].stock ?? 0),
+      minStock: Number.isFinite(Number(partial.minStock))
+        ? Number(partial.minStock)
+        : (items[existingIdx].minStock ?? 10),
       updatedAt: ts,
-    } as Vare;
+    };
     items[existingIdx] = updated;
   } else {
     const created: Vare = {
-      id: partial.id,
-      name: partial.name ?? "",
-      price: partial.price ?? 0,
-      cost: partial.cost ?? 0,
-      stock: partial.stock ?? 0,
-      minStock: partial.minStock ?? 0,
-      createdAt: ts,
-      updatedAt: ts,
+      id: String(partial.id),
+      name: String(partial.name ?? "").trim(),
+      price: Number(partial.price ?? 0) || 0,
+      cost: Number(partial.cost ?? 0) || 0,
+      stock: Number.isFinite(Number(partial.stock)) ? Number(partial.stock) : 0,
+      minStock: Number.isFinite(Number(partial.minStock)) ? Number(partial.minStock) : 10,
+      createdAt: partial.createdAt ?? ts,
+      updatedAt: partial.updatedAt ?? ts,
     };
     items.unshift(created);
   }
@@ -187,8 +194,32 @@ export function adjustStock(id: string, delta: number) {
    Customers
 ========================= */
 
+function normalizeCustomer(x: any): Customer | null {
+  const name = String(x?.name ?? "").trim().replace(/\s+/g, " ");
+  if (!name) return null;
+
+  const ts = nowIso();
+  const phone = x?.phone ? String(x.phone).trim() : undefined;
+  const address = x?.address ? String(x.address).trim() : undefined;
+  const note = x?.note ? String(x.note).trim() : undefined;
+
+  return {
+    id: String(x?.id ?? uid("cust")),
+    name,
+    phone: phone || undefined,
+    address: address || undefined,
+    note: note || undefined,
+    createdAt: String(x?.createdAt ?? ts),
+    updatedAt: String(x?.updatedAt ?? ts),
+  };
+}
+
 export function getCustomers(): Customer[] {
-  return safeParse<Customer[]>(localStorage.getItem(KEY_CUSTOMERS), []);
+  const raw = safeParse<any[]>(localStorage.getItem(KEY_CUSTOMERS), []);
+  const normalized = raw
+    .map((x) => normalizeCustomer(x))
+    .filter(Boolean) as Customer[];
+  return normalized;
 }
 
 export function setCustomers(customers: Customer[]) {
@@ -203,24 +234,28 @@ export function upsertCustomer(
   const existingIdx = customers.findIndex((c) => c.id === partial.id);
   const ts = nowIso();
 
+  const name = String(partial.name ?? "").trim().replace(/\s+/g, " ");
+
   if (existingIdx >= 0) {
-    const updated: Customer = {
+    customers[existingIdx] = {
       ...customers[existingIdx],
       ...partial,
-      updatedAt: ts,
-    } as Customer;
-    customers[existingIdx] = updated;
-  } else {
-    const created: Customer = {
-      id: partial.id,
-      name: partial.name ?? "",
-      phone: partial.phone,
-      address: partial.address,
-      note: partial.note,
-      createdAt: ts,
+      name: name || customers[existingIdx].name,
+      phone: partial.phone ? String(partial.phone).trim() : partial.phone,
+      address: partial.address ? String(partial.address).trim() : partial.address,
+      note: partial.note ? String(partial.note).trim() : partial.note,
       updatedAt: ts,
     };
-    customers.unshift(created);
+  } else {
+    customers.unshift({
+      id: String(partial.id),
+      name,
+      phone: partial.phone ? String(partial.phone).trim() : undefined,
+      address: partial.address ? String(partial.address).trim() : undefined,
+      note: partial.note ? String(partial.note).trim() : undefined,
+      createdAt: partial.createdAt ?? ts,
+      updatedAt: partial.updatedAt ?? ts,
+    });
   }
 
   setCustomers(customers);
@@ -235,8 +270,43 @@ export function deleteCustomer(id: string) {
    Sales
 ========================= */
 
+function normalizeSale(x: any): Sale | null {
+  const itemId = String(x?.itemId ?? "").trim();
+  const itemName = String(x?.itemName ?? "").trim();
+  if (!itemId || !itemName) return null;
+
+  const ts = nowIso();
+
+  // gammel schema-støtte:
+  // - customer: "Per" -> blir customerName
+  const legacyCustomerName = x?.customer ? String(x.customer).trim() : undefined;
+
+  const qty = Number(x?.qty ?? 0);
+  const unitPrice = Number(x?.unitPrice ?? 0);
+  const total = Number.isFinite(Number(x?.total))
+    ? Number(x.total)
+    : round2((Number(unitPrice) || 0) * (Number(qty) || 0));
+
+  return {
+    id: String(x?.id ?? uid("sale")),
+    createdAt: String(x?.createdAt ?? ts),
+    itemId,
+    itemName,
+    qty: Number.isFinite(qty) ? qty : 0,
+    unitPrice: Number.isFinite(unitPrice) ? unitPrice : 0,
+    total: Number.isFinite(total) ? total : 0,
+    customerId: x?.customerId ? String(x.customerId) : undefined,
+    customerName: x?.customerName ? String(x.customerName).trim() : legacyCustomerName,
+    note: x?.note ? String(x.note) : undefined,
+  };
+}
+
 export function getSales(): Sale[] {
-  return safeParse<Sale[]>(localStorage.getItem(KEY_SALES), []);
+  const raw = safeParse<any[]>(localStorage.getItem(KEY_SALES), []);
+  const normalized = raw
+    .map((x) => normalizeSale(x))
+    .filter(Boolean) as Sale[];
+  return normalized;
 }
 
 export function setSales(sales: Sale[]) {
@@ -254,11 +324,35 @@ export function addSale(s: Omit<Sale, "id" | "createdAt" | "total">) {
     createdAt,
     total,
     ...s,
+    // hygiene
+    customerId: s.customerId ? String(s.customerId) : undefined,
+    customerName: s.customerName ? String(s.customerName).trim() : undefined,
   };
 
   sales.unshift(sale);
   setSales(sales);
   return sale;
+}
+
+/* =========================
+   Sale draft (customer preselect)
+========================= */
+
+export function setSaleDraftCustomer(customerId: string) {
+  const payload: SaleDraftCustomer = { customerId };
+  localStorage.setItem(KEY_SALE_DRAFT_CUSTOMER, JSON.stringify(payload));
+  notify();
+}
+
+export function getSaleDraftCustomer(): SaleDraftCustomer | null {
+  const parsed = safeParse<SaleDraftCustomer | null>(localStorage.getItem(KEY_SALE_DRAFT_CUSTOMER), null);
+  if (!parsed?.customerId) return null;
+  return { customerId: String(parsed.customerId) };
+}
+
+export function clearSaleDraftCustomer() {
+  localStorage.removeItem(KEY_SALE_DRAFT_CUSTOMER);
+  notify();
 }
 
 /* =========================
