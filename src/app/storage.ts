@@ -194,7 +194,7 @@ export function setTheme(t: Theme) {
 }
 
 export function applyThemeToDom(theme: Theme) {
-  document.documentElement.dataset.theme = theme; // CSS: :root[data-theme="light"]
+  document.documentElement.dataset.theme = theme;
   document.documentElement.classList.toggle("theme-dark", theme === "dark");
   document.documentElement.classList.toggle("theme-light", theme === "light");
 }
@@ -242,6 +242,15 @@ export function setItems(next: Vare[]) {
   emitChange();
 }
 
+function adjustItemStockCore(id: string, delta: number) {
+  const items = getItems();
+  const i = items.findIndex((x) => x.id === id);
+  if (i < 0) return;
+  const nextStock = (items[i].stock ?? 0) + delta;
+  items[i] = { ...items[i], stock: nextStock, updatedAt: nowIso() };
+  setItems(items);
+}
+
 function upsertItemCore(item: Omit<Vare, "createdAt" | "updatedAt">) {
   const items = getItems();
   const i = items.findIndex((x) => x.id === item.id);
@@ -252,15 +261,6 @@ function upsertItemCore(item: Omit<Vare, "createdAt" | "updatedAt">) {
 
 function removeItemCore(id: string) {
   setItems(getItems().filter((x) => x.id !== id));
-}
-
-function adjustItemStockCore(id: string, delta: number) {
-  const items = getItems();
-  const i = items.findIndex((x) => x.id === id);
-  if (i < 0) return;
-  const nextStock = (items[i].stock ?? 0) + delta;
-  items[i] = { ...items[i], stock: nextStock, updatedAt: nowIso() };
-  setItems(items);
 }
 
 export function useItems() {
@@ -362,7 +362,6 @@ export function getSales(): Sale[] {
     const payments = normalizePayments(x.payments);
     const paidSum = payments.length ? payments.reduce((a, p) => a + num(p.amount, 0), 0) : 0;
 
-    // fallback for eldre data
     const paidLegacy = Boolean(x.paid);
     const paid = payments.length ? round2(paidSum) >= total : paidLegacy;
 
@@ -471,6 +470,44 @@ function removeSalePaymentCore(saleId: string, paymentId: string) {
   setSales(sales);
 }
 
+/** ✅ Slett salg (valgfritt: legg tilbake på lager) */
+function removeSaleCore(saleId: string, restoreStock: boolean) {
+  const sales = getSales();
+  const i = sales.findIndex((x) => x.id === saleId);
+  if (i < 0) return;
+
+  const s = sales[i];
+
+  // Legg tilbake varer hvis ønsket
+  if (restoreStock) {
+    const q = Math.trunc(num(s.qty, 0));
+    if (q !== 0 && s.itemId) {
+      adjustItemStockCore(s.itemId, q);
+    }
+  }
+
+  const nextSales = sales.filter((x) => x.id !== saleId);
+  setSales(nextSales);
+}
+
+/* ✅ Eksporter “flate” funksjoner (så imports i pages funker) */
+export function setSalePaid(saleId: string, paid: boolean) {
+  setSalePaidCore(saleId, paid);
+}
+
+/** Signatur som matcher din bruk i Salg.tsx: (saleId, amount, note?, dateIso?) */
+export function addSalePayment(saleId: string, amount: number, note?: string, dateIso?: string) {
+  addSalePaymentCore(saleId, amount, dateIso, note);
+}
+
+export function removeSalePayment(saleId: string, paymentId: string) {
+  removeSalePaymentCore(saleId, paymentId);
+}
+
+export function removeSale(saleId: string, restoreStock: boolean = true) {
+  removeSaleCore(saleId, restoreStock);
+}
+
 export function useSales() {
   const [sales, setState] = useState<Sale[]>(() => getSales());
 
@@ -488,8 +525,9 @@ export function useSales() {
     () => ({
       sales,
       setPaid: (saleId: string, paid: boolean) => setSalePaidCore(saleId, paid),
-      addPayment: (saleId: string, amount: number, dateIso?: string, note?: string) => addSalePaymentCore(saleId, amount, dateIso, note),
+      addPayment: (saleId: string, amount: number, note?: string, dateIso?: string) => addSalePaymentCore(saleId, amount, dateIso, note),
       removePayment: (saleId: string, paymentId: string) => removeSalePaymentCore(saleId, paymentId),
+      removeSale: (saleId: string, restoreStock: boolean = true) => removeSaleCore(saleId, restoreStock),
       setAll: (all: Sale[]) => setSales(all),
     }),
     [sales]
@@ -699,7 +737,7 @@ export function downloadExportAll(filename?: string) {
   URL.revokeObjectURL(url);
 }
 
-// Alias(er) for eldre imports
+/** Alias pga eldre imports */
 export const downloadAllDataJson = downloadExportAll;
 
 export async function importAllFromFile(file: File, mode: "replace" | "merge" = "replace") {
@@ -819,20 +857,13 @@ export function clearAllData() {
   localStorage.removeItem(LS_KEYS.sales);
   localStorage.removeItem(LS_KEYS.receivables);
   localStorage.removeItem(LS_KEYS.saleDraftCustomer);
-  // theme lar vi stå (kan fjernes om du vil)
   emitChange();
 }
 
 /* =========================
    File picker helpers (for buttons)
-   - Dette fikser feilen din:
-     "has no exported member 'pickImportAllFile'"
 ========================= */
 
-/**
- * Åpner filvelger og importerer backup (replace).
- * Kan brukes direkte som onClick-handler.
- */
 export function pickImportAllFile(_e?: any) {
   const input = document.createElement("input");
   input.type = "file";
@@ -845,7 +876,6 @@ export function pickImportAllFile(_e?: any) {
   input.click();
 }
 
-/** Valgfri: merge-variant */
 export function pickImportAllFileMerge(_e?: any) {
   const input = document.createElement("input");
   input.type = "file";
