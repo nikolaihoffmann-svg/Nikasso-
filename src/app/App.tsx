@@ -1,6 +1,14 @@
 // src/app/App.tsx
-import React, { useEffect, useMemo, useState } from "react";
-import { applyThemeToDom, getTheme, setTheme, Theme } from "./storage";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import {
+  applyThemeToDom,
+  getTheme,
+  setTheme,
+  Theme,
+  downloadExportAll,
+  importAllFromFile,
+  clearAllData,
+} from "./storage";
 
 import { Oversikt } from "../pages/Oversikt";
 import { Varer } from "../pages/Varer";
@@ -11,9 +19,35 @@ import { Backup } from "../pages/Backup";
 
 type TabKey = "oversikt" | "varer" | "salg" | "kunder" | "gjeld" | "backup";
 
+function Modal(props: {
+  open: boolean;
+  title: string;
+  children: React.ReactNode;
+  onClose: () => void;
+}) {
+  if (!props.open) return null;
+  return (
+    <div className="modalBackdrop" role="dialog" aria-modal="true" onClick={props.onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modalHeader">
+          <p className="modalTitle">{props.title}</p>
+          <button className="iconBtn" type="button" onClick={props.onClose} aria-label="Lukk">
+            ✕
+          </button>
+        </div>
+        <div className="modalBody">{props.children}</div>
+      </div>
+    </div>
+  );
+}
+
 export function App() {
   const [theme, setThemeState] = useState<Theme>(() => getTheme());
   const [tab, setTab] = useState<TabKey>("oversikt");
+
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     applyThemeToDom(theme);
@@ -42,7 +76,13 @@ export function App() {
           </div>
 
           <div className="btnRow" style={{ marginTop: 0, justifyContent: "flex-end" }}>
-            <button className="iconBtn" type="button" onClick={toggleTheme} title="Bytt tema" aria-label="Bytt tema">
+            {/* Meny-knapp */}
+            <button className="btn" type="button" onClick={() => setMenuOpen(true)} title="Meny">
+              ☰
+            </button>
+
+            {/* Tema som ikon */}
+            <button className="themeBtn" type="button" onClick={toggleTheme} title="Bytt tema">
               {theme === "dark" ? "🌙" : "☀️"}
             </button>
           </div>
@@ -64,13 +104,75 @@ export function App() {
           <button className={`tab ${tab === "gjeld" ? "active" : ""}`} onClick={() => setTab("gjeld")} type="button">
             Gjeld
           </button>
-          <button className={`tab ${tab === "backup" ? "active" : ""}`} onClick={() => setTab("backup")} type="button">
-            Backup
-          </button>
         </nav>
       </header>
 
       {content}
+
+      {/* Skjult fil-input for Import */}
+      <input
+        ref={importInputRef}
+        type="file"
+        accept="application/json"
+        style={{ display: "none" }}
+        onChange={async (e) => {
+          const f = e.target.files?.[0];
+          if (!f) return;
+          await importAllFromFile(f, "replace");
+          e.target.value = "";
+          setMenuOpen(false);
+        }}
+      />
+
+      {/* Meny-modal */}
+      <Modal open={menuOpen} title="Meny" onClose={() => setMenuOpen(false)}>
+        <div className="btnRow" style={{ justifyContent: "flex-start", flexWrap: "wrap" }}>
+          <button
+            className="btn btnPrimary"
+            type="button"
+            onClick={() => {
+              downloadExportAll();
+              setMenuOpen(false);
+            }}
+          >
+            Eksporter ALT
+          </button>
+
+          <button
+            className="btn"
+            type="button"
+            onClick={() => {
+              importInputRef.current?.click();
+            }}
+          >
+            Importer ALT
+          </button>
+
+          <button
+            className="btn"
+            type="button"
+            onClick={() => {
+              setTab("backup");
+              setMenuOpen(false);
+            }}
+          >
+            Backup
+          </button>
+
+          <button
+            className="btn btnDanger"
+            type="button"
+            onClick={() => {
+              if (confirm("Slette ALL data i nettleseren? (Varer, kunder, salg, gjeld)")) {
+                clearAllData();
+                setMenuOpen(false);
+              }
+            }}
+          >
+            Nullstill
+          </button>
+        </div>
+      </Modal>
     </div>
   );
 }
