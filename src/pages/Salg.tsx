@@ -2,6 +2,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   addSale,
+  addSalePayment,
   clearSaleDraftCustomer,
   fmtKr,
   getItems,
@@ -42,7 +43,7 @@ function Modal(props: { open: boolean; title: string; children: React.ReactNode;
 export function Salg() {
   const { items } = useItems();
   const { customers } = useCustomers();
-  const { sales, addPayment } = useSales();
+  const { sales, removeSale } = useSales();
 
   const [itemId, setItemId] = useState<string>("");
   const [qty, setQty] = useState<string>("1");
@@ -60,6 +61,7 @@ export function Salg() {
   const selectedItem = useMemo(() => items.find((i) => i.id === itemId) ?? null, [items, itemId]);
   const selectedCustomer = useMemo(() => customers.find((c) => c.id === customerId) ?? null, [customers, customerId]);
 
+  // forhåndsvalg kunde fra Kunder-siden
   useEffect(() => {
     const draft = getSaleDraftCustomer();
     if (draft) {
@@ -68,6 +70,7 @@ export function Salg() {
     }
   }, []);
 
+  // autopopulate pris ved valg av vare (kun hvis feltet er tomt)
   useEffect(() => {
     if (!selectedItem) return;
     if (unitPrice.trim() === "") setUnitPrice(String(selectedItem.price ?? 0));
@@ -86,8 +89,10 @@ export function Salg() {
 
   function doSale() {
     if (!selectedItem) return alert("Velg en vare først.");
+
     const q = Math.trunc(toNum(qty));
     if (q <= 0) return alert("Antall må være minst 1.");
+
     const p = toNum(unitPrice || String(selectedItem.price ?? 0));
 
     const itemsNow = getItems();
@@ -106,7 +111,6 @@ export function Salg() {
       customerId: selectedCustomer?.id,
       customerName: selectedCustomer?.name,
       payments: [],
-      // NB: unitCostAtSale settes best i addSale-kallet hvis du vil ha 100% historikk – vi kan legge det inn når du vil.
     });
 
     const min = itemsNow[idx].minStock ?? 0;
@@ -115,6 +119,7 @@ export function Salg() {
     setQty("1");
     setUnitPrice("");
     setItemId("");
+    // kundevalg lar vi stå
   }
 
   function openPayment(s: Sale) {
@@ -130,10 +135,16 @@ export function Salg() {
     if (a <= 0) return alert("Innbetaling må være over 0.");
 
     const iso = payDate ? new Date(`${payDate}T12:00:00`).toISOString() : undefined;
-
-    // ✅ riktig rekkefølge: (saleId, amount, dateIso, note)
-    addPayment(paySale.id, a, iso, payNote.trim() || undefined);
+    addSalePayment(paySale.id, a, payNote.trim() || undefined, iso);
     setPaySale(null);
+  }
+
+  function delSale(s: Sale) {
+    const ok = confirm(
+      `Slette dette salget?\n\nVare: ${s.itemName}\nAntall: ${s.qty}\nSum: ${fmtKr(s.total)}\n\nVarene legges tilbake på lager.`
+    );
+    if (!ok) return;
+    removeSale(s.id, true);
   }
 
   return (
@@ -203,12 +214,13 @@ export function Salg() {
 
       <div className="card" style={{ marginTop: 0 }}>
         <div className="cardTitle">Siste salg</div>
-        <div className="cardSub">Viser siste 25 • med delbetaling/utestående</div>
+        <div className="cardSub">Viser siste 25 • med delbetaling/utestående • du kan også slette</div>
 
         <div className="list">
           {sales.slice(0, 25).map((s) => {
             const paid = salePaidSum(s);
             const rem = Math.max(0, saleRemaining(s));
+
             return (
               <div key={s.id} className={rem > 0 ? "item low" : "item"}>
                 <div className="itemTop">
@@ -252,6 +264,10 @@ export function Salg() {
                       Betalt
                     </button>
                   )}
+
+                  <button className="btn btnDanger" type="button" onClick={() => delSale(s)}>
+                    Slett
+                  </button>
                 </div>
               </div>
             );
@@ -292,7 +308,8 @@ export function Salg() {
                   {" "}
                   • Kunde: <b>{paySale.customerName}</b>
                 </>
-              ) : null}{" "}
+              ) : null}
+              {" "}
               • Utestående: <b>{fmtKr(Math.max(0, saleRemaining(paySale)))}</b>
             </div>
 
