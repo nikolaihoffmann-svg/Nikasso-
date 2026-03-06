@@ -40,6 +40,59 @@ function Modal(props: { open: boolean; title: string; children: React.ReactNode;
   );
 }
 
+function ChoiceModal(props: {
+  open: boolean;
+  title: string;
+  children: React.ReactNode;
+  onClose: () => void;
+
+  // Primary = "Slett + legg tilbake"
+  primaryText: string;
+  onPrimary: () => void;
+
+  // Secondary = "Slett (ikke tilbake)"
+  secondaryText: string;
+  onSecondary: () => void;
+
+  // Cancel
+  cancelText: string;
+  onCancel: () => void;
+}) {
+  if (!props.open) return null;
+  return (
+    <div className="modalBackdrop" role="dialog" aria-modal="true" onClick={props.onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modalHeader">
+          <p className="modalTitle">{props.title}</p>
+          <button className="iconBtn" type="button" onClick={props.onClose} aria-label="Lukk">
+            ✕
+          </button>
+        </div>
+
+        <div className="modalBody">
+          {props.children}
+
+          <div className="btnRow" style={{ marginTop: 14, justifyContent: "flex-end" }}>
+            <button className="btn" type="button" onClick={props.onCancel}>
+              {props.cancelText}
+            </button>
+
+            {/* 🔴 "Ikke tilbake" = farligere = rød */}
+            <button className="btn btnDanger" type="button" onClick={props.onSecondary}>
+              {props.secondaryText}
+            </button>
+
+            {/* ✅ "Tilbake på lager" = normal/primary */}
+            <button className="btn btnPrimary" type="button" onClick={props.onPrimary}>
+              {props.primaryText}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function Salg() {
   const { items } = useItems();
   const { customers } = useCustomers();
@@ -57,6 +110,9 @@ export function Salg() {
   const [payAmount, setPayAmount] = useState("0");
   const [payDate, setPayDate] = useState<string>(new Date().toISOString().slice(0, 10)); // yyyy-mm-dd
   const [payNote, setPayNote] = useState("");
+
+  // slett modal med 2 valg
+  const [delSale, setDelSale] = useState<Sale | null>(null);
 
   const selectedItem = useMemo(() => items.find((i) => i.id === itemId) ?? null, [items, itemId]);
   const selectedCustomer = useMemo(() => customers.find((c) => c.id === customerId) ?? null, [customers, customerId]);
@@ -119,7 +175,6 @@ export function Salg() {
     setQty("1");
     setUnitPrice("");
     setItemId("");
-    // kundevalg lar vi stå
   }
 
   function openPayment(s: Sale) {
@@ -139,12 +194,14 @@ export function Salg() {
     setPaySale(null);
   }
 
-  function delSale(s: Sale) {
-    const ok = confirm(
-      `Slette dette salget?\n\nVare: ${s.itemName}\nAntall: ${s.qty}\nSum: ${fmtKr(s.total)}\n\nVarene legges tilbake på lager.`
-    );
-    if (!ok) return;
-    removeSale(s.id, true);
+  function askDelete(s: Sale) {
+    setDelSale(s);
+  }
+
+  function doDelete(restoreStock: boolean) {
+    if (!delSale) return;
+    removeSale(delSale.id, restoreStock);
+    setDelSale(null);
   }
 
   return (
@@ -236,7 +293,8 @@ export function Salg() {
                       ) : null}
                     </div>
                     <div className="itemMeta" style={{ marginTop: 6 }}>
-                      Innbetalt: <b>{fmtKr(paid)}</b> • Utestående: <b>{fmtKr(rem)}</b> • {new Date(s.createdAt).toLocaleString("nb-NO")}
+                      Innbetalt: <b>{fmtKr(paid)}</b> • Utestående: <b>{fmtKr(rem)}</b> •{" "}
+                      {new Date(s.createdAt).toLocaleString("nb-NO")}
                     </div>
 
                     {Array.isArray(s.payments) && s.payments.length > 0 ? (
@@ -248,7 +306,9 @@ export function Salg() {
                             {p.note ? <> ({p.note})</> : null}
                           </div>
                         ))}
-                        {s.payments.length > 4 ? <div style={{ marginTop: 4, opacity: 0.9 }}>… +{s.payments.length - 4} til</div> : null}
+                        {s.payments.length > 4 ? (
+                          <div style={{ marginTop: 4, opacity: 0.9 }}>… +{s.payments.length - 4} til</div>
+                        ) : null}
                       </div>
                     ) : null}
                   </div>
@@ -265,7 +325,7 @@ export function Salg() {
                     </button>
                   )}
 
-                  <button className="btn btnDanger" type="button" onClick={() => delSale(s)}>
+                  <button className="btn btnDanger" type="button" onClick={() => askDelete(s)}>
                     Slett
                   </button>
                 </div>
@@ -308,8 +368,7 @@ export function Salg() {
                   {" "}
                   • Kunde: <b>{paySale.customerName}</b>
                 </>
-              ) : null}
-              {" "}
+              ) : null}{" "}
               • Utestående: <b>{fmtKr(Math.max(0, saleRemaining(paySale)))}</b>
             </div>
 
@@ -339,6 +398,28 @@ export function Salg() {
           </div>
         ) : null}
       </Modal>
+
+      <ChoiceModal
+        open={!!delSale}
+        title="Slette salg?"
+        onClose={() => setDelSale(null)}
+        cancelText="Avbryt"
+        onCancel={() => setDelSale(null)}
+        secondaryText="Slett (ikke tilbake på lager)"
+        onSecondary={() => doDelete(false)}
+        primaryText="Slett + legg tilbake på lager"
+        onPrimary={() => doDelete(true)}
+      >
+        {delSale ? (
+          <div className="itemMeta" style={{ marginTop: 0 }}>
+            Vare: <b>{delSale.itemName}</b>
+            <br />
+            Antall: <b>{delSale.qty}</b> • Sum: <b>{fmtKr(delSale.total)}</b>
+            <br />
+            <span style={{ opacity: 0.9 }}>Velg om varen skal legges tilbake på lager eller ikke.</span>
+          </div>
+        ) : null}
+      </ChoiceModal>
     </div>
   );
 }
