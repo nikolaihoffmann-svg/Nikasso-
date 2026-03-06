@@ -96,8 +96,6 @@ const LS_KEYS = {
   receivables: "sg.receivables.v1",
   saleDraftCustomer: "sg.saleDraftCustomer.v1",
   theme: "sg.theme.v1",
-  // saldo
-  saldo: "sg.saldo.v1",
 } as const;
 
 const EVT = "sg:storage-changed";
@@ -179,36 +177,6 @@ export function receivableRemaining(r: Receivable) {
   const total = round2(num(r.amount, 0));
   const paid = receivablePaidSum(r);
   return round2(Math.max(0, total - paid));
-}
-
-/* =========================
-   Saldo (manuell)
-========================= */
-
-export function getSaldo(): number {
-  const v = safeJsonParse<any>(localStorage.getItem(LS_KEYS.saldo), 0);
-  return round2(num(v, 0));
-}
-
-export function setSaldo(n: number) {
-  localStorage.setItem(LS_KEYS.saldo, JSON.stringify(round2(num(n, 0))));
-  emitChange();
-}
-
-export function useSaldo(): [number, (n: number) => void] {
-  const [saldo, setState] = useState<number>(() => getSaldo());
-
-  useEffect(() => {
-    const onChange = () => setState(getSaldo());
-    window.addEventListener("storage", onChange);
-    window.addEventListener(EVT, onChange);
-    return () => {
-      window.removeEventListener("storage", onChange);
-      window.removeEventListener(EVT, onChange);
-    };
-  }, []);
-
-  return [saldo, setSaldo];
 }
 
 /* =========================
@@ -430,7 +398,9 @@ export function setSales(next: Sale[]) {
   emitChange();
 }
 
-export function addSale(input: Omit<Sale, "id" | "createdAt" | "total" | "paid" | "payments"> & { payments?: Payment[]; paid?: boolean }) {
+export function addSale(
+  input: Omit<Sale, "id" | "createdAt" | "total" | "paid" | "payments"> & { payments?: Payment[]; paid?: boolean }
+) {
   const sales = getSales();
   const createdAt = nowIso();
 
@@ -501,29 +471,6 @@ function removeSalePaymentCore(saleId: string, paymentId: string) {
   setSales(sales);
 }
 
-/** ✅ NYTT: Slett salg + legg varer tilbake på lager (default: true) */
-function removeSaleCore(saleId: string, restoreStock = true) {
-  const sales = getSales();
-  const idx = sales.findIndex((x) => x.id === saleId);
-  if (idx < 0) return;
-
-  const s = sales[idx];
-
-  // legg tilbake på lager hvis mulig
-  if (restoreStock) {
-    const items = getItems();
-    const ii = items.findIndex((it) => it.id === s.itemId);
-    if (ii >= 0) {
-      const nextStock = (items[ii].stock ?? 0) + Math.trunc(num(s.qty, 0));
-      items[ii] = { ...items[ii], stock: nextStock, updatedAt: nowIso() };
-      setItems(items);
-    }
-  }
-
-  const next = sales.filter((x) => x.id !== saleId);
-  setSales(next);
-}
-
 export function useSales() {
   const [sales, setState] = useState<Sale[]>(() => getSales());
 
@@ -541,21 +488,13 @@ export function useSales() {
     () => ({
       sales,
       setPaid: (saleId: string, paid: boolean) => setSalePaidCore(saleId, paid),
-      addPayment: (saleId: string, amount: number, note?: string, dateIso?: string) => addSalePaymentCore(saleId, amount, dateIso, note),
+      addPayment: (saleId: string, amount: number, dateIso?: string, note?: string) => addSalePaymentCore(saleId, amount, dateIso, note),
       removePayment: (saleId: string, paymentId: string) => removeSalePaymentCore(saleId, paymentId),
-      removeSale: (saleId: string, restoreStock = true) => removeSaleCore(saleId, restoreStock),
       setAll: (all: Sale[]) => setSales(all),
     }),
     [sales]
   );
 }
-
-/** Alias-eksporter (så imports i gamle filer fortsatt funker) */
-export const setSalePaid = (saleId: string, paid: boolean) => setSalePaidCore(saleId, paid);
-export const addSalePayment = (saleId: string, amount: number, note?: string, dateIso?: string) =>
-  addSalePaymentCore(saleId, amount, dateIso, note);
-export const removeSalePayment = (saleId: string, paymentId: string) => removeSalePaymentCore(saleId, paymentId);
-export const removeSale = (saleId: string, restoreStock = true) => removeSaleCore(saleId, restoreStock);
 
 /* =========================
    Receivables (Gjeld til deg)
@@ -731,7 +670,6 @@ export type ExportAllPayloadV1 = {
   version: 1;
   exportedAt: string;
   theme: Theme;
-  saldo: number;
   items: Vare[];
   customers: Customer[];
   sales: Sale[];
@@ -743,7 +681,6 @@ export function makeExportAllPayload(): ExportAllPayloadV1 {
     version: 1,
     exportedAt: nowIso(),
     theme: getTheme(),
-    saldo: getSaldo(),
     items: getItems(),
     customers: getCustomers(),
     sales: getSales(),
@@ -757,12 +694,12 @@ export function downloadExportAll(filename?: string) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = filename || `salg-gjeld-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  a.download = filename || `nikasso-backup-${new Date().toISOString().slice(0, 10)}.json`;
   a.click();
   URL.revokeObjectURL(url);
 }
 
-/** Alias pga feilmeldinger fra tidligere */
+// Alias(er) for eldre imports
 export const downloadAllDataJson = downloadExportAll;
 
 export async function importAllFromFile(file: File, mode: "replace" | "merge" = "replace") {
@@ -776,7 +713,6 @@ export async function importAllFromFile(file: File, mode: "replace" | "merge" = 
           version: 1,
           exportedAt: nowIso(),
           theme: getTheme(),
-          saldo: num(parsed?.saldo, getSaldo()),
           items: Array.isArray(parsed?.items) ? parsed.items : [],
           customers: Array.isArray(parsed?.customers) ? parsed.customers : [],
           sales: Array.isArray(parsed?.sales) ? parsed.sales : [],
@@ -850,8 +786,6 @@ export async function importAllFromFile(file: File, mode: "replace" | "merge" = 
     } as Receivable;
   });
 
-  const nextSaldo = round2(num((payload as any).saldo, getSaldo()));
-
   if (mode === "merge") {
     const byId = <T extends { id: string }>(a: T[], b: T[]) => {
       const m = new Map<string, T>();
@@ -864,13 +798,11 @@ export async function importAllFromFile(file: File, mode: "replace" | "merge" = 
     setCustomers(byId(getCustomers(), nextCustomers));
     setSales(byId(getSales(), nextSales));
     setReceivables(byId(getReceivables(), nextReceivables));
-    setSaldo(nextSaldo);
   } else {
     setItems(nextItems);
     setCustomers(nextCustomers);
     setSales(nextSales);
     setReceivables(nextReceivables);
-    setSaldo(nextSaldo);
   }
 
   if (payload.theme === "light" || payload.theme === "dark") {
@@ -887,7 +819,41 @@ export function clearAllData() {
   localStorage.removeItem(LS_KEYS.sales);
   localStorage.removeItem(LS_KEYS.receivables);
   localStorage.removeItem(LS_KEYS.saleDraftCustomer);
-  localStorage.removeItem(LS_KEYS.saldo);
-  // theme lar vi stå
+  // theme lar vi stå (kan fjernes om du vil)
   emitChange();
+}
+
+/* =========================
+   File picker helpers (for buttons)
+   - Dette fikser feilen din:
+     "has no exported member 'pickImportAllFile'"
+========================= */
+
+/**
+ * Åpner filvelger og importerer backup (replace).
+ * Kan brukes direkte som onClick-handler.
+ */
+export function pickImportAllFile(_e?: any) {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "application/json,.json";
+  input.onchange = async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    await importAllFromFile(file, "replace");
+  };
+  input.click();
+}
+
+/** Valgfri: merge-variant */
+export function pickImportAllFileMerge(_e?: any) {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "application/json,.json";
+  input.onchange = async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    await importAllFromFile(file, "merge");
+  };
+  input.click();
 }
