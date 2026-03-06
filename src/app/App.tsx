@@ -1,22 +1,15 @@
 // src/app/App.tsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import {
-  applyThemeToDom,
-  getTheme,
-  setTheme,
-  Theme,
-  downloadExportAll,
-  importAllFromFile,
-  clearAllData,
-} from "./storage";
+import { applyThemeToDom, getTheme, setTheme, Theme, downloadExportAll, importAllFromFile, clearAllData } from "./storage";
 
 import { Oversikt } from "../pages/Oversikt";
 import { Varer } from "../pages/Varer";
 import { Salg } from "../pages/Salg";
 import { Kunder } from "../pages/Kunder";
 import { Gjeld } from "../pages/Gjeld";
+import { Backup } from "../pages/Backup";
 
-type TabKey = "oversikt" | "varer" | "salg" | "kunder" | "gjeld";
+type TabKey = "oversikt" | "varer" | "salg" | "kunder" | "gjeld" | "backup";
 
 export function App() {
   const [theme, setThemeState] = useState<Theme>(() => getTheme());
@@ -38,38 +31,51 @@ export function App() {
     if (tab === "varer") return <Varer />;
     if (tab === "salg") return <Salg />;
     if (tab === "kunder") return <Kunder />;
-    return <Gjeld />;
+    if (tab === "gjeld") return <Gjeld />;
+    return <Backup />;
   }, [tab]);
 
-  const title = useMemo(() => {
-    if (tab === "oversikt") return "Oversikt";
-    if (tab === "varer") return "Varer";
-    if (tab === "salg") return "Salg";
-    if (tab === "kunder") return "Kunder";
-    return "Gjeld";
-  }, [tab]);
+  async function handleImportFile(file: File) {
+    await importAllFromFile(file, "replace");
+    alert("Import ferdig ✅");
+  }
 
   return (
     <div className="container">
       <header className="header">
         <div className="headerTop">
           <div>
-            <div className="h1">{title}</div>
+            <div className="h1">Oversikt</div>
             <div className="subRow">
               <div className="sub">Privat • Lokal lagring i nettleseren</div>
             </div>
           </div>
 
           <div className="btnRow" style={{ marginTop: 0, justifyContent: "flex-end" }}>
-            {/* ✅ 1) Eksport = wrap i arrow */}
             <button className="btn" type="button" onClick={() => downloadExportAll()}>
               Eksporter ALT
             </button>
 
-            {/* ✅ 2) Import = åpne filvelger */}
             <button className="btn" type="button" onClick={() => importRef.current?.click()}>
               Importer ALT
             </button>
+
+            <input
+              ref={importRef}
+              type="file"
+              accept="application/json"
+              style={{ display: "none" }}
+              onChange={async (e) => {
+                const f = e.target.files?.[0];
+                e.currentTarget.value = "";
+                if (!f) return;
+                try {
+                  await handleImportFile(f);
+                } catch (err: any) {
+                  alert("Import feilet: " + (err?.message || String(err)));
+                }
+              }}
+            />
 
             <button
               className="btn btnDanger"
@@ -84,26 +90,6 @@ export function App() {
             <button className="themeBtn" type="button" onClick={toggleTheme} title="Bytt tema">
               {theme === "dark" ? "🌙 Mørk" : "☀️ Lys"}
             </button>
-
-            {/* Hidden file input for import */}
-            <input
-              ref={importRef}
-              type="file"
-              accept="application/json,.json"
-              style={{ display: "none" }}
-              onChange={async (e) => {
-                const file = e.target.files?.[0];
-                e.target.value = "";
-                if (!file) return;
-
-                try {
-                  await importAllFromFile(file, "replace");
-                  alert("Import OK ✅");
-                } catch (err: any) {
-                  alert("Import feilet: " + String(err?.message ?? err));
-                }
-              }}
-            />
           </div>
         </div>
 
@@ -122,6 +108,9 @@ export function App() {
           </button>
           <button className={`tab ${tab === "gjeld" ? "active" : ""}`} onClick={() => setTab("gjeld")} type="button">
             Gjeld
+          </button>
+          <button className={`tab ${tab === "backup" ? "active" : ""}`} onClick={() => setTab("backup")} type="button">
+            Backup
           </button>
         </nav>
       </header>
