@@ -1,4 +1,3 @@
-// src/pages/Oversikt.tsx
 import React, { useMemo, useState } from "react";
 import {
   fmtKr,
@@ -142,7 +141,6 @@ export function Oversikt() {
       <div className="cardTitle">Oversikt</div>
       <div className="cardSub">Saldo + utestående (automatisk).</div>
 
-      {/* Saldo + utestående (samlet, tydelig) */}
       <div className="card" style={{ marginTop: 0 }}>
         <div className="cardTitle" style={{ fontSize: 18, marginBottom: 8 }}>Penger</div>
 
@@ -167,7 +165,6 @@ export function Oversikt() {
         </div>
       </div>
 
-      {/* Perioder */}
       <div className="list">
         <div className="item">
           <p className="itemTitle">Siste 7 dager</p>
@@ -191,7 +188,6 @@ export function Oversikt() {
         </div>
       </div>
 
-      {/* Salg pr kunde */}
       <div className="card">
         <div className="cardTitle">Salg pr kunde (30 dager)</div>
         <div className="cardSub">Solgt, profitt og utestående pr kunde.</div>
