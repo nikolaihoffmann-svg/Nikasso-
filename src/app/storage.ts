@@ -96,7 +96,7 @@ const LS_KEYS = {
   receivables: "sg.receivables.v1",
   saleDraftCustomer: "sg.saleDraftCustomer.v1",
   theme: "sg.theme.v1",
-  saldo: "sg.saldo.v1",
+  balance: "sg.balance.v1",
 } as const;
 
 const EVT = "sg:storage-changed";
@@ -217,24 +217,26 @@ export function useTheme(): [Theme, (t: Theme) => void] {
 }
 
 /* =========================
-   Saldo (manuell)
+   Balance (Saldo)
 ========================= */
 
-export function getSaldo(): number {
-  const raw = safeJsonParse<any>(localStorage.getItem(LS_KEYS.saldo), 0);
-  return round2(num(raw, 0));
+export function getBalance(): number {
+  const raw = localStorage.getItem(LS_KEYS.balance);
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : 0;
 }
 
-export function setSaldo(value: number) {
-  localStorage.setItem(LS_KEYS.saldo, JSON.stringify(round2(num(value, 0))));
+export function setBalance(amount: number) {
+  const v = round2(num(amount, 0));
+  localStorage.setItem(LS_KEYS.balance, String(v));
   emitChange();
 }
 
-export function useSaldo(): [number, (n: number) => void] {
-  const [saldo, setState] = useState<number>(() => getSaldo());
+export function useBalance(): number {
+  const [balance, setState] = useState<number>(() => getBalance());
 
   useEffect(() => {
-    const onChange = () => setState(getSaldo());
+    const onChange = () => setState(getBalance());
     window.addEventListener("storage", onChange);
     window.addEventListener(EVT, onChange);
     return () => {
@@ -243,7 +245,7 @@ export function useSaldo(): [number, (n: number) => void] {
     };
   }, []);
 
-  return [saldo, setSaldo];
+  return balance;
 }
 
 /* =========================
@@ -436,7 +438,8 @@ export function addSale(input: Omit<Sale, "id" | "createdAt" | "total" | "paid" 
   const total = round2((num(input.qty, 0) || 0) * (num(input.unitPrice, 0) || 0));
 
   const payments = normalizePayments(input.payments);
-  const paid = payments.length > 0 ? round2(payments.reduce((a, p) => a + num(p.amount, 0), 0)) >= total : Boolean(input.paid);
+  const paid =
+    payments.length > 0 ? round2(payments.reduce((a, p) => a + num(p.amount, 0), 0)) >= total : Boolean(input.paid);
 
   const next: Sale = {
     id: uid("sale"),
@@ -698,7 +701,7 @@ export type ExportAllPayloadV1 = {
   version: 1;
   exportedAt: string;
   theme: Theme;
-  saldo: number;
+  balance?: number;
   items: Vare[];
   customers: Customer[];
   sales: Sale[];
@@ -710,7 +713,7 @@ export function makeExportAllPayload(): ExportAllPayloadV1 {
     version: 1,
     exportedAt: nowIso(),
     theme: getTheme(),
-    saldo: getSaldo(),
+    balance: getBalance(),
     items: getItems(),
     customers: getCustomers(),
     sales: getSales(),
@@ -724,12 +727,12 @@ export function downloadExportAll(filename?: string) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = filename || `nikasso-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  a.download = filename || `salg-gjeld-backup-${new Date().toISOString().slice(0, 10)}.json`;
   a.click();
   URL.revokeObjectURL(url);
 }
 
-/** Alias (om du har gammel import et sted) */
+/** Alias pga feilmeldingen din */
 export const downloadAllDataJson = downloadExportAll;
 
 export async function importAllFromFile(file: File, mode: "replace" | "merge" = "replace") {
@@ -743,7 +746,7 @@ export async function importAllFromFile(file: File, mode: "replace" | "merge" = 
           version: 1,
           exportedAt: nowIso(),
           theme: getTheme(),
-          saldo: num(parsed?.saldo, 0),
+          balance: typeof parsed?.balance === "number" ? parsed.balance : undefined,
           items: Array.isArray(parsed?.items) ? parsed.items : [],
           customers: Array.isArray(parsed?.customers) ? parsed.customers : [],
           sales: Array.isArray(parsed?.sales) ? parsed.sales : [],
@@ -829,18 +832,20 @@ export async function importAllFromFile(file: File, mode: "replace" | "merge" = 
     setCustomers(byId(getCustomers(), nextCustomers));
     setSales(byId(getSales(), nextSales));
     setReceivables(byId(getReceivables(), nextReceivables));
-    setSaldo(round2(num(payload.saldo, getSaldo())));
   } else {
     setItems(nextItems);
     setCustomers(nextCustomers);
     setSales(nextSales);
-    setReceivables(nextReceivables);
-    setSaldo(round2(num(payload.saldo, 0)));
+    setReceivables(nextReceivables));
   }
 
   if (payload.theme === "light" || payload.theme === "dark") {
     setTheme(payload.theme);
     applyThemeToDom(payload.theme);
+  }
+
+  if (typeof payload.balance === "number" && Number.isFinite(payload.balance)) {
+    setBalance(payload.balance);
   }
 
   emitChange();
@@ -852,6 +857,30 @@ export function clearAllData() {
   localStorage.removeItem(LS_KEYS.sales);
   localStorage.removeItem(LS_KEYS.receivables);
   localStorage.removeItem(LS_KEYS.saleDraftCustomer);
-  localStorage.removeItem(LS_KEYS.saldo);
+  localStorage.removeItem(LS_KEYS.balance);
+  // theme lar vi stå (kan fjernes om du vil)
   emitChange();
+}
+
+/* =========================
+   Backwards-compatible exports (for eldre imports i pages)
+========================= */
+
+export const setSalePaid = (saleId: string, paid: boolean) => setSalePaidCore(saleId, paid);
+
+export const removeSalePayment = (saleId: string, paymentId: string) => removeSalePaymentCore(saleId, paymentId);
+
+/**
+ * Wrapper: tåler både (saleId, amount, note, dateIso) og (saleId, amount, dateIso, note)
+ */
+export function addSalePayment(saleId: string, amount: number, a3?: string, a4?: string) {
+  const looksLikeDate = (s?: string) => !!s && /^\d{4}-\d{2}-\d{2}/.test(s);
+
+  if (looksLikeDate(a3)) {
+    // (saleId, amount, dateIso, note)
+    return addSalePaymentCore(saleId, amount, a3, a4);
+  }
+
+  // (saleId, amount, note, dateIso)
+  return addSalePaymentCore(saleId, amount, a4, a3);
 }
