@@ -1,13 +1,13 @@
 // src/app/App.tsx
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   applyThemeToDom,
+  clearAllData,
+  downloadExportAll,
   getTheme,
+  pickImportAllFile,
   setTheme,
   Theme,
-  downloadExportAll,
-  importAllFromFile,
-  clearAllData,
 } from "./storage";
 
 import { Oversikt } from "../pages/Oversikt";
@@ -15,16 +15,10 @@ import { Varer } from "../pages/Varer";
 import { Salg } from "../pages/Salg";
 import { Kunder } from "../pages/Kunder";
 import { Gjeld } from "../pages/Gjeld";
-import { Backup } from "../pages/Backup";
 
-type TabKey = "oversikt" | "varer" | "salg" | "kunder" | "gjeld" | "backup";
+type TabKey = "oversikt" | "varer" | "salg" | "kunder" | "gjeld";
 
-function Modal(props: {
-  open: boolean;
-  title: string;
-  children: React.ReactNode;
-  onClose: () => void;
-}) {
+function Modal(props: { open: boolean; title: string; children: React.ReactNode; onClose: () => void }) {
   if (!props.open) return null;
   return (
     <div className="modalBackdrop" role="dialog" aria-modal="true" onClick={props.onClose}>
@@ -44,10 +38,7 @@ function Modal(props: {
 export function App() {
   const [theme, setThemeState] = useState<Theme>(() => getTheme());
   const [tab, setTab] = useState<TabKey>("oversikt");
-
-  const [menuOpen, setMenuOpen] = useState(false);
-
-  const importInputRef = useRef<HTMLInputElement | null>(null);
+  const [dataOpen, setDataOpen] = useState(false);
 
   useEffect(() => {
     applyThemeToDom(theme);
@@ -63,8 +54,7 @@ export function App() {
     if (tab === "varer") return <Varer />;
     if (tab === "salg") return <Salg />;
     if (tab === "kunder") return <Kunder />;
-    if (tab === "gjeld") return <Gjeld />;
-    return <Backup />;
+    return <Gjeld />;
   }, [tab]);
 
   return (
@@ -76,13 +66,17 @@ export function App() {
           </div>
 
           <div className="btnRow" style={{ marginTop: 0, justifyContent: "flex-end" }}>
-            {/* Meny-knapp */}
-            <button className="btn" type="button" onClick={() => setMenuOpen(true)} title="Meny">
-              ☰
+            <button className="btn" type="button" onClick={() => setDataOpen(true)} title="Backup / Import / Nullstill">
+              ⚙️ Data
             </button>
 
-            {/* Tema som ikon */}
-            <button className="themeBtn" type="button" onClick={toggleTheme} title="Bytt tema">
+            <button
+              className="themeBtn"
+              type="button"
+              onClick={toggleTheme}
+              title="Bytt tema"
+              aria-label="Bytt tema"
+            >
               {theme === "dark" ? "🌙" : "☀️"}
             </button>
           </div>
@@ -109,68 +103,38 @@ export function App() {
 
       {content}
 
-      {/* Skjult fil-input for Import */}
-      <input
-        ref={importInputRef}
-        type="file"
-        accept="application/json"
-        style={{ display: "none" }}
-        onChange={async (e) => {
-          const f = e.target.files?.[0];
-          if (!f) return;
-          await importAllFromFile(f, "replace");
-          e.target.value = "";
-          setMenuOpen(false);
-        }}
-      />
+      <Modal open={dataOpen} title="Data (backup / import)" onClose={() => setDataOpen(false)}>
+        <div className="fieldGrid" style={{ marginTop: 0 }}>
+          <div className="itemMeta" style={{ marginTop: 0 }}>
+            Her kan du eksportere alt, importere en backup eller nullstille data.
+          </div>
 
-      {/* Meny-modal */}
-      <Modal open={menuOpen} title="Meny" onClose={() => setMenuOpen(false)}>
-        <div className="btnRow" style={{ justifyContent: "flex-start", flexWrap: "wrap" }}>
-          <button
-            className="btn btnPrimary"
-            type="button"
-            onClick={() => {
-              downloadExportAll();
-              setMenuOpen(false);
-            }}
-          >
-            Eksporter ALT
-          </button>
+          <div className="btnRow">
+            <button className="btn btnPrimary" type="button" onClick={() => downloadExportAll()}>
+              Eksporter ALT
+            </button>
 
-          <button
-            className="btn"
-            type="button"
-            onClick={() => {
-              importInputRef.current?.click();
-            }}
-          >
-            Importer ALT
-          </button>
+            <button className="btn" type="button" onClick={() => pickImportAllFile("replace")}>
+              Importer ALT
+            </button>
 
-          <button
-            className="btn"
-            type="button"
-            onClick={() => {
-              setTab("backup");
-              setMenuOpen(false);
-            }}
-          >
-            Backup
-          </button>
+            <button
+              className="btn btnDanger"
+              type="button"
+              onClick={() => {
+                if (confirm("Slette ALL data? (Varer, kunder, salg, gjeld, saldo)")) {
+                  clearAllData();
+                  setDataOpen(false);
+                }
+              }}
+            >
+              Nullstill
+            </button>
+          </div>
 
-          <button
-            className="btn btnDanger"
-            type="button"
-            onClick={() => {
-              if (confirm("Slette ALL data i nettleseren? (Varer, kunder, salg, gjeld)")) {
-                clearAllData();
-                setMenuOpen(false);
-              }
-            }}
-          >
-            Nullstill
-          </button>
+          <div className="itemMeta" style={{ marginTop: 10 }}>
+            Tips: Import “replace” overskriver. Hvis du senere vil ha “merge”, sier du ifra så legger jeg det inn som en ekstra knapp.
+          </div>
         </div>
       </Modal>
     </div>
