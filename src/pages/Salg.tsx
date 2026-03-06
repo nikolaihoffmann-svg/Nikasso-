@@ -16,6 +16,7 @@ import {
   useSales,
   Vare,
   Sale,
+  SaleLine,
 } from "../app/storage";
 
 function toNum(v: string) {
@@ -46,15 +47,12 @@ function ChoiceModal(props: {
   children: React.ReactNode;
   onClose: () => void;
 
-  // Primary = "Slett + legg tilbake"
   primaryText: string;
   onPrimary: () => void;
 
-  // Secondary = "Slett (ikke tilbake)"
   secondaryText: string;
   onSecondary: () => void;
 
-  // Cancel
   cancelText: string;
   onCancel: () => void;
 }) {
@@ -77,12 +75,10 @@ function ChoiceModal(props: {
               {props.cancelText}
             </button>
 
-            {/* 🔴 "Ikke tilbake" = farligere = rød */}
             <button className="btn btnDanger" type="button" onClick={props.onSecondary}>
               {props.secondaryText}
             </button>
 
-            {/* ✅ "Tilbake på lager" = normal/primary */}
             <button className="btn btnPrimary" type="button" onClick={props.onPrimary}>
               {props.primaryText}
             </button>
@@ -93,31 +89,46 @@ function ChoiceModal(props: {
   );
 }
 
+type CartLine = {
+  itemId: string;
+  qty: string;
+  unitPrice: string;
+};
+
 export function Salg() {
   const { items } = useItems();
   const { customers } = useCustomers();
-  const { sales, removeSale } = useSales();
+  const { sales, addPayment, setPaid, removeSale } = useSales();
 
+  const [customerId, setCustomerId] = useState<string>("");
+
+  // ✅ Handlekurv
   const [itemId, setItemId] = useState<string>("");
   const [qty, setQty] = useState<string>("1");
-  const [customerId, setCustomerId] = useState<string>("");
   const [unitPrice, setUnitPrice] = useState<string>("");
+
+  const [cart, setCart] = useState<CartLine[]>([]);
+  const [paidAtSave, setPaidAtSave] = useState(true);
 
   const [lowPopup, setLowPopup] = useState<{ item: Vare; newStock: number } | null>(null);
 
   // betaling modal
   const [paySale, setPaySale] = useState<Sale | null>(null);
   const [payAmount, setPayAmount] = useState("0");
-  const [payDate, setPayDate] = useState<string>(new Date().toISOString().slice(0, 10)); // yyyy-mm-dd
+  const [payDate, setPayDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [payNote, setPayNote] = useState("");
 
-  // slett modal med 2 valg
+  // slett modal
   const [delSale, setDelSale] = useState<Sale | null>(null);
+
+  // søk/vis flere
+  const [q, setQ] = useState("");
+  const [limit, setLimit] = useState(25);
 
   const selectedItem = useMemo(() => items.find((i) => i.id === itemId) ?? null, [items, itemId]);
   const selectedCustomer = useMemo(() => customers.find((c) => c.id === customerId) ?? null, [customers, customerId]);
 
-  // forhåndsvalg kunde fra Kunder-siden
+  // forhåndsvalg kunde
   useEffect(() => {
     const draft = getSaleDraftCustomer();
     if (draft) {
@@ -126,55 +137,99 @@ export function Salg() {
     }
   }, []);
 
-  // autopopulate pris ved valg av vare (kun hvis feltet er tomt)
+  // autopopulate pris
   useEffect(() => {
     if (!selectedItem) return;
     if (unitPrice.trim() === "") setUnitPrice(String(selectedItem.price ?? 0));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedItem]);
 
-  const total = useMemo(() => {
-    const q = Math.trunc(toNum(qty));
-    const p = toNum(unitPrice || (selectedItem?.price ? String(selectedItem.price) : "0"));
-    return round2(q * p);
-  }, [qty, unitPrice, selectedItem]);
+  const cartPreview = useMemo(() => {
+    const lines = cart.map((c) => {
+      const it = items.find((x) => x.id === c.itemId);
+      const name = it?.name ?? "Ukjent";
+      const q = Math.trunc(toNum(c.qty));
+      const p = toNum(c.unitPrice);
+      const total = round2(q * p);
+      return { ...c, name, q, p, total };
+    });
+    const sum = round2(lines.reduce((a, l) => a + l.total, 0));
+    return { lines, sum };
+  }, [cart, items]);
 
   const outstandingTotal = useMemo(() => {
     return round2(sales.reduce((a, s) => a + Math.max(0, saleRemaining(s)), 0));
   }, [sales]);
 
-  function doSale() {
+  function addToCart() {
     if (!selectedItem) return alert("Velg en vare først.");
-
     const q = Math.trunc(toNum(qty));
     if (q <= 0) return alert("Antall må være minst 1.");
-
     const p = toNum(unitPrice || String(selectedItem.price ?? 0));
 
-    const itemsNow = getItems();
-    const idx = itemsNow.findIndex((x) => x.id === selectedItem.id);
-    if (idx < 0) return alert("Fant ikke varen i lageret.");
+    setCart((prev) => [{ itemId: selectedItem.id, qty: String(q), unitPrice: String(round2(p)) }, ...prev]);
 
-    const newStock = (itemsNow[idx].stock ?? 0) - q;
-    itemsNow[idx] = { ...itemsNow[idx], stock: newStock, updatedAt: new Date().toISOString() };
-    setItems(itemsNow);
-
-    addSale({
-      itemId: selectedItem.id,
-      itemName: selectedItem.name,
-      qty: q,
-      unitPrice: round2(p),
-      customerId: selectedCustomer?.id,
-      customerName: selectedCustomer?.name,
-      payments: [],
-    });
-
-    const min = itemsNow[idx].minStock ?? 0;
-    if (min > 0 && newStock <= min) setLowPopup({ item: itemsNow[idx], newStock });
-
+    // reset
+    setItemId("");
     setQty("1");
     setUnitPrice("");
-    setItemId("");
+  }
+
+  function removeCartLine(idx: number) {
+    setCart((prev) => prev.filter((_, i) => i !== idx));
+  }
+
+  function doSale() {
+    if (cart.length === 0) return alert("Legg til minst én vare i salget.");
+
+    // trekk lager
+    const itemsNow = getItems();
+    const byId = new Map(itemsNow.map((it) => [it.id, it] as const));
+
+    // bygg linjer
+    const lines: Omit<SaleLine, "id" | "lineTotal">[] = cart.map((c) => {
+      const it = byId.get(c.itemId);
+      const name = it?.name ?? "Ukjent";
+      const q = Math.trunc(toNum(c.qty));
+      const p = round2(toNum(c.unitPrice || "0"));
+      return {
+        itemId: c.itemId,
+        itemName: name,
+        qty: q,
+        unitPrice: p,
+        unitCostAtSale: it ? Number(it.cost ?? 0) : undefined,
+      };
+    });
+
+    // lagerjustering
+    for (const l of lines) {
+      const it = byId.get(l.itemId);
+      if (!it) continue;
+      const newStock = (it.stock ?? 0) - (l.qty ?? 0);
+      it.stock = newStock;
+      it.updatedAt = new Date().toISOString();
+
+      const min = it.minStock ?? 0;
+      if (min > 0 && newStock <= min) setLowPopup({ item: it, newStock });
+    }
+
+    setItems(Array.from(byId.values()));
+
+    addSale({
+      itemId: lines[0]?.itemId ?? "",
+      itemName: lines.length > 1 ? `Flere varer (${lines.length})` : (lines[0]?.itemName ?? "Salg"),
+      qty: lines.reduce((a, l) => a + (l.qty ?? 0), 0),
+      unitPrice: lines.length === 1 ? lines[0].unitPrice : 0,
+      customerId: selectedCustomer?.id,
+      customerName: selectedCustomer?.name,
+      paid: paidAtSave, // ✅ default true
+      payments: [],
+      lines,
+    });
+
+    // reset
+    setCart([]);
+    setPaidAtSave(true);
   }
 
   function openPayment(s: Sale) {
@@ -188,9 +243,10 @@ export function Salg() {
     if (!paySale) return;
     const a = toNum(payAmount);
     if (a <= 0) return alert("Innbetaling må være over 0.");
-
     const iso = payDate ? new Date(`${payDate}T12:00:00`).toISOString() : undefined;
-    addSalePayment(paySale.id, a, payNote.trim() || undefined, iso);
+
+    // via useSales
+    addPayment(paySale.id, a, payNote.trim() || undefined, iso);
     setPaySale(null);
   }
 
@@ -204,13 +260,31 @@ export function Salg() {
     setDelSale(null);
   }
 
+  const filteredSales = useMemo(() => {
+    const qq = q.trim().toLowerCase();
+    const base = sales;
+
+    if (!qq) return base.slice(0, limit);
+
+    const matches = base.filter((s) => {
+      const lineText = (Array.isArray(s.lines) ? s.lines : [])
+        .map((l) => `${l.itemName} ${l.qty} ${l.unitPrice}`)
+        .join(" ");
+      const hay = `${s.itemName} ${s.customerName ?? ""} ${lineText}`.toLowerCase();
+      return hay.includes(qq);
+    });
+
+    return matches.slice(0, limit);
+  }, [sales, q, limit]);
+
   return (
     <div className="card">
       <div className="cardTitle">Salg</div>
       <div className="cardSub">
-        Registrer salg. Lager trekkes automatisk. <b>Utestående salg totalt:</b> <b>{fmtKr(outstandingTotal)}</b>
+        <b>Utestående salg totalt:</b> <b>{fmtKr(outstandingTotal)}</b>
       </div>
 
+      {/* Kunde */}
       <div className="fieldGrid">
         <div>
           <label className="label">Kunde (valgfritt)</label>
@@ -226,77 +300,152 @@ export function Salg() {
               ))}
           </select>
         </div>
+      </div>
 
-        <div>
-          <label className="label">Vare</label>
-          <select className="input" value={itemId} onChange={(e) => setItemId(e.target.value)}>
-            <option value="">Velg vare…</option>
-            {items.map((i) => (
-              <option key={i.id} value={i.id}>
-                {i.name} (lager: {i.stock}, min: {i.minStock})
-              </option>
-            ))}
-          </select>
+      {/* Legg i handlekurv */}
+      <div className="card" style={{ marginTop: 12 }}>
+        <div className="cardTitle" style={{ fontSize: 18, marginBottom: 10 }}>
+          Nytt salg
         </div>
 
-        <div className="row3">
+        <div className="fieldGrid" style={{ marginTop: 0 }}>
           <div>
-            <label className="label">Antall</label>
-            <input className="input" inputMode="numeric" value={qty} onChange={(e) => setQty(e.target.value)} />
+            <label className="label">Vare</label>
+            <select className="input" value={itemId} onChange={(e) => setItemId(e.target.value)}>
+              <option value="">Velg vare…</option>
+              {items.map((i) => (
+                <option key={i.id} value={i.id}>
+                  {i.name} (lager: {i.stock}, min: {i.minStock})
+                </option>
+              ))}
+            </select>
           </div>
-          <div>
-            <label className="label">Pris pr stk (kr)</label>
-            <input
-              className="input"
-              inputMode="decimal"
-              value={unitPrice}
-              onChange={(e) => setUnitPrice(e.target.value)}
-              placeholder={selectedItem ? String(selectedItem.price ?? 0) : "0"}
-            />
-          </div>
-          <div>
-            <label className="label">Sum</label>
-            <input className="input" value={fmtKr(total)} readOnly />
-          </div>
-        </div>
 
-        <div className="btnRow">
-          <button className="btn btnPrimary" type="button" onClick={doSale}>
-            Registrer salg
-          </button>
+          <div className="row3">
+            <div>
+              <label className="label">Antall</label>
+              <input className="input" inputMode="numeric" value={qty} onChange={(e) => setQty(e.target.value)} />
+            </div>
+            <div>
+              <label className="label">Pris pr stk (kr)</label>
+              <input
+                className="input"
+                inputMode="decimal"
+                value={unitPrice}
+                onChange={(e) => setUnitPrice(e.target.value)}
+                placeholder={selectedItem ? String(selectedItem.price ?? 0) : "0"}
+              />
+            </div>
+            <div>
+              <label className="label">Legg til</label>
+              <button className="btn btnPrimary" type="button" onClick={addToCart} style={{ width: "100%" }}>
+                + I salget
+              </button>
+            </div>
+          </div>
+
+          {/* Betalt toggle før lagring */}
+          <div className="itemMeta" style={{ marginTop: 2 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <input type="checkbox" checked={paidAtSave} onChange={(e) => setPaidAtSave(e.target.checked)} />
+              Lagre som <b>{paidAtSave ? "Betalt" : "Ubetalt"}</b> (default: betalt)
+            </label>
+          </div>
+
+          {/* Kurv */}
+          <div className="card" style={{ marginTop: 8 }}>
+            <div className="cardTitle" style={{ fontSize: 16, marginBottom: 8 }}>
+              Varer i salget
+            </div>
+
+            {cartPreview.lines.length === 0 ? (
+              <div className="itemMeta">Ingen varer lagt til enda.</div>
+            ) : (
+              <div className="list" style={{ marginTop: 0 }}>
+                {cartPreview.lines.map((l, idx) => (
+                  <div key={idx} className="item">
+                    <div className="itemTop">
+                      <div>
+                        <p className="itemTitle">{l.name}</p>
+                        <div className="itemMeta">
+                          Antall: <b>{l.q}</b> • Pris: <b>{fmtKr(l.p)}</b> • Linjesum: <b>{fmtKr(l.total)}</b>
+                        </div>
+                      </div>
+                      <button className="btn btnDanger" type="button" onClick={() => removeCartLine(idx)}>
+                        Fjern
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="itemMeta" style={{ marginTop: 10 }}>
+              Sum: <b>{fmtKr(cartPreview.sum)}</b>
+              {selectedCustomer?.name ? (
+                <>
+                  {" "}
+                  • Kunde: <b>{selectedCustomer.name}</b>
+                </>
+              ) : null}
+            </div>
+
+            <div className="btnRow" style={{ marginTop: 12 }}>
+              <button className="btn btnPrimary" type="button" onClick={doSale} disabled={cartPreview.lines.length === 0}>
+                Registrer salg
+              </button>
+              <button className="btn" type="button" onClick={() => setCart([])} disabled={cartPreview.lines.length === 0}>
+                Tøm
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
       <div style={{ height: 18 }} />
 
+      {/* Salgs-lista */}
       <div className="card" style={{ marginTop: 0 }}>
-        <div className="cardTitle">Siste salg</div>
-        <div className="cardSub">Viser siste 25 • med delbetaling/utestående • du kan også slette</div>
+        <div className="cardTitle">Salg</div>
+        <div className="cardSub">Søk, delbetaling, utestående, slett + marker betalt/ubetalt.</div>
+
+        <input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Søk i salg (kunde, vare…)" />
 
         <div className="list">
-          {sales.slice(0, 25).map((s) => {
+          {filteredSales.map((s) => {
             const paid = salePaidSum(s);
             const rem = Math.max(0, saleRemaining(s));
+            const isUnpaid = rem > 0;
+
+            const lines = Array.isArray(s.lines) ? s.lines : [];
+            const customer = s.customerName ?? "Anonym";
 
             return (
-              <div key={s.id} className={rem > 0 ? "item low" : "item"}>
+              <div key={s.id} className={isUnpaid ? "item low" : "item"}>
                 <div className="itemTop">
                   <div>
-                    <p className="itemTitle">{s.itemName}</p>
+                    <p className="itemTitle">{customer}</p>
+
                     <div className="itemMeta">
-                      Antall: <b>{s.qty}</b> • Pris: <b>{fmtKr(s.unitPrice)}</b> • Sum: <b>{fmtKr(s.total)}</b>
-                      {s.customerName ? (
-                        <>
-                          {" "}
-                          • Kunde: <b>{s.customerName}</b>
-                        </>
-                      ) : null}
-                    </div>
-                    <div className="itemMeta" style={{ marginTop: 6 }}>
-                      Innbetalt: <b>{fmtKr(paid)}</b> • Utestående: <b>{fmtKr(rem)}</b> •{" "}
+                      Total: <b>{fmtKr(s.total)}</b> • Innbetalt: <b>{fmtKr(paid)}</b> • Utestående: <b>{fmtKr(rem)}</b>
+                      {" • "}
                       {new Date(s.createdAt).toLocaleString("nb-NO")}
                     </div>
 
+                    {/* Hva kunden kjøpte */}
+                    {lines.length > 0 ? (
+                      <div className="itemMeta" style={{ marginTop: 8 }}>
+                        <b>Kjøpt:</b>
+                        {lines.slice(0, 6).map((l) => (
+                          <div key={l.id} style={{ marginTop: 4 }}>
+                            • {l.itemName} — <b>{l.qty} stk</b> × <b>{fmtKr(l.unitPrice)}</b> = <b>{fmtKr(l.lineTotal)}</b>
+                          </div>
+                        ))}
+                        {lines.length > 6 ? <div style={{ marginTop: 4, opacity: 0.9 }}>… +{lines.length - 6} til</div> : null}
+                      </div>
+                    ) : null}
+
+                    {/* Innbetalinger */}
                     {Array.isArray(s.payments) && s.payments.length > 0 ? (
                       <div className="itemMeta" style={{ marginTop: 8 }}>
                         <b>Innbetalinger:</b>
@@ -315,13 +464,24 @@ export function Salg() {
                 </div>
 
                 <div className="itemActions">
-                  {rem > 0 ? (
+                  {isUnpaid ? (
                     <button className="btn btnPrimary" type="button" onClick={() => openPayment(s)}>
                       Registrer innbetaling
                     </button>
                   ) : (
-                    <button className="btn" type="button" disabled>
-                      Betalt
+                    <button className="btn" type="button" onClick={() => openPayment(s)}>
+                      Legg til innbetaling
+                    </button>
+                  )}
+
+                  {/* ✅ toggle betalt/ubetalt etter lagring */}
+                  {s.paid ? (
+                    <button className="btn" type="button" onClick={() => setPaid(s.id, false)}>
+                      Marker som ubetalt
+                    </button>
+                  ) : (
+                    <button className="btn btnPrimary" type="button" onClick={() => setPaid(s.id, true)}>
+                      Marker som betalt
                     </button>
                   )}
 
@@ -334,6 +494,19 @@ export function Salg() {
           })}
 
           {sales.length === 0 ? <div className="item">Ingen salg enda.</div> : null}
+        </div>
+
+        <div className="btnRow" style={{ marginTop: 12, justifyContent: "center" }}>
+          {limit < sales.length ? (
+            <button className="btn" type="button" onClick={() => setLimit((x) => x + 25)}>
+              Vis flere
+            </button>
+          ) : null}
+          {limit > 25 ? (
+            <button className="btn" type="button" onClick={() => setLimit(25)}>
+              Vis færre
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -362,14 +535,8 @@ export function Salg() {
         {paySale ? (
           <div className="fieldGrid" style={{ marginTop: 0 }}>
             <div className="itemMeta" style={{ marginTop: 0 }}>
-              <b>{paySale.itemName}</b>
-              {paySale.customerName ? (
-                <>
-                  {" "}
-                  • Kunde: <b>{paySale.customerName}</b>
-                </>
-              ) : null}{" "}
-              • Utestående: <b>{fmtKr(Math.max(0, saleRemaining(paySale)))}</b>
+              <b>{paySale.customerName ?? "Anonym"}</b> • Total: <b>{fmtKr(paySale.total)}</b> • Utestående:{" "}
+              <b>{fmtKr(Math.max(0, saleRemaining(paySale)))}</b>
             </div>
 
             <div className="row3">
@@ -412,11 +579,11 @@ export function Salg() {
       >
         {delSale ? (
           <div className="itemMeta" style={{ marginTop: 0 }}>
-            Vare: <b>{delSale.itemName}</b>
+            Kunde: <b>{delSale.customerName ?? "Anonym"}</b>
             <br />
-            Antall: <b>{delSale.qty}</b> • Sum: <b>{fmtKr(delSale.total)}</b>
+            Total: <b>{fmtKr(delSale.total)}</b>
             <br />
-            <span style={{ opacity: 0.9 }}>Velg om varen skal legges tilbake på lager eller ikke.</span>
+            <span style={{ opacity: 0.9 }}>Velg om varene skal legges tilbake på lager eller ikke.</span>
           </div>
         ) : null}
       </ChoiceModal>
