@@ -1,4 +1,3 @@
-// src/app/storage.ts
 import { useEffect, useMemo, useState } from "react";
 
 /* =========================
@@ -96,6 +95,9 @@ const LS_KEYS = {
   receivables: "sg.receivables.v1",
   saleDraftCustomer: "sg.saleDraftCustomer.v1",
   theme: "sg.theme.v1",
+
+  // ✅ Saldo (manuell)
+  saldo: "sg.saldo.v1",
 } as const;
 
 const EVT = "sg:storage-changed";
@@ -152,6 +154,40 @@ function normalizePayments(raw: any): Payment[] {
     .filter((p) => p.amount !== 0);
 }
 
+/* =========================
+   Saldo (manuell)
+========================= */
+
+export function getSaldo(): number {
+  const v = safeJsonParse<any>(localStorage.getItem(LS_KEYS.saldo), 0);
+  return round2(num(v, 0));
+}
+
+export function setSaldo(value: number) {
+  localStorage.setItem(LS_KEYS.saldo, JSON.stringify(round2(num(value, 0))));
+  emitChange();
+}
+
+export function useSaldo(): [number, (v: number) => void] {
+  const [saldo, setState] = useState<number>(() => getSaldo());
+
+  useEffect(() => {
+    const onChange = () => setState(getSaldo());
+    window.addEventListener("storage", onChange);
+    window.addEventListener(EVT, onChange);
+    return () => {
+      window.removeEventListener("storage", onChange);
+      window.removeEventListener(EVT, onChange);
+    };
+  }, []);
+
+  return [saldo, setSaldo];
+}
+
+/* =========================
+   Calculations
+========================= */
+
 export function salePaidSum(s: Sale) {
   if (Array.isArray(s.payments) && s.payments.length > 0) {
     return round2(s.payments.reduce((a, p) => a + num(p.amount, 0), 0));
@@ -194,7 +230,7 @@ export function setTheme(t: Theme) {
 }
 
 export function applyThemeToDom(theme: Theme) {
-  document.documentElement.dataset.theme = theme;
+  document.documentElement.dataset.theme = theme; // CSS: :root[data-theme="light"]
   document.documentElement.classList.toggle("theme-dark", theme === "dark");
   document.documentElement.classList.toggle("theme-light", theme === "light");
 }
@@ -242,15 +278,6 @@ export function setItems(next: Vare[]) {
   emitChange();
 }
 
-function adjustItemStockCore(id: string, delta: number) {
-  const items = getItems();
-  const i = items.findIndex((x) => x.id === id);
-  if (i < 0) return;
-  const nextStock = (items[i].stock ?? 0) + delta;
-  items[i] = { ...items[i], stock: nextStock, updatedAt: nowIso() };
-  setItems(items);
-}
-
 function upsertItemCore(item: Omit<Vare, "createdAt" | "updatedAt">) {
   const items = getItems();
   const i = items.findIndex((x) => x.id === item.id);
@@ -261,6 +288,15 @@ function upsertItemCore(item: Omit<Vare, "createdAt" | "updatedAt">) {
 
 function removeItemCore(id: string) {
   setItems(getItems().filter((x) => x.id !== id));
+}
+
+function adjustItemStockCore(id: string, delta: number) {
+  const items = getItems();
+  const i = items.findIndex((x) => x.id === id);
+  if (i < 0) return;
+  const nextStock = (items[i].stock ?? 0) + delta;
+  items[i] = { ...items[i], stock: nextStock, updatedAt: nowIso() };
+  setItems(items);
 }
 
 export function useItems() {
@@ -362,6 +398,7 @@ export function getSales(): Sale[] {
     const payments = normalizePayments(x.payments);
     const paidSum = payments.length ? payments.reduce((a, p) => a + num(p.amount, 0), 0) : 0;
 
+    // fallback for eldre data
     const paidLegacy = Boolean(x.paid);
     const paid = payments.length ? round2(paidSum) >= total : paidLegacy;
 
@@ -397,9 +434,7 @@ export function setSales(next: Sale[]) {
   emitChange();
 }
 
-export function addSale(
-  input: Omit<Sale, "id" | "createdAt" | "total" | "paid" | "payments"> & { payments?: Payment[]; paid?: boolean }
-) {
+export function addSale(input: Omit<Sale, "id" | "createdAt" | "total" | "paid" | "payments"> & { payments?: Payment[]; paid?: boolean }) {
   const sales = getSales();
   const createdAt = nowIso();
 
@@ -422,24 +457,7 @@ export function addSale(
   setSales(sales);
 }
 
-function setSalePaidCore(saleId: string, paid: boolean) {
-  const sales = getSales();
-  const i = sales.findIndex((x) => x.id === saleId);
-  if (i < 0) return;
-
-  const s = sales[i];
-  if (paid) {
-    const rem = saleRemaining(s);
-    const payments = Array.isArray(s.payments) ? [...s.payments] : [];
-    if (rem > 0) payments.push({ id: uid("pay"), amount: rem, createdAt: nowIso() });
-    sales[i] = { ...s, payments, paid: true };
-  } else {
-    sales[i] = { ...s, payments: [], paid: false };
-  }
-  setSales(sales);
-}
-
-function addSalePaymentCore(saleId: string, amount: number, dateIso?: string, note?: string) {
+function addSalePaymentCore(saleId: string, amount: number, note?: string, dateIso?: string) {
   const sales = getSales();
   const i = sales.findIndex((x) => x.id === saleId);
   if (i < 0) return;
@@ -458,54 +476,26 @@ function addSalePaymentCore(saleId: string, amount: number, dateIso?: string, no
   setSales(sales);
 }
 
-function removeSalePaymentCore(saleId: string, paymentId: string) {
-  const sales = getSales();
-  const i = sales.findIndex((x) => x.id === saleId);
-  if (i < 0) return;
-
-  const s = sales[i];
-  const payments = (Array.isArray(s.payments) ? s.payments : []).filter((p) => p.id !== paymentId);
-  const paid = saleRemaining({ ...s, payments }) <= 0;
-  sales[i] = { ...s, payments, paid };
-  setSales(sales);
-}
-
-/** ✅ Slett salg (valgfritt: legg tilbake på lager) */
 function removeSaleCore(saleId: string, restoreStock: boolean) {
   const sales = getSales();
-  const i = sales.findIndex((x) => x.id === saleId);
-  if (i < 0) return;
+  const idx = sales.findIndex((x) => x.id === saleId);
+  if (idx < 0) return;
 
-  const s = sales[i];
+  const sale = sales[idx];
 
-  // Legg tilbake varer hvis ønsket
+  // ✅ legg tilbake på lager hvis valgt
   if (restoreStock) {
-    const q = Math.trunc(num(s.qty, 0));
-    if (q !== 0 && s.itemId) {
-      adjustItemStockCore(s.itemId, q);
+    const items = getItems();
+    const ii = items.findIndex((x) => x.id === sale.itemId);
+    if (ii >= 0) {
+      const nextStock = (items[ii].stock ?? 0) + Math.trunc(num(sale.qty, 0));
+      items[ii] = { ...items[ii], stock: nextStock, updatedAt: nowIso() };
+      setItems(items);
     }
   }
 
-  const nextSales = sales.filter((x) => x.id !== saleId);
-  setSales(nextSales);
-}
-
-/* ✅ Eksporter “flate” funksjoner (så imports i pages funker) */
-export function setSalePaid(saleId: string, paid: boolean) {
-  setSalePaidCore(saleId, paid);
-}
-
-/** Signatur som matcher din bruk i Salg.tsx: (saleId, amount, note?, dateIso?) */
-export function addSalePayment(saleId: string, amount: number, note?: string, dateIso?: string) {
-  addSalePaymentCore(saleId, amount, dateIso, note);
-}
-
-export function removeSalePayment(saleId: string, paymentId: string) {
-  removeSalePaymentCore(saleId, paymentId);
-}
-
-export function removeSale(saleId: string, restoreStock: boolean = true) {
-  removeSaleCore(saleId, restoreStock);
+  sales.splice(idx, 1);
+  setSales(sales);
 }
 
 export function useSales() {
@@ -524,15 +514,17 @@ export function useSales() {
   return useMemo(
     () => ({
       sales,
-      setPaid: (saleId: string, paid: boolean) => setSalePaidCore(saleId, paid),
-      addPayment: (saleId: string, amount: number, note?: string, dateIso?: string) => addSalePaymentCore(saleId, amount, dateIso, note),
-      removePayment: (saleId: string, paymentId: string) => removeSalePaymentCore(saleId, paymentId),
-      removeSale: (saleId: string, restoreStock: boolean = true) => removeSaleCore(saleId, restoreStock),
+      addPayment: (saleId: string, amount: number, note?: string, dateIso?: string) => addSalePaymentCore(saleId, amount, note, dateIso),
+      removeSale: (saleId: string, restoreStock = true) => removeSaleCore(saleId, restoreStock),
       setAll: (all: Sale[]) => setSales(all),
     }),
     [sales]
   );
 }
+
+// ✅ Kompat-exports (slik sidene dine kan importere direkte)
+export const addSalePayment = (saleId: string, amount: number, note?: string, dateIso?: string) =>
+  addSalePaymentCore(saleId, amount, note, dateIso);
 
 /* =========================
    Receivables (Gjeld til deg)
@@ -605,24 +597,7 @@ function removeReceivableCore(id: string) {
   setReceivables(getReceivables().filter((x) => x.id !== id));
 }
 
-function setReceivablePaidCore(id: string, paid: boolean) {
-  const list = getReceivables();
-  const i = list.findIndex((x) => x.id === id);
-  if (i < 0) return;
-
-  const r = list[i];
-  if (paid) {
-    const rem = receivableRemaining(r);
-    const payments = [...(r.payments || [])];
-    if (rem > 0) payments.push({ id: uid("pay"), amount: rem, createdAt: nowIso() });
-    list[i] = { ...r, payments, paid: true, updatedAt: nowIso() };
-  } else {
-    list[i] = { ...r, payments: [], paid: false, updatedAt: nowIso() };
-  }
-  setReceivables(list);
-}
-
-function addReceivablePaymentCore(id: string, amount: number, dateIso?: string, note?: string) {
+function addReceivablePaymentCore(id: string, amount: number, note?: string, dateIso?: string) {
   const list = getReceivables();
   const i = list.findIndex((x) => x.id === id);
   if (i < 0) return;
@@ -671,14 +646,16 @@ export function useReceivables() {
       receivables,
       upsert: (r: Omit<Receivable, "createdAt" | "updatedAt" | "paid">) => upsertReceivableCore(r),
       remove: (id: string) => removeReceivableCore(id),
-      setPaid: (id: string, paid: boolean) => setReceivablePaidCore(id, paid),
-      addPayment: (id: string, amount: number, note?: string, dateIso?: string) => addReceivablePaymentCore(id, amount, dateIso, note),
+      addPayment: (id: string, amount: number, note?: string, dateIso?: string) => addReceivablePaymentCore(id, amount, note, dateIso),
       removePayment: (id: string, paymentId: string) => removeReceivablePaymentCore(id, paymentId),
       setAll: (all: Receivable[]) => setReceivables(all),
     }),
     [receivables]
   );
 }
+
+// ✅ Kompat-export (slik Gjeld.tsx kan importere direkte)
+export const addPayment = (id: string, amount: number, note?: string, dateIso?: string) => addReceivablePaymentCore(id, amount, note, dateIso);
 
 /* =========================
    Sale draft customer (forhåndsvalg)
@@ -708,6 +685,10 @@ export type ExportAllPayloadV1 = {
   version: 1;
   exportedAt: string;
   theme: Theme;
+
+  // ✅ ny: saldo (manuell)
+  saldo: number;
+
   items: Vare[];
   customers: Customer[];
   sales: Sale[];
@@ -719,6 +700,7 @@ export function makeExportAllPayload(): ExportAllPayloadV1 {
     version: 1,
     exportedAt: nowIso(),
     theme: getTheme(),
+    saldo: getSaldo(),
     items: getItems(),
     customers: getCustomers(),
     sales: getSales(),
@@ -732,12 +714,12 @@ export function downloadExportAll(filename?: string) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = filename || `nikasso-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  a.download = filename || `salg-gjeld-backup-${new Date().toISOString().slice(0, 10)}.json`;
   a.click();
   URL.revokeObjectURL(url);
 }
 
-/** Alias pga eldre imports */
+/** Alias pga feilmeldingen din */
 export const downloadAllDataJson = downloadExportAll;
 
 export async function importAllFromFile(file: File, mode: "replace" | "merge" = "replace") {
@@ -751,6 +733,7 @@ export async function importAllFromFile(file: File, mode: "replace" | "merge" = 
           version: 1,
           exportedAt: nowIso(),
           theme: getTheme(),
+          saldo: Number(parsed?.saldo ?? getSaldo()) || getSaldo(),
           items: Array.isArray(parsed?.items) ? parsed.items : [],
           customers: Array.isArray(parsed?.customers) ? parsed.customers : [],
           sales: Array.isArray(parsed?.sales) ? parsed.sales : [],
@@ -843,6 +826,9 @@ export async function importAllFromFile(file: File, mode: "replace" | "merge" = 
     setReceivables(nextReceivables);
   }
 
+  // ✅ saldo
+  setSaldo(round2(num((payload as any).saldo, getSaldo())));
+
   if (payload.theme === "light" || payload.theme === "dark") {
     setTheme(payload.theme);
     applyThemeToDom(payload.theme);
@@ -851,39 +837,26 @@ export async function importAllFromFile(file: File, mode: "replace" | "merge" = 
   emitChange();
 }
 
+// ✅ Filvelger for import (så App.tsx kan bruke onClick uten TS-feil)
+export function pickImportAllFile(mode: "replace" | "merge" = "replace") {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "application/json";
+  input.onchange = async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    await importAllFromFile(file, mode);
+  };
+  input.click();
+}
+
 export function clearAllData() {
   localStorage.removeItem(LS_KEYS.items);
   localStorage.removeItem(LS_KEYS.customers);
   localStorage.removeItem(LS_KEYS.sales);
   localStorage.removeItem(LS_KEYS.receivables);
   localStorage.removeItem(LS_KEYS.saleDraftCustomer);
+  localStorage.removeItem(LS_KEYS.saldo);
+  // theme lar vi stå (kan fjernes om du vil)
   emitChange();
-}
-
-/* =========================
-   File picker helpers (for buttons)
-========================= */
-
-export function pickImportAllFile(_e?: any) {
-  const input = document.createElement("input");
-  input.type = "file";
-  input.accept = "application/json,.json";
-  input.onchange = async () => {
-    const file = input.files?.[0];
-    if (!file) return;
-    await importAllFromFile(file, "replace");
-  };
-  input.click();
-}
-
-export function pickImportAllFileMerge(_e?: any) {
-  const input = document.createElement("input");
-  input.type = "file";
-  input.accept = "application/json,.json";
-  input.onchange = async () => {
-    const file = input.files?.[0];
-    if (!file) return;
-    await importAllFromFile(file, "merge");
-  };
-  input.click();
 }
