@@ -1,6 +1,6 @@
 // src/app/App.tsx
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { applyThemeToDom, getTheme, setTheme, Theme, downloadExportAll, importAllFromFile, clearAllData } from "./storage";
+import React, { useEffect, useMemo, useState } from "react";
+import { applyThemeToDom, getTheme, setTheme, Theme } from "./storage";
 
 import { Oversikt } from "../pages/Oversikt";
 import { Varer } from "../pages/Varer";
@@ -14,8 +14,6 @@ type TabKey = "oversikt" | "varer" | "salg" | "kunder" | "gjeld" | "backup";
 export function App() {
   const [theme, setThemeState] = useState<Theme>(() => getTheme());
   const [tab, setTab] = useState<TabKey>("oversikt");
-
-  const importRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     applyThemeToDom(theme);
@@ -35,60 +33,17 @@ export function App() {
     return <Backup />;
   }, [tab]);
 
-  async function handleImportFile(file: File) {
-    await importAllFromFile(file, "replace");
-    alert("Import ferdig ✅");
-  }
-
   return (
     <div className="container">
       <header className="header">
         <div className="headerTop">
           <div>
-            <div className="h1">Oversikt</div>
-            <div className="subRow">
-              <div className="sub">Privat • Lokal lagring i nettleseren</div>
-            </div>
+            <div className="h1">NIKASSO</div>
           </div>
 
           <div className="btnRow" style={{ marginTop: 0, justifyContent: "flex-end" }}>
-            <button className="btn" type="button" onClick={() => downloadExportAll()}>
-              Eksporter ALT
-            </button>
-
-            <button className="btn" type="button" onClick={() => importRef.current?.click()}>
-              Importer ALT
-            </button>
-
-            <input
-              ref={importRef}
-              type="file"
-              accept="application/json"
-              style={{ display: "none" }}
-              onChange={async (e) => {
-                const f = e.target.files?.[0];
-                e.currentTarget.value = "";
-                if (!f) return;
-                try {
-                  await handleImportFile(f);
-                } catch (err: any) {
-                  alert("Import feilet: " + (err?.message || String(err)));
-                }
-              }}
-            />
-
-            <button
-              className="btn btnDanger"
-              type="button"
-              onClick={() => {
-                if (confirm("Slette ALL data i nettleseren? (Varer, kunder, salg, gjeld)")) clearAllData();
-              }}
-            >
-              Nullstill
-            </button>
-
-            <button className="themeBtn" type="button" onClick={toggleTheme} title="Bytt tema">
-              {theme === "dark" ? "🌙 Mørk" : "☀️ Lys"}
+            <button className="iconBtn" type="button" onClick={toggleTheme} title="Bytt tema" aria-label="Bytt tema">
+              {theme === "dark" ? "🌙" : "☀️"}
             </button>
           </div>
         </div>
