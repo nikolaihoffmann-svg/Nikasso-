@@ -1,52 +1,69 @@
 // src/pages/Backup.tsx
-import React, { useRef } from "react";
+import React, { useRef, useState } from "react";
 import { clearAllData, downloadExportAll, importAllFromFile } from "../app/storage";
 
 export function Backup() {
-  const importRef = useRef<HTMLInputElement | null>(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const [mode, setMode] = useState<"replace" | "merge">("replace");
 
   return (
     <div className="card">
       <div className="cardTitle">Backup</div>
-      <div className="cardSub">Eksporter/importer all data (varer, kunder, salg, gjeld).</div>
+      <div className="cardSub">Eksporter / importer alt (varer, kunder, salg, gjeld). Import kan enten erstatte alt eller merge.</div>
 
-      <div className="btnRow">
-        <button className="btn btnPrimary" type="button" onClick={() => downloadExportAll()}>
-          Eksporter ALT
-        </button>
+      <div className="fieldGrid">
+        <div>
+          <label className="label">Import-modus</label>
+          <select className="input" value={mode} onChange={(e) => setMode(e.target.value as any)}>
+            <option value="replace">Erstatt ALT</option>
+            <option value="merge">Merge (legg til / oppdater på id)</option>
+          </select>
+        </div>
 
-        <button className="btn" type="button" onClick={() => importRef.current?.click()}>
-          Importer ALT
-        </button>
+        <div className="btnRow">
+          <button className="btn btnPrimary" type="button" onClick={() => downloadExportAll()}>
+            Eksporter ALT (JSON)
+          </button>
 
-        <button
-          className="btn btnDanger"
-          type="button"
-          onClick={() => {
-            if (confirm("Slette ALL data i nettleseren? (Varer, kunder, salg, gjeld)")) clearAllData();
-          }}
-        >
-          Nullstill
-        </button>
+          <button className="btn" type="button" onClick={() => fileRef.current?.click()}>
+            Importer fra fil…
+          </button>
+
+          <button
+            className="btn btnDanger"
+            type="button"
+            onClick={() => {
+              if (confirm("Slette ALL data i nettleseren?")) clearAllData();
+            }}
+          >
+            Nullstill ALT
+          </button>
+        </div>
 
         <input
-          ref={importRef}
+          ref={fileRef}
           type="file"
-          accept="application/json,.json"
+          accept="application/json"
           style={{ display: "none" }}
           onChange={async (e) => {
-            const file = e.target.files?.[0];
-            e.target.value = "";
-            if (!file) return;
-
+            const f = e.target.files?.[0];
+            e.currentTarget.value = "";
+            if (!f) return;
             try {
-              await importAllFromFile(file, "replace");
-              alert("Import OK ✅");
+              await importAllFromFile(f, mode);
+              alert("Import ferdig ✅");
             } catch (err: any) {
-              alert("Import feilet: " + String(err?.message ?? err));
+              alert("Import feilet: " + (err?.message || String(err)));
             }
           }}
         />
+      </div>
+
+      <div className="card" style={{ marginTop: 18 }}>
+        <div className="cardTitle">Tips</div>
+        <div className="cardSub" style={{ marginBottom: 0 }}>
+          “Erstatt ALT” er tryggest hvis du vil restore en backup. “Merge” er nyttig hvis du vil samle data fra flere enheter.
+        </div>
       </div>
     </div>
   );
