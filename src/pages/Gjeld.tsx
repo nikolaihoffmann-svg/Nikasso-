@@ -48,7 +48,8 @@ function Modal(props: {
 }
 
 export function Gjeld() {
-  const { receivables, upsert, remove, addPayment, removePayment } = useReceivables();
+  // NB: dette matcher signaturen i loggen din
+  const { receivables, upsert, remove, addPayment } = useReceivables();
 
   // Ny gjeld
   const [title, setTitle] = useState("Gjeld");
@@ -86,12 +87,7 @@ export function Gjeld() {
       return a;
     }, 0);
 
-    return {
-      totalOriginal,
-      totalPaid,
-      totalRemaining,
-      overdueRemaining,
-    };
+    return { totalOriginal, totalPaid, totalRemaining, overdueRemaining };
   }, [receivables]);
 
   function add() {
@@ -135,8 +131,8 @@ export function Gjeld() {
     // ISO ved “midt på dagen” for pen dato i UI (unngår tidssone-wobble)
     const iso = payDate ? new Date(`${payDate}T12:00:00`).toISOString() : undefined;
 
-    // NB: signature i storage: addPayment(id, amount, dateIso?, note?)
-    addPayment(payFor.id, a, iso, payNote.trim() || undefined);
+    // VIKTIG: din addPayment er (id, amount, note?, dateIso?)
+    addPayment(payFor.id, a, payNote.trim() || undefined, iso);
     setPayFor(null);
   }
 
@@ -176,12 +172,7 @@ export function Gjeld() {
 
             <div>
               <label className="label">Beløp (kr)</label>
-              <input
-                className="input"
-                inputMode="decimal"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-              />
+              <input className="input" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} />
             </div>
           </div>
 
@@ -221,9 +212,7 @@ export function Gjeld() {
             <div key={r.id} className={overdue ? "item low" : "item"}>
               <div className="itemTop">
                 <div>
-                  <p className="itemTitle">
-                    {r.debtorName}
-                  </p>
+                  <p className="itemTitle">{r.debtorName}</p>
 
                   <div className="itemMeta">
                     {r.title ? (
@@ -243,7 +232,11 @@ export function Gjeld() {
                     • Status: <b>{rem <= 0 ? "Betalt" : overdue ? "Forfalt" : "Utestående"}</b>
                   </div>
 
-                  {r.note ? <div className="itemMeta">Notat: <b>{r.note}</b></div> : null}
+                  {r.note ? (
+                    <div className="itemMeta">
+                      Notat: <b>{r.note}</b>
+                    </div>
+                  ) : null}
 
                   {Array.isArray(r.payments) && r.payments.length > 0 ? (
                     <div className="itemMeta" style={{ marginTop: 8 }}>
@@ -253,22 +246,9 @@ export function Gjeld() {
                         .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""))
                         .slice(0, 8)
                         .map((p) => (
-                          <div key={p.id} style={{ marginTop: 4, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                            <div>
-                              • {new Date(p.createdAt).toLocaleDateString("nb-NO")} – <b>{fmtKr(p.amount)}</b>
-                              {p.note ? <> ({p.note})</> : null}
-                            </div>
-
-                            <button
-                              className="btn"
-                              type="button"
-                              onClick={() => {
-                                if (confirm("Slette denne innbetalingen?")) removePayment(r.id, p.id);
-                              }}
-                              title="Slett innbetaling"
-                            >
-                              Slett
-                            </button>
+                          <div key={p.id} style={{ marginTop: 4 }}>
+                            • {new Date(p.createdAt).toLocaleDateString("nb-NO")} – <b>{fmtKr(p.amount)}</b>
+                            {p.note ? <> ({p.note})</> : null}
                           </div>
                         ))}
 
@@ -330,21 +310,11 @@ export function Gjeld() {
               </div>
               <div>
                 <label className="label">Beløp (kr)</label>
-                <input
-                  className="input"
-                  inputMode="decimal"
-                  value={payAmount}
-                  onChange={(e) => setPayAmount(e.target.value)}
-                />
+                <input className="input" inputMode="decimal" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} />
               </div>
               <div>
                 <label className="label">Notat</label>
-                <input
-                  className="input"
-                  value={payNote}
-                  onChange={(e) => setPayNote(e.target.value)}
-                  placeholder="Valgfritt"
-                />
+                <input className="input" value={payNote} onChange={(e) => setPayNote(e.target.value)} placeholder="Valgfritt" />
               </div>
             </div>
 
