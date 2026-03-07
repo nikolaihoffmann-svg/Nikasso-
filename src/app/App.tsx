@@ -2,12 +2,12 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   applyThemeToDom,
+  clearAllData,
+  downloadExportAll,
   getTheme,
+  pickImportAllFile,
   setTheme,
   Theme,
-  downloadExportAll,
-  pickImportAllFile,
-  clearAllData,
 } from "./storage";
 
 import { Oversikt } from "../pages/Oversikt";
@@ -78,24 +78,31 @@ export function App() {
           </button>
         </nav>
 
-        {/* Liten “quick actions” KUN når man er på Backup */}
         {tab === "backup" ? (
-          <div className="btnRow" style={{ marginTop: 12 }}>
-            <button className="btn" type="button" onClick={downloadExportAll}>
-              Eksporter ALT
-            </button>
-            <button className="btn" type="button" onClick={pickImportAllFile("replace")}>
-              Importer ALT
-            </button>
-            <button
-              className="btn btnDanger"
-              type="button"
-              onClick={() => {
-                if (confirm("Slette ALL data i nettleseren? (Varer, kunder, salg, gjeld)")) clearAllData();
-              }}
-            >
-              Nullstill
-            </button>
+          <div className="card" style={{ marginTop: 14 }}>
+            <div className="cardTitle">Data</div>
+            <div className="cardSub">Eksport/Import/Nullstill – samlet på ett sted.</div>
+
+            <div className="btnRow">
+              <button className="btn btnPrimary" type="button" onClick={() => downloadExportAll()}>
+                Eksporter ALT
+              </button>
+              <button className="btn" type="button" onClick={() => pickImportAllFile("replace")}>
+                Importer (erstatt)
+              </button>
+              <button className="btn" type="button" onClick={() => pickImportAllFile("merge")}>
+                Importer (slå sammen)
+              </button>
+              <button
+                className="btn btnDanger"
+                type="button"
+                onClick={() => {
+                  if (confirm("Slette ALL data i nettleseren? (Varer, kunder, salg, gjeld, saldo)")) clearAllData();
+                }}
+              >
+                Nullstill
+              </button>
+            </div>
           </div>
         ) : null}
       </header>
