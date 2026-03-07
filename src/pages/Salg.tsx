@@ -12,11 +12,13 @@ import {
   saleRemaining,
   setItems,
   setSalePaid,
+  uid,
   useCustomers,
   useItems,
   useSales,
   Vare,
   Sale,
+  SaleLine,
 } from "../app/storage";
 
 function toNum(v: string) {
@@ -89,44 +91,30 @@ function ChoiceModal(props: {
   );
 }
 
-type DraftLine = {
-  itemId: string;
-  itemName: string;
-  qty: number;
-  unitPrice: number;
-  unitCostAtSale: number;
-};
-
 export function Salg() {
   const { items } = useItems();
   const { customers } = useCustomers();
   const { sales, removeSale } = useSales();
 
-  // Draft inputs
-  const [customerId, setCustomerId] = useState<string>("");
   const [itemId, setItemId] = useState<string>("");
   const [qty, setQty] = useState<string>("1");
+  const [customerId, setCustomerId] = useState<string>("");
   const [unitPrice, setUnitPrice] = useState<string>("");
 
-  // Draft cart
-  const [draftLines, setDraftLines] = useState<DraftLine[]>([]);
-  const [paidDefault, setPaidDefault] = useState(true);
+  const [paidDefault, setPaidDefault] = useState<boolean>(true);
 
   const [lowPopup, setLowPopup] = useState<{ item: Vare; newStock: number } | null>(null);
 
-  // betaling modal
   const [paySale, setPaySale] = useState<Sale | null>(null);
   const [payAmount, setPayAmount] = useState("0");
-  const [payDate, setPayDate] = useState<string>(new Date().toISOString().slice(0, 10)); // yyyy-mm-dd
+  const [payDate, setPayDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [payNote, setPayNote] = useState("");
 
-  // slett modal med 2 valg
   const [delSale, setDelSale] = useState<Sale | null>(null);
 
   const selectedItem = useMemo(() => items.find((i) => i.id === itemId) ?? null, [items, itemId]);
   const selectedCustomer = useMemo(() => customers.find((c) => c.id === customerId) ?? null, [customers, customerId]);
 
-  // forhåndsvalg kunde fra Kunder-siden
   useEffect(() => {
     const draft = getSaleDraftCustomer();
     if (draft) {
@@ -135,28 +123,23 @@ export function Salg() {
     }
   }, []);
 
-  // autopopulate pris ved valg av vare (kun hvis feltet er tomt)
   useEffect(() => {
     if (!selectedItem) return;
     if (unitPrice.trim() === "") setUnitPrice(String(selectedItem.price ?? 0));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedItem]);
 
-  const lineTotal = useMemo(() => {
+  const total = useMemo(() => {
     const q = Math.trunc(toNum(qty));
     const p = toNum(unitPrice || (selectedItem?.price ? String(selectedItem.price) : "0"));
     return round2(q * p);
   }, [qty, unitPrice, selectedItem]);
 
-  const draftTotal = useMemo(() => {
-    return round2(draftLines.reduce((a, l) => a + l.qty * l.unitPrice, 0));
-  }, [draftLines]);
-
   const outstandingTotal = useMemo(() => {
     return round2(sales.reduce((a, s) => a + Math.max(0, saleRemaining(s)), 0));
   }, [sales]);
 
-  function addLineToDraft() {
+  function doSale() {
     if (!selectedItem) return alert("Velg en vare først.");
 
     const q = Math.trunc(toNum(qty));
@@ -164,75 +147,36 @@ export function Salg() {
 
     const p = toNum(unitPrice || String(selectedItem.price ?? 0));
 
-    setDraftLines((prev) => [
-      ...prev,
-      {
-        itemId: selectedItem.id,
-        itemName: selectedItem.name,
-        qty: q,
-        unitPrice: round2(p),
-        unitCostAtSale: round2(Number(selectedItem.cost ?? 0)),
-      },
-    ]);
+    const itemsNow = getItems();
+    const idx = itemsNow.findIndex((x) => x.id === selectedItem.id);
+    if (idx < 0) return alert("Fant ikke varen i lageret.");
+
+    const newStock = (itemsNow[idx].stock ?? 0) - q;
+    itemsNow[idx] = { ...itemsNow[idx], stock: newStock, updatedAt: new Date().toISOString() };
+    setItems(itemsNow);
+
+    const line: SaleLine = {
+      id: uid("line"),
+      itemId: selectedItem.id,
+      itemName: selectedItem.name,
+      qty: q,
+      unitPrice: round2(p),
+      unitCostAtSale: Number.isFinite(Number(selectedItem.cost)) ? Number(selectedItem.cost) : undefined,
+    };
+
+    addSale({
+      customerId: selectedCustomer?.id,
+      customerName: selectedCustomer?.name,
+      lines: [line],
+      paid: paidDefault, // ✅ default true
+    });
+
+    const min = itemsNow[idx].minStock ?? 0;
+    if (min > 0 && newStock <= min) setLowPopup({ item: itemsNow[idx], newStock });
 
     setQty("1");
     setUnitPrice("");
     setItemId("");
-  }
-
-  function removeDraftLine(index: number) {
-    setDraftLines((prev) => prev.filter((_, i) => i !== index));
-  }
-
-  function doSale() {
-    if (draftLines.length === 0) return alert("Legg til minst én vare i salget først.");
-
-    // trekk lager for alle lines
-    const itemsNow = getItems();
-    const byId = new Map(itemsNow.map((x) => [x.id, x]));
-    const now = new Date().toISOString();
-
-    // først valider
-    for (const l of draftLines) {
-      const it = byId.get(l.itemId);
-      if (!it) return alert(`Fant ikke varen i lageret: ${l.itemName}`);
-      const newStock = (it.stock ?? 0) - l.qty;
-      // tillat negativt hvis du vil – men dette er en fin sikkerhet:
-      // if (newStock < 0) return alert(`Ikke nok på lager for ${it.name}.`);
-      byId.set(l.itemId, { ...it, stock: newStock, updatedAt: now });
-    }
-
-    // lagre lager
-    setItems(Array.from(byId.values()));
-
-    // lagre salg
-    addSale({
-      customerId: selectedCustomer?.id,
-      customerName: selectedCustomer?.name,
-      lines: draftLines.map((l) => ({
-        itemId: l.itemId,
-        itemName: l.itemName,
-        qty: l.qty,
-        unitPrice: l.unitPrice,
-        unitCostAtSale: l.unitCostAtSale,
-      })),
-      paid: paidDefault, // default betalt ✅
-    });
-
-    // low stock popup: sjekk alle berørte varer
-    for (const l of draftLines) {
-      const it = byId.get(l.itemId);
-      if (!it) continue;
-      const min = it.minStock ?? 0;
-      if (min > 0 && (it.stock ?? 0) <= min) {
-        setLowPopup({ item: it, newStock: it.stock ?? 0 });
-        break;
-      }
-    }
-
-    // reset draft
-    setDraftLines([]);
-    setPaidDefault(true);
   }
 
   function openPayment(s: Sale) {
@@ -260,12 +204,6 @@ export function Salg() {
     if (!delSale) return;
     removeSale(delSale.id, restoreStock);
     setDelSale(null);
-  }
-
-  function renderSaleTitle(s: Sale) {
-    if (!s.lines || s.lines.length === 0) return "Salg";
-    if (s.lines.length === 1) return s.lines[0].itemName;
-    return `${s.lines[0].itemName} + ${s.lines.length - 1} til`;
   }
 
   return (
@@ -319,62 +257,23 @@ export function Salg() {
             />
           </div>
           <div>
-            <label className="label">Sum (linje)</label>
-            <input className="input" value={fmtKr(lineTotal)} readOnly />
+            <label className="label">Sum</label>
+            <input className="input" value={fmtKr(total)} readOnly />
           </div>
+        </div>
+
+        <div>
+          <label className="label">Status</label>
+          <select className="input" value={paidDefault ? "paid" : "unpaid"} onChange={(e) => setPaidDefault(e.target.value === "paid")}>
+            <option value="paid">Betalt (default)</option>
+            <option value="unpaid">Ikke betalt</option>
+          </select>
         </div>
 
         <div className="btnRow">
-          <button className="btn" type="button" onClick={addLineToDraft}>
-            Legg til vare
+          <button className="btn btnPrimary" type="button" onClick={doSale}>
+            Registrer salg
           </button>
-        </div>
-
-        {/* Draft cart */}
-        <div className="card" style={{ marginTop: 0 }}>
-          <div className="cardTitle" style={{ fontSize: 18, marginBottom: 8 }}>
-            Dette salget
-          </div>
-
-          {draftLines.length === 0 ? (
-            <div className="item">Ingen varer lagt til enda.</div>
-          ) : (
-            <div className="list">
-              {draftLines.map((l, idx) => (
-                <div key={`${l.itemId}-${idx}`} className="item">
-                  <p className="itemTitle">{l.itemName}</p>
-                  <div className="itemMeta">
-                    Antall: <b>{l.qty}</b> • Pris: <b>{fmtKr(l.unitPrice)}</b> • Sum: <b>{fmtKr(l.qty * l.unitPrice)}</b>
-                  </div>
-                  <div className="itemActions">
-                    <button className="btn btnDanger" type="button" onClick={() => removeDraftLine(idx)}>
-                      Fjern
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <div className="itemMeta" style={{ marginTop: 10 }}>
-            Totalt: <b>{fmtKr(draftTotal)}</b>
-          </div>
-
-          <div className="itemMeta" style={{ marginTop: 10 }}>
-            <label style={{ display: "inline-flex", gap: 10, alignItems: "center" }}>
-              <input type="checkbox" checked={paidDefault} onChange={(e) => setPaidDefault(e.target.checked)} />
-              <span>Betalt (default)</span>
-            </label>
-          </div>
-
-          <div className="btnRow" style={{ marginTop: 12 }}>
-            <button className="btn btnPrimary" type="button" onClick={doSale}>
-              Lagre salg
-            </button>
-            <button className="btn" type="button" onClick={() => setDraftLines([])} disabled={draftLines.length === 0}>
-              Tøm
-            </button>
-          </div>
         </div>
       </div>
 
@@ -382,19 +281,21 @@ export function Salg() {
 
       <div className="card" style={{ marginTop: 0 }}>
         <div className="cardTitle">Siste salg</div>
-        <div className="cardSub">Viser siste 25 • du kan endre betalt/ubetalt • innbetaling • slette</div>
+        <div className="cardSub">Viser siste 25 • delbetaling/utestående • toggle betalt • slett</div>
 
         <div className="list">
           {sales.slice(0, 25).map((s) => {
-            const paidSum = salePaidSum(s);
+            const paid = salePaidSum(s);
             const rem = Math.max(0, saleRemaining(s));
-            const isPaid = s.paid || rem <= 0;
+            const first = s.lines?.[0];
 
             return (
               <div key={s.id} className={rem > 0 ? "item low" : "item"}>
                 <div className="itemTop">
                   <div>
-                    <p className="itemTitle">{renderSaleTitle(s)}</p>
+                    <p className="itemTitle">
+                      {s.lines?.length > 1 ? `${s.lines.length} varer` : first ? first.itemName : "Salg"}
+                    </p>
 
                     <div className="itemMeta">
                       Sum: <b>{fmtKr(s.total)}</b>
@@ -404,63 +305,36 @@ export function Salg() {
                           • Kunde: <b>{s.customerName}</b>
                         </>
                       ) : null}
-                      {" • "}
-                      {new Date(s.createdAt).toLocaleString("nb-NO")}
                     </div>
 
-                    {/* Lines */}
-                    {Array.isArray(s.lines) && s.lines.length > 0 ? (
-                      <div className="itemMeta" style={{ marginTop: 8 }}>
-                        <b>Varer:</b>
-                        {s.lines.slice(0, 6).map((l) => (
+                    {s.lines?.length ? (
+                      <div className="itemMeta" style={{ marginTop: 6 }}>
+                        <b>Linjer:</b>
+                        {s.lines.slice(0, 3).map((l) => (
                           <div key={l.id} style={{ marginTop: 4 }}>
-                            • {l.itemName} — <b>{l.qty}</b> stk × <b>{fmtKr(l.unitPrice)}</b> ={" "}
-                            <b>{fmtKr(l.qty * l.unitPrice)}</b>
+                            • {l.itemName} × <b>{l.qty}</b> á <b>{fmtKr(l.unitPrice)}</b>
                           </div>
                         ))}
-                        {s.lines.length > 6 ? <div style={{ marginTop: 4, opacity: 0.9 }}>… +{s.lines.length - 6} til</div> : null}
+                        {s.lines.length > 3 ? <div style={{ marginTop: 4, opacity: 0.9 }}>… +{s.lines.length - 3} til</div> : null}
                       </div>
                     ) : null}
 
                     <div className="itemMeta" style={{ marginTop: 8 }}>
-                      Status: <b>{isPaid ? "Betalt" : "Ubetalt"}</b> • Innbetalt: <b>{fmtKr(paidSum)}</b> • Utestående:{" "}
-                      <b>{fmtKr(rem)}</b>
+                      Innbetalt: <b>{fmtKr(paid)}</b> • Utestående: <b>{fmtKr(rem)}</b> • {new Date(s.createdAt).toLocaleString("nb-NO")}
                     </div>
-
-                    {Array.isArray(s.payments) && s.payments.length > 0 ? (
-                      <div className="itemMeta" style={{ marginTop: 8 }}>
-                        <b>Innbetalinger:</b>
-                        {s.payments.slice(0, 4).map((p) => (
-                          <div key={p.id} style={{ marginTop: 4 }}>
-                            • {new Date(p.createdAt).toLocaleDateString("nb-NO")} – <b>{fmtKr(p.amount)}</b>
-                            {p.note ? <> ({p.note})</> : null}
-                          </div>
-                        ))}
-                        {s.payments.length > 4 ? (
-                          <div style={{ marginTop: 4, opacity: 0.9 }}>… +{s.payments.length - 4} til</div>
-                        ) : null}
-                      </div>
-                    ) : null}
                   </div>
                 </div>
 
                 <div className="itemActions">
-                  {/* Toggle paid/unpaid */}
-                  {isPaid ? (
-                    <button className="btn" type="button" onClick={() => setSalePaid(s.id, false)}>
-                      Marker som ubetalt
-                    </button>
-                  ) : (
-                    <button className="btn" type="button" onClick={() => setSalePaid(s.id, true)}>
-                      Marker som betalt
-                    </button>
-                  )}
-
                   {rem > 0 ? (
                     <button className="btn btnPrimary" type="button" onClick={() => openPayment(s)}>
                       Registrer innbetaling
                     </button>
                   ) : null}
+
+                  <button className="btn" type="button" onClick={() => setSalePaid(s.id, !s.paid)}>
+                    {s.paid ? "Marker ubetalt" : "Marker betalt"}
+                  </button>
 
                   <button className="btn btnDanger" type="button" onClick={() => askDelete(s)}>
                     Slett
@@ -499,14 +373,7 @@ export function Salg() {
         {paySale ? (
           <div className="fieldGrid" style={{ marginTop: 0 }}>
             <div className="itemMeta" style={{ marginTop: 0 }}>
-              <b>{renderSaleTitle(paySale)}</b>
-              {paySale.customerName ? (
-                <>
-                  {" "}
-                  • Kunde: <b>{paySale.customerName}</b>
-                </>
-              ) : null}{" "}
-              • Utestående: <b>{fmtKr(Math.max(0, saleRemaining(paySale)))}</b>
+              <b>{paySale.customerName || "Salg"}</b> • Utestående: <b>{fmtKr(Math.max(0, saleRemaining(paySale)))}</b>
             </div>
 
             <div className="row3">
@@ -549,11 +416,9 @@ export function Salg() {
       >
         {delSale ? (
           <div className="itemMeta" style={{ marginTop: 0 }}>
-            <b>{renderSaleTitle(delSale)}</b>
-            <br />
             Sum: <b>{fmtKr(delSale.total)}</b>
             <br />
-            <span style={{ opacity: 0.9 }}>Velg om varene skal legges tilbake på lager eller ikke.</span>
+            <span style={{ opacity: 0.9 }}>Velg om varer skal legges tilbake på lager eller ikke.</span>
           </div>
         ) : null}
       </ChoiceModal>
