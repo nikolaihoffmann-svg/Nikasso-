@@ -1,6 +1,14 @@
 // src/app/App.tsx
 import React, { useEffect, useMemo, useState } from "react";
-import { applyThemeToDom, getTheme, pickImportAllFile, setTheme, Theme, downloadExportAll, clearAllData } from "./storage";
+import {
+  applyThemeToDom,
+  getTheme,
+  setTheme,
+  Theme,
+  downloadExportAll,
+  pickImportAllFile,
+  clearAllData,
+} from "./storage";
 
 import { Oversikt } from "../pages/Oversikt";
 import { Varer } from "../pages/Varer";
@@ -42,7 +50,7 @@ export function App() {
           </div>
 
           <div className="btnRow" style={{ marginTop: 0, justifyContent: "flex-end" }}>
-            <button className="btn" type="button" onClick={() => setTab("backup")} title="Eksport / Import / Nullstill">
+            <button className="btn" type="button" onClick={() => setTab("backup")}>
               ⚙️ Data
             </button>
 
@@ -68,10 +76,28 @@ export function App() {
           <button className={`tab ${tab === "gjeld" ? "active" : ""}`} onClick={() => setTab("gjeld")} type="button">
             Gjeld
           </button>
-          <button className={`tab ${tab === "backup" ? "active" : ""}`} onClick={() => setTab("backup")} type="button">
-            Backup
-          </button>
         </nav>
+
+        {/* Liten “quick actions” KUN når man er på Backup */}
+        {tab === "backup" ? (
+          <div className="btnRow" style={{ marginTop: 12 }}>
+            <button className="btn" type="button" onClick={downloadExportAll}>
+              Eksporter ALT
+            </button>
+            <button className="btn" type="button" onClick={pickImportAllFile("replace")}>
+              Importer ALT
+            </button>
+            <button
+              className="btn btnDanger"
+              type="button"
+              onClick={() => {
+                if (confirm("Slette ALL data i nettleseren? (Varer, kunder, salg, gjeld)")) clearAllData();
+              }}
+            >
+              Nullstill
+            </button>
+          </div>
+        ) : null}
       </header>
 
       {content}
