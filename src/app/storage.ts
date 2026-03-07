@@ -31,30 +31,44 @@ export type Customer = {
 export type Payment = {
   id: string;
   amount: number;
-  createdAt: string; // ISO
+  /** ISO-tidspunkt for innbetaling */
+  createdAt: string;
   note?: string;
+};
+
+export type SaleLine = {
+  itemId: string;
+  itemName: string;
+  qty: number;
+  unitPrice: number;
+
+  /** kost per stk på salgstidspunktet (for korrekt historikk) */
+  unitCostAtSale?: number;
 };
 
 export type Sale = {
   id: string;
 
-  itemId: string;
-  itemName: string;
-  qty: number;
-  unitPrice: number;
+  /** Ny modell: flere varer pr salg */
+  lines: SaleLine[];
+
+  /** Legacy (for kompatibilitet med gamle sider/visninger) */
+  itemId?: string;
+  itemName?: string;
+  qty?: number;
+  unitPrice?: number;
+  unitCostAtSale?: number;
+
   total: number;
 
   customerId?: string;
   customerName?: string;
 
-  // historisk kost pr stk (valgfri for gamle salg)
-  unitCostAtSale?: number;
-
-  // delbetaling
   payments: Payment[];
-
-  // “hurtigstatus” (holdes i sync med payments/total)
   paid: boolean;
+
+  dueDate?: string;
+  note?: string;
 
   createdAt: string;
 };
@@ -62,11 +76,16 @@ export type Sale = {
 export type Receivable = {
   id: string;
 
-  title: string; // f.eks "Gjeld"
-  debtorName: string; // hvem skylder deg
-  amount: number; // totalt
+  /** Kort tittel (f.eks "Lån", "Faktura", "Diverse") */
+  title: string;
 
-  dueDate?: string; // yyyy-mm-dd eller ISO
+  /** Hvem skylder deg */
+  debtorName: string;
+
+  /** Totalbeløp som skal inn */
+  amount: number;
+
+  dueDate?: string;
   note?: string;
 
   payments: Payment[];
@@ -74,6 +93,28 @@ export type Receivable = {
 
   createdAt: string;
   updatedAt: string;
+};
+
+export type AddSaleInput = {
+  customerId?: string;
+  customerName?: string;
+
+  /** Ny måte */
+  lines?: SaleLine[];
+
+  /** Legacy måte (hvis du fortsatt lager “1 vare pr salg”) */
+  itemId?: string;
+  itemName?: string;
+  qty?: number;
+  unitPrice?: number;
+  unitCostAtSale?: number;
+
+  /** status/innbetaling */
+  paid?: boolean;
+  payments?: Payment[];
+
+  dueDate?: string;
+  note?: string;
 };
 
 /* =========================
@@ -126,6 +167,7 @@ function num(v: any, fallback = 0) {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
 }
+
 function str(v: any, fallback = "") {
   const s = String(v ?? "");
   return s.length ? s : fallback;
@@ -143,6 +185,24 @@ function normalizePayments(raw: any): Payment[] {
     .filter((p) => p.amount !== 0);
 }
 
+function normalizeLines(raw: any): SaleLine[] {
+  const arr: any[] = Array.isArray(raw) ? raw : [];
+  const out = arr
+    .map((l) => ({
+      itemId: str(l.itemId),
+      itemName: str(l.itemName),
+      qty: Math.trunc(num(l.qty, 0)),
+      unitPrice: round2(num(l.unitPrice, 0)),
+      unitCostAtSale: Number.isFinite(Number(l.unitCostAtSale)) ? Number(l.unitCostAtSale) : undefined,
+    }))
+    .filter((l) => l.itemId && l.itemName && l.qty !== 0);
+  return out;
+}
+
+function sumLineTotal(lines: SaleLine[]) {
+  return round2(lines.reduce((a, l) => a + round2(num(l.qty, 0) * num(l.unitPrice, 0)), 0));
+}
+
 /* =========================
    Theme
 ========================= */
@@ -158,7 +218,7 @@ export function setTheme(t: Theme) {
 }
 
 export function applyThemeToDom(theme: Theme) {
-  document.documentElement.dataset.theme = theme;
+  document.documentElement.dataset.theme = theme; // CSS: :root[data-theme="light"]
   document.documentElement.classList.toggle("theme-dark", theme === "dark");
   document.documentElement.classList.toggle("theme-light", theme === "light");
 }
@@ -188,12 +248,12 @@ export function getSaldo(): number {
   return round2(num(v, 0));
 }
 
-export function setSaldo(value: number) {
-  localStorage.setItem(LS_KEYS.saldo, JSON.stringify(round2(num(value, 0))));
+export function setSaldo(next: number) {
+  localStorage.setItem(LS_KEYS.saldo, JSON.stringify(round2(num(next, 0))));
   emitChange();
 }
 
-export function useSaldo(): [number, (v: number) => void] {
+export function useSaldo(): [number, (n: number) => void] {
   const [saldo, setState] = useState<number>(() => getSaldo());
 
   useEffect(() => {
@@ -345,13 +405,13 @@ export function useCustomers() {
 }
 
 /* =========================
-   Sales helpers
+   Sales (Salg)
 ========================= */
 
 export function salePaidSum(s: Sale) {
-  const payments = Array.isArray(s.payments) ? s.payments : [];
-  if (payments.length > 0) return round2(payments.reduce((a, p) => a + num(p.amount, 0), 0));
-  // fallback for gamle salg uten payments
+  if (Array.isArray(s.payments) && s.payments.length > 0) {
+    return round2(s.payments.reduce((a, p) => a + num(p.amount, 0), 0));
+  }
   return s.paid ? round2(num(s.total, 0)) : 0;
 }
 
@@ -361,48 +421,65 @@ export function saleRemaining(s: Sale) {
   return round2(Math.max(0, total - paid));
 }
 
-/* =========================
-   Sales (Salg)
-========================= */
+function saleLinesFromLegacy(x: any): SaleLine[] {
+  const itemId = str(x.itemId);
+  const itemName = str(x.itemName);
+  const qty = Math.trunc(num(x.qty, 0));
+  const unitPrice = round2(num(x.unitPrice, 0));
 
-export type AddSaleInput = {
-  itemId: string;
-  itemName: string;
-  qty: number;
-  unitPrice: number;
-  customerId?: string;
-  customerName?: string;
-  unitCostAtSale?: number;
-  payments?: Payment[];
-  paid?: boolean; // default = true
-};
+  if (!itemId || !itemName || qty === 0) return [];
+  return [
+    {
+      itemId,
+      itemName,
+      qty,
+      unitPrice,
+      unitCostAtSale: Number.isFinite(Number(x.unitCostAtSale)) ? Number(x.unitCostAtSale) : undefined,
+    },
+  ];
+}
 
 export function getSales(): Sale[] {
   const raw = safeJsonParse<any[]>(localStorage.getItem(LS_KEYS.sales), []);
 
   const normalized: Sale[] = (raw || []).map((x) => {
-    const qty = Math.trunc(num(x.qty, 0));
-    const unitPrice = round2(num(x.unitPrice, 0));
-    const total = round2(num(x.total, round2(qty * unitPrice)));
-
     const payments = normalizePayments(x.payments);
-    const paidFromPayments = payments.length ? round2(payments.reduce((a, p) => a + num(p.amount, 0), 0)) >= total : false;
 
+    const lines = (() => {
+      const ln = normalizeLines(x.lines);
+      if (ln.length) return ln;
+      return saleLinesFromLegacy(x);
+    })();
+
+    const total = round2(num(x.total, lines.length ? sumLineTotal(lines) : round2(num(x.qty, 0) * num(x.unitPrice, 0))));
+
+    const paidSum = payments.length ? payments.reduce((a, p) => a + num(p.amount, 0), 0) : 0;
     const paidLegacy = Boolean(x.paid);
-    const paid = payments.length ? paidFromPayments : paidLegacy;
+    const paid = payments.length ? round2(paidSum) >= total : paidLegacy;
 
     return {
       id: str(x.id, uid("sale")),
-      itemId: str(x.itemId),
-      itemName: str(x.itemName),
-      qty,
-      unitPrice,
+
+      lines,
+
+      // legacy fields (for visning/kompat)
+      itemId: x.itemId ? String(x.itemId) : (lines[0]?.itemId ?? undefined),
+      itemName: x.itemName ? String(x.itemName) : (lines[0]?.itemName ?? undefined),
+      qty: Number.isFinite(Number(x.qty)) ? Math.trunc(Number(x.qty)) : (lines[0]?.qty ?? undefined),
+      unitPrice: Number.isFinite(Number(x.unitPrice)) ? round2(Number(x.unitPrice)) : (lines[0]?.unitPrice ?? undefined),
+      unitCostAtSale: Number.isFinite(Number(x.unitCostAtSale)) ? Number(x.unitCostAtSale) : (lines[0]?.unitCostAtSale ?? undefined),
+
       total,
+
       customerId: x.customerId ? String(x.customerId) : undefined,
       customerName: x.customerName ? String(x.customerName) : undefined,
-      unitCostAtSale: Number.isFinite(Number(x.unitCostAtSale)) ? Number(x.unitCostAtSale) : undefined,
+
       payments,
       paid,
+
+      dueDate: x.dueDate ? String(x.dueDate) : undefined,
+      note: x.note ? String(x.note) : undefined,
+
       createdAt: str(x.createdAt, nowIso()),
     };
   });
@@ -420,66 +497,89 @@ export function addSale(input: AddSaleInput) {
   const sales = getSales();
   const createdAt = nowIso();
 
-  const qty = Math.trunc(num(input.qty, 0));
-  const unitPrice = round2(num(input.unitPrice, 0));
-  const total = round2(qty * unitPrice);
+  const lines = (() => {
+    const ln = normalizeLines(input.lines);
+    if (ln.length) return ln;
+
+    const itemId = str(input.itemId);
+    const itemName = str(input.itemName);
+    const qty = Math.trunc(num(input.qty, 0));
+    const unitPrice = round2(num(input.unitPrice, 0));
+    if (!itemId || !itemName || qty <= 0) return [];
+    return [
+      {
+        itemId,
+        itemName,
+        qty,
+        unitPrice,
+        unitCostAtSale: Number.isFinite(Number(input.unitCostAtSale)) ? Number(input.unitCostAtSale) : undefined,
+      },
+    ];
+  })();
+
+  const total = round2(lines.length ? sumLineTotal(lines) : 0);
 
   const payments = normalizePayments(input.payments);
   const paid =
     payments.length > 0
       ? round2(payments.reduce((a, p) => a + num(p.amount, 0), 0)) >= total
-      : input.paid !== undefined
-        ? Boolean(input.paid)
-        : true; // ✅ default: betalt
+      : Boolean(input.paid);
 
-  const next: Sale = {
+  const s: Sale = {
     id: uid("sale"),
-    itemId: input.itemId,
-    itemName: input.itemName,
-    qty,
-    unitPrice,
+    createdAt,
+
+    lines,
+
+    // legacy for visning
+    itemId: lines[0]?.itemId,
+    itemName: lines[0]?.itemName,
+    qty: lines[0]?.qty,
+    unitPrice: lines[0]?.unitPrice,
+    unitCostAtSale: lines[0]?.unitCostAtSale,
+
     total,
+
     customerId: input.customerId,
     customerName: input.customerName,
-    unitCostAtSale: Number.isFinite(Number(input.unitCostAtSale)) ? Number(input.unitCostAtSale) : undefined,
+
     payments,
     paid,
-    createdAt,
+
+    dueDate: input.dueDate,
+    note: input.note,
   };
 
-  sales.unshift(next);
+  sales.unshift(s);
   setSales(sales);
 }
 
-export function setSalePaid(saleId: string, paid: boolean) {
+/** intern: sett paid/unpaid uten å ødelegge historikk */
+function setSalePaidCore(saleId: string, paid: boolean) {
   const sales = getSales();
   const i = sales.findIndex((x) => x.id === saleId);
   if (i < 0) return;
 
   const s = sales[i];
-
   if (paid) {
-    // fyll opp rest som betaling hvis det mangler
     const rem = saleRemaining(s);
     const payments = Array.isArray(s.payments) ? [...s.payments] : [];
     if (rem > 0) payments.push({ id: uid("pay"), amount: rem, createdAt: nowIso() });
     sales[i] = { ...s, payments, paid: true };
   } else {
-    // sett som ubetalt: behold payments (valgfritt). Her gjør vi det enkelt: tøm.
+    // “ikke betalt” = behold payments? her nuller vi den for enkelhet
     sales[i] = { ...s, payments: [], paid: false };
   }
-
   setSales(sales);
 }
 
-export function addSalePayment(saleId: string, amount: number, note?: string, dateIso?: string) {
+function addSalePaymentCore(saleId: string, amount: number, note?: string, dateIso?: string) {
   const sales = getSales();
   const i = sales.findIndex((x) => x.id === saleId);
   if (i < 0) return;
 
   const s = sales[i];
   const payments = Array.isArray(s.payments) ? [...s.payments] : [];
-
   payments.push({
     id: uid("pay"),
     amount: round2(num(amount, 0)),
@@ -492,7 +592,7 @@ export function addSalePayment(saleId: string, amount: number, note?: string, da
   setSales(sales);
 }
 
-export function removeSalePayment(saleId: string, paymentId: string) {
+function removeSalePaymentCore(saleId: string, paymentId: string) {
   const sales = getSales();
   const i = sales.findIndex((x) => x.id === saleId);
   if (i < 0) return;
@@ -504,23 +604,29 @@ export function removeSalePayment(saleId: string, paymentId: string) {
   setSales(sales);
 }
 
-export function removeSale(saleId: string, restoreStock: boolean) {
+function removeSaleCore(saleId: string, restoreStock: boolean) {
   const sales = getSales();
-  const s = sales.find((x) => x.id === saleId);
-  if (!s) return;
+  const idx = sales.findIndex((x) => x.id === saleId);
+  if (idx < 0) return;
 
-  // Fjern salget
-  setSales(sales.filter((x) => x.id !== saleId));
+  const s = sales[idx];
 
-  // Legg tilbake på lager hvis ønsket
   if (restoreStock) {
     const items = getItems();
-    const idx = items.findIndex((it) => it.id === s.itemId);
-    if (idx >= 0) {
-      items[idx] = { ...items[idx], stock: (items[idx].stock ?? 0) + (s.qty ?? 0), updatedAt: nowIso() };
-      setItems(items);
+    const lines = Array.isArray(s.lines) && s.lines.length ? s.lines : saleLinesFromLegacy(s);
+
+    for (const l of lines) {
+      const i = items.findIndex((it) => it.id === l.itemId);
+      if (i >= 0) {
+        const nextStock = (items[i].stock ?? 0) + Math.trunc(num(l.qty, 0));
+        items[i] = { ...items[i], stock: nextStock, updatedAt: nowIso() };
+      }
     }
+    setItems(items);
   }
+
+  sales.splice(idx, 1);
+  setSales(sales);
 }
 
 export function useSales() {
@@ -539,23 +645,32 @@ export function useSales() {
   return useMemo(
     () => ({
       sales,
-      setPaid: (saleId: string, paid: boolean) => setSalePaid(saleId, paid),
-      addPayment: (saleId: string, amount: number, note?: string, dateIso?: string) => addSalePayment(saleId, amount, note, dateIso),
-      removePayment: (saleId: string, paymentId: string) => removeSalePayment(saleId, paymentId),
-      removeSale: (saleId: string, restoreStock: boolean) => removeSale(saleId, restoreStock),
+      setPaid: (saleId: string, paid: boolean) => setSalePaidCore(saleId, paid),
+      addPayment: (saleId: string, amount: number, note?: string, dateIso?: string) => addSalePaymentCore(saleId, amount, note, dateIso),
+      removePayment: (saleId: string, paymentId: string) => removeSalePaymentCore(saleId, paymentId),
+      removeSale: (saleId: string, restoreStock: boolean) => removeSaleCore(saleId, restoreStock),
       setAll: (all: Sale[]) => setSales(all),
     }),
     [sales]
   );
 }
 
+/** Aliaser (for imports som varierer i filene dine) */
+export const addSalePayment = (saleId: string, amount: number, note?: string, dateIso?: string) =>
+  addSalePaymentCore(saleId, amount, note, dateIso);
+
+export const removeSalePayment = (saleId: string, paymentId: string) => removeSalePaymentCore(saleId, paymentId);
+
+export const setSalePaid = (saleId: string, paid: boolean) => setSalePaidCore(saleId, paid);
+
 /* =========================
-   Receivables helpers
+   Receivables (Gjeld til deg)
 ========================= */
 
 export function receivablePaidSum(r: Receivable) {
-  const payments = Array.isArray(r.payments) ? r.payments : [];
-  if (payments.length > 0) return round2(payments.reduce((a, p) => a + num(p.amount, 0), 0));
+  if (Array.isArray(r.payments) && r.payments.length > 0) {
+    return round2(r.payments.reduce((a, p) => a + num(p.amount, 0), 0));
+  }
   return r.paid ? round2(num(r.amount, 0)) : 0;
 }
 
@@ -565,27 +680,26 @@ export function receivableRemaining(r: Receivable) {
   return round2(Math.max(0, total - paid));
 }
 
-/* =========================
-   Receivables (Gjeld til deg)
-========================= */
-
 export function getReceivables(): Receivable[] {
   const raw = safeJsonParse<any[]>(localStorage.getItem(LS_KEYS.receivables), []);
 
   const normalized: Receivable[] = (raw || []).map((x) => {
     const amount = round2(num(x.amount, 0));
     const payments = normalizePayments(x.payments);
-    const paid = payments.length ? receivableRemaining({ ...(x as any), amount, payments } as Receivable) <= 0 : Boolean(x.paid);
+    const paid = payments.length ? receivableRemaining({ ...(x as any), payments, amount } as Receivable) <= 0 : Boolean(x.paid);
 
     return {
       id: str(x.id, uid("rcv")),
       title: str(x.title, "Gjeld"),
       debtorName: str(x.debtorName, "Ukjent"),
       amount,
+
       dueDate: x.dueDate ? String(x.dueDate) : undefined,
       note: x.note ? String(x.note) : undefined,
+
       payments,
       paid,
+
       createdAt: str(x.createdAt, nowIso()),
       updatedAt: str(x.updatedAt, nowIso()),
     };
@@ -620,6 +734,7 @@ function upsertReceivableCore(r: Omit<Receivable, "createdAt" | "updatedAt" | "p
       updatedAt: nowIso(),
     } as Receivable);
   }
+
   setReceivables(list);
 }
 
@@ -633,7 +748,7 @@ function addReceivablePaymentCore(id: string, amount: number, note?: string, dat
   if (i < 0) return;
 
   const r = list[i];
-  const payments = Array.isArray(r.payments) ? [...r.payments] : [];
+  const payments = [...(r.payments || [])];
   payments.push({
     id: uid("pay"),
     amount: round2(num(amount, 0)),
@@ -641,6 +756,18 @@ function addReceivablePaymentCore(id: string, amount: number, note?: string, dat
     note: note?.trim() ? note.trim() : undefined,
   });
 
+  const paid = receivableRemaining({ ...r, payments }) <= 0;
+  list[i] = { ...r, payments, paid, updatedAt: nowIso() };
+  setReceivables(list);
+}
+
+function removeReceivablePaymentCore(id: string, paymentId: string) {
+  const list = getReceivables();
+  const i = list.findIndex((x) => x.id === id);
+  if (i < 0) return;
+
+  const r = list[i];
+  const payments = (r.payments || []).filter((p) => p.id !== paymentId);
   const paid = receivableRemaining({ ...r, payments }) <= 0;
   list[i] = { ...r, payments, paid, updatedAt: nowIso() };
   setReceivables(list);
@@ -665,11 +792,16 @@ export function useReceivables() {
       upsert: (r: Omit<Receivable, "createdAt" | "updatedAt" | "paid">) => upsertReceivableCore(r),
       remove: (id: string) => removeReceivableCore(id),
       addPayment: (id: string, amount: number, note?: string, dateIso?: string) => addReceivablePaymentCore(id, amount, note, dateIso),
+      removePayment: (id: string, paymentId: string) => removeReceivablePaymentCore(id, paymentId),
       setAll: (all: Receivable[]) => setReceivables(all),
     }),
     [receivables]
   );
 }
+
+/** Aliaser (for imports som varierer i filene dine) */
+export const receivablePaidSum = (r: Receivable) => round2(num(r.amount, 0) - Math.max(0, receivableRemaining(r))); // (bruk heller receivablePaidSum over, men denne holder TS fornøyd)
+export const receivableRemainingSum = receivableRemaining;
 
 /* =========================
    Sale draft customer (forhåndsvalg)
@@ -719,7 +851,11 @@ export function makeExportAllPayload(): ExportAllPayloadV1 {
   };
 }
 
-export function downloadExportAll(filename?: string) {
+/**
+ * Kan brukes direkte som onClick-handler:
+ * <button onClick={downloadExportAll}>...</button>
+ */
+export function downloadExportAll(_ev?: any, filename?: string) {
   const payload = makeExportAllPayload();
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
@@ -730,18 +866,8 @@ export function downloadExportAll(filename?: string) {
   URL.revokeObjectURL(url);
 }
 
-/** Liten helper til App.tsx: åpner filvelger og importerer */
-export function pickImportAllFile(mode: "replace" | "merge" = "replace") {
-  const input = document.createElement("input");
-  input.type = "file";
-  input.accept = "application/json";
-  input.onchange = async () => {
-    const file = input.files?.[0];
-    if (!file) return;
-    await importAllFromFile(file, mode);
-  };
-  input.click();
-}
+/** Alias brukt i noen av filene dine */
+export const downloadAllDataJson = downloadExportAll;
 
 export async function importAllFromFile(file: File, mode: "replace" | "merge" = "replace") {
   const text = await file.text();
@@ -749,80 +875,23 @@ export async function importAllFromFile(file: File, mode: "replace" | "merge" = 
 
   const payload: ExportAllPayloadV1 =
     parsed && typeof parsed === "object" && parsed.version === 1
-      ? parsed
+      ? (parsed as ExportAllPayloadV1)
       : {
           version: 1,
           exportedAt: nowIso(),
           theme: getTheme(),
           saldo: getSaldo(),
-          items: Array.isArray(parsed?.items) ? parsed.items : [],
-          customers: Array.isArray(parsed?.customers) ? parsed.customers : [],
-          sales: Array.isArray(parsed?.sales) ? parsed.sales : [],
-          receivables: Array.isArray(parsed?.receivables) ? parsed.receivables : [],
+          items: Array.isArray((parsed as any)?.items) ? (parsed as any).items : [],
+          customers: Array.isArray((parsed as any)?.customers) ? (parsed as any).customers : [],
+          sales: Array.isArray((parsed as any)?.sales) ? (parsed as any).sales : [],
+          receivables: Array.isArray((parsed as any)?.receivables) ? (parsed as any).receivables : [],
         };
 
-  const nextItems = (Array.isArray(payload.items) ? payload.items : []).map((x: any) => ({
-    id: str(x.id, uid("item")),
-    name: str(x.name).trim(),
-    price: round2(num(x.price, 0)),
-    cost: round2(num(x.cost, 0)),
-    stock: Math.trunc(num(x.stock, 0)),
-    minStock: Math.trunc(num(x.minStock, 10)),
-    createdAt: str(x.createdAt, nowIso()),
-    updatedAt: str(x.updatedAt, nowIso()),
-  })) as Vare[];
-
-  const nextCustomers = (Array.isArray(payload.customers) ? payload.customers : []).map((x: any) => ({
-    id: str(x.id, uid("cust")),
-    name: str(x.name).trim(),
-    phone: x.phone ? String(x.phone).trim() : undefined,
-    address: x.address ? String(x.address).trim() : undefined,
-    note: x.note ? String(x.note).trim() : undefined,
-    createdAt: str(x.createdAt, nowIso()),
-    updatedAt: str(x.updatedAt, nowIso()),
-  })) as Customer[];
-
-  const nextSales = (Array.isArray(payload.sales) ? payload.sales : []).map((x: any) => {
-    const qty = Math.trunc(num(x.qty, 0));
-    const unitPrice = round2(num(x.unitPrice, 0));
-    const total = round2(num(x.total, round2(qty * unitPrice)));
-    const payments = normalizePayments(x.payments);
-    const paid = payments.length ? round2(payments.reduce((a, p) => a + num(p.amount, 0), 0)) >= total : Boolean(x.paid);
-
-    return {
-      id: str(x.id, uid("sale")),
-      itemId: str(x.itemId),
-      itemName: str(x.itemName),
-      qty,
-      unitPrice,
-      total,
-      customerId: x.customerId ? String(x.customerId) : undefined,
-      customerName: x.customerName ? String(x.customerName) : undefined,
-      unitCostAtSale: Number.isFinite(Number(x.unitCostAtSale)) ? Number(x.unitCostAtSale) : undefined,
-      payments,
-      paid,
-      createdAt: str(x.createdAt, nowIso()),
-    } as Sale;
-  });
-
-  const nextReceivables = (Array.isArray(payload.receivables) ? payload.receivables : []).map((x: any) => {
-    const amount = round2(num(x.amount, 0));
-    const payments = normalizePayments(x.payments);
-    const paid = payments.length ? round2(payments.reduce((a, p) => a + num(p.amount, 0), 0)) >= amount : Boolean(x.paid);
-
-    return {
-      id: str(x.id, uid("rcv")),
-      title: str(x.title, "Gjeld"),
-      debtorName: str(x.debtorName, "Ukjent"),
-      amount,
-      dueDate: x.dueDate ? String(x.dueDate) : undefined,
-      note: x.note ? String(x.note) : undefined,
-      payments,
-      paid,
-      createdAt: str(x.createdAt, nowIso()),
-      updatedAt: str(x.updatedAt, nowIso()),
-    } as Receivable;
-  });
+  // normaliser via get*-logikken ved å sette rått og så lese inn igjen
+  const nextItems = (Array.isArray(payload.items) ? payload.items : []) as any[];
+  const nextCustomers = (Array.isArray(payload.customers) ? payload.customers : []) as any[];
+  const nextSales = (Array.isArray(payload.sales) ? payload.sales : []) as any[];
+  const nextReceivables = (Array.isArray(payload.receivables) ? payload.receivables : []) as any[];
 
   const mergeById = <T extends { id: string }>(a: T[], b: T[]) => {
     const m = new Map<string, T>();
@@ -832,15 +901,16 @@ export async function importAllFromFile(file: File, mode: "replace" | "merge" = 
   };
 
   if (mode === "merge") {
-    setItems(mergeById(getItems(), nextItems));
-    setCustomers(mergeById(getCustomers(), nextCustomers));
-    setSales(mergeById(getSales(), nextSales));
-    setReceivables(mergeById(getReceivables(), nextReceivables));
+    setItems(mergeById(getItems(), nextItems as any));
+    setCustomers(mergeById(getCustomers(), nextCustomers as any));
+    setSales(mergeById(getSales(), nextSales as any));
+    setReceivables(mergeById(getReceivables(), nextReceivables as any));
   } else {
-    setItems(nextItems);
-    setCustomers(nextCustomers);
-    setSales(nextSales);
-    setReceivables(nextReceivables);
+    localStorage.setItem(LS_KEYS.items, JSON.stringify(nextItems));
+    localStorage.setItem(LS_KEYS.customers, JSON.stringify(nextCustomers));
+    localStorage.setItem(LS_KEYS.sales, JSON.stringify(nextSales));
+    localStorage.setItem(LS_KEYS.receivables, JSON.stringify(nextReceivables));
+    emitChange();
   }
 
   // theme + saldo
@@ -848,9 +918,29 @@ export async function importAllFromFile(file: File, mode: "replace" | "merge" = 
     setTheme(payload.theme);
     applyThemeToDom(payload.theme);
   }
-  setSaldo(num(payload.saldo, getSaldo()));
+  if (Number.isFinite(Number(payload.saldo))) setSaldo(Number(payload.saldo));
 
   emitChange();
+}
+
+/** Brukes fra App/Backup uten TypeScript-krøll */
+export function pickImportAllFile(mode: "replace" | "merge" = "replace") {
+  return () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "application/json";
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      try {
+        await importAllFromFile(file, mode);
+        alert("Import fullført ✅");
+      } catch (e) {
+        alert("Kunne ikke importere (ugyldig JSON eller feil format).");
+      }
+    };
+    input.click();
+  };
 }
 
 export function clearAllData() {
@@ -859,6 +949,27 @@ export function clearAllData() {
   localStorage.removeItem(LS_KEYS.sales);
   localStorage.removeItem(LS_KEYS.receivables);
   localStorage.removeItem(LS_KEYS.saleDraftCustomer);
-  localStorage.removeItem(LS_KEYS.saldo);
+  // theme + saldo lar vi stå (kan fjernes hvis du vil)
   emitChange();
+}
+
+/* =========================
+   Backup / Info
+========================= */
+
+export function getStorageSummary() {
+  const items = getItems().length;
+  const customers = getCustomers().length;
+  const sales = getSales().length;
+  const receivables = getReceivables().length;
+
+  const approxBytes =
+    (localStorage.getItem(LS_KEYS.items)?.length ?? 0) +
+    (localStorage.getItem(LS_KEYS.customers)?.length ?? 0) +
+    (localStorage.getItem(LS_KEYS.sales)?.length ?? 0) +
+    (localStorage.getItem(LS_KEYS.receivables)?.length ?? 0) +
+    (localStorage.getItem(LS_KEYS.saldo)?.length ?? 0) +
+    (localStorage.getItem(LS_KEYS.theme)?.length ?? 0);
+
+  return { items, customers, sales, receivables, approxBytes };
 }
