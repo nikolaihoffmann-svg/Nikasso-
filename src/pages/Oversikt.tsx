@@ -10,6 +10,8 @@ import {
   useReceivables,
   useSales,
   useSaldo,
+  Sale,
+  SaleLine,
 } from "../app/storage";
 
 function toNum(v: string) {
@@ -43,6 +45,29 @@ function startOfMonth(d = new Date()) {
   return new Date(d.getFullYear(), d.getMonth(), 1, 0, 0, 0, 0);
 }
 
+function saleLinesSafe(s: Sale): SaleLine[] {
+  const lines = Array.isArray((s as any).lines) ? ((s as any).lines as SaleLine[]) : [];
+  if (lines.length > 0) return lines;
+
+  const itemName = (s as any).itemName;
+  const itemId = (s as any).itemId;
+  const qty = (s as any).qty;
+  const unitPrice = (s as any).unitPrice;
+  if (itemName && itemId && Number(qty)) {
+    return [
+      {
+        id: "legacy",
+        itemId: String(itemId),
+        itemName: String(itemName),
+        qty: Number(qty) || 0,
+        unitPrice: Number(unitPrice) || 0,
+        unitCostAtSale: (s as any).unitCostAtSale,
+      } as any,
+    ];
+  }
+  return [];
+}
+
 export function Oversikt() {
   const { sales } = useSales();
   const { customers } = useCustomers();
@@ -64,14 +89,25 @@ export function Oversikt() {
   const fromMonth = useMemo(() => startOfMonth(new Date()), []);
 
   function calcProfitForSale(s: any) {
-    const lines = Array.isArray(s.lines) ? s.lines : [];
-    return lines.reduce((acc: number, line: any) => {
-      const unitCost =
-        Number.isFinite(Number(line.unitCostAtSale)) ? Number(line.unitCostAtSale) : byItemId.get(line.itemId)?.cost ?? 0;
-      const qty = Number(line.qty ?? 0);
-      const unitPrice = Number(line.unitPrice ?? 0);
-      return acc + (unitPrice - unitCost) * qty;
-    }, 0);
+    // summer profitt per linje hvis mulig
+    const lines = saleLinesSafe(s as Sale);
+    if (lines.length > 0) {
+      return lines.reduce((acc, l) => {
+        const unitCost = Number.isFinite(Number(l.unitCostAtSale))
+          ? Number(l.unitCostAtSale)
+          : byItemId.get(l.itemId)?.cost ?? 0;
+        const qty = Number(l.qty ?? 0);
+        const unitPrice = Number(l.unitPrice ?? 0);
+        return acc + (unitPrice - unitCost) * qty;
+      }, 0);
+    }
+
+    // fallback (eldre)
+    const unitCost =
+      Number.isFinite(Number(s.unitCostAtSale)) ? Number(s.unitCostAtSale) : byItemId.get(s.itemId)?.cost ?? 0;
+    const qty = Number(s.qty ?? 0);
+    const unitPrice = Number(s.unitPrice ?? 0);
+    return (unitPrice - unitCost) * qty;
   }
 
   const totals = useMemo(() => {
@@ -129,6 +165,36 @@ export function Oversikt() {
     return arr;
   }, [sales, customers, from30, byItemId]);
 
+  const mostSold30 = useMemo(() => {
+    const map = new Map<string, { itemId: string; name: string; qty: number; revenue: number; profit: number }>();
+    const list = sales.filter((s) => isAfter(s.createdAt, from30));
+
+    for (const s of list) {
+      const lines = saleLinesSafe(s);
+      for (const l of lines) {
+        const key = l.itemId || l.itemName;
+        const unitCost = Number.isFinite(Number(l.unitCostAtSale))
+          ? Number(l.unitCostAtSale)
+          : byItemId.get(l.itemId)?.cost ?? 0;
+
+        const prev = map.get(key) || { itemId: String(l.itemId), name: String(l.itemName), qty: 0, revenue: 0, profit: 0 };
+        const qty = Number(l.qty) || 0;
+        const rev = (Number(l.unitPrice) || 0) * qty;
+        const prof = ((Number(l.unitPrice) || 0) - unitCost) * qty;
+
+        prev.qty += qty;
+        prev.revenue += rev;
+        prev.profit += prof;
+
+        map.set(key, prev);
+      }
+    }
+
+    const arr = Array.from(map.values());
+    arr.sort((a, b) => b.qty - a.qty || b.revenue - a.revenue);
+    return arr.slice(0, 5);
+  }, [sales, from30, byItemId]);
+
   function openSaldoModal() {
     setSaldoInput(String(saldo));
     setSaldoOpen(true);
@@ -145,6 +211,7 @@ export function Oversikt() {
       <div className="cardTitle">Oversikt</div>
       <div className="cardSub">Saldo + utestående (automatisk).</div>
 
+      {/* Penger */}
       <div className="card" style={{ marginTop: 0 }}>
         <div className="cardTitle" style={{ fontSize: 18, marginBottom: 8 }}>
           Penger
@@ -169,6 +236,7 @@ export function Oversikt() {
         </div>
       </div>
 
+      {/* Perioder */}
       <div className="list">
         <div className="item">
           <p className="itemTitle">Siste 7 dager</p>
@@ -192,6 +260,28 @@ export function Oversikt() {
         </div>
       </div>
 
+      {/* Mest solgt */}
+      <div className="card">
+        <div className="cardTitle">Mest solgt (30 dager)</div>
+        <div className="cardSub">Topp 5 basert på antall solgte enheter (med omsetning/profitt).</div>
+
+        <div className="list">
+          {mostSold30.length === 0 ? (
+            <div className="item">Ingen salg siste 30 dager.</div>
+          ) : (
+            mostSold30.map((x) => (
+              <div key={x.itemId || x.name} className="item">
+                <p className="itemTitle">{x.name}</p>
+                <div className="itemMeta">
+                  Antall: <b>{x.qty}</b> • Solgt: <b>{fmtKr(x.revenue)}</b> • Profitt: <b>{fmtKr(x.profit)}</b>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
+      {/* Salg pr kunde */}
       <div className="card">
         <div className="cardTitle">Salg pr kunde (30 dager)</div>
         <div className="cardSub">Solgt, profitt og utestående pr kunde.</div>
