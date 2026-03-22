@@ -5,7 +5,8 @@ import {
   clearAllData,
   downloadExportAll,
   getTheme,
-  pickImportAllFile,
+  pickImportAllFileMerge,
+  pickImportAllFileReplace,
   setTheme,
   Theme,
 } from "./storage";
@@ -87,12 +88,15 @@ export function App() {
               <button className="btn btnPrimary" type="button" onClick={() => downloadExportAll()}>
                 Eksporter ALT
               </button>
-              <button className="btn" type="button" onClick={() => pickImportAllFile("replace")}>
+
+              <button className="btn" type="button" onClick={pickImportAllFileReplace}>
                 Importer (erstatt)
               </button>
-              <button className="btn" type="button" onClick={() => pickImportAllFile("merge")}>
+
+              <button className="btn" type="button" onClick={pickImportAllFileMerge}>
                 Importer (slå sammen)
               </button>
+
               <button
                 className="btn btnDanger"
                 type="button"
