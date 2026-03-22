@@ -1,13 +1,6 @@
 // src/pages/Gjeld.tsx
 import React, { useMemo, useState } from "react";
-import {
-  fmtKr,
-  uid,
-  useReceivables,
-  receivablePaidSum,
-  receivableRemaining,
-  Receivable,
-} from "../app/storage";
+import { fmtKr, uid, useReceivables, receivablePaidSum, receivableRemaining, Receivable } from "../app/storage";
 
 function toNum(v: string) {
   const n = Number(String(v).replace(",", "."));
@@ -21,16 +14,7 @@ function isOverdue(dueDate?: string) {
   return d.getTime() < Date.now();
 }
 
-function normalizeText(s: string) {
-  return s.trim().replace(/\s+/g, " ");
-}
-
-function Modal(props: {
-  open: boolean;
-  title: string;
-  children: React.ReactNode;
-  onClose: () => void;
-}) {
+function Modal(props: { open: boolean; title: string; children: React.ReactNode; onClose: () => void }) {
   if (!props.open) return null;
   return (
     <div className="modalBackdrop" role="dialog" aria-modal="true" onClick={props.onClose}>
@@ -48,10 +32,9 @@ function Modal(props: {
 }
 
 export function Gjeld() {
-  // NB: dette matcher signaturen i loggen din
   const { receivables, upsert, remove, addPayment } = useReceivables();
 
-  // Ny gjeld
+  // legg til
   const [title, setTitle] = useState("Gjeld");
   const [debtorName, setDebtorName] = useState("");
   const [amount, setAmount] = useState("0");
@@ -60,18 +43,25 @@ export function Gjeld() {
 
   const [q, setQ] = useState("");
 
-  // Betaling modal
+  // betaling modal
   const [payFor, setPayFor] = useState<Receivable | null>(null);
   const [payAmount, setPayAmount] = useState("0");
-  const [payDate, setPayDate] = useState<string>(new Date().toISOString().slice(0, 10)); // yyyy-mm-dd
+  const [payDate, setPayDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [payNote, setPayNote] = useState("");
+
+  // rediger modal
+  const [edit, setEdit] = useState<Receivable | null>(null);
+  const [eTitle, setETitle] = useState("");
+  const [eName, setEName] = useState("");
+  const [eAmount, setEAmount] = useState("0");
+  const [eDue, setEDue] = useState("");
+  const [eNote, setENote] = useState("");
 
   const filtered = useMemo(() => {
     const qq = q.trim().toLowerCase();
     if (!qq) return receivables;
-
     return receivables.filter((r) => {
-      const hay = `${r.title ?? ""} ${r.debtorName ?? ""} ${r.note ?? ""} ${r.dueDate ?? ""}`.toLowerCase();
+      const hay = `${r.title ?? ""} ${r.debtorName} ${r.note ?? ""} ${r.dueDate ?? ""}`.toLowerCase();
       return hay.includes(qq);
     });
   }, [receivables, q]);
@@ -87,26 +77,29 @@ export function Gjeld() {
       return a;
     }, 0);
 
-    return { totalOriginal, totalPaid, totalRemaining, overdueRemaining };
+    return {
+      totalOriginal,
+      totalPaid,
+      totalRemaining,
+      overdueRemaining,
+    };
   }, [receivables]);
 
   function add() {
-    const t = normalizeText(title || "Gjeld");
-    const n = normalizeText(debtorName);
-    if (!n) return alert("Hvem skylder deg? (navn) kan ikke være tomt.");
-
+    const n = debtorName.trim();
+    if (!n) return alert("Navn kan ikke være tomt.");
     const a = toNum(amount);
     if (a <= 0) return alert("Beløp må være over 0.");
 
     upsert({
       id: uid("rcv"),
-      title: t || "Gjeld",
+      title: title.trim() ? title.trim() : "Gjeld",
       debtorName: n,
       amount: a,
       dueDate: dueDate.trim() ? dueDate.trim() : undefined,
       note: note.trim() ? note.trim() : undefined,
       payments: [],
-    });
+    } as any);
 
     setTitle("Gjeld");
     setDebtorName("");
@@ -124,52 +117,65 @@ export function Gjeld() {
 
   function savePayment() {
     if (!payFor) return;
-
     const a = toNum(payAmount);
     if (a <= 0) return alert("Innbetaling må være over 0.");
 
-    // ISO ved “midt på dagen” for pen dato i UI (unngår tidssone-wobble)
     const iso = payDate ? new Date(`${payDate}T12:00:00`).toISOString() : undefined;
-
-    // VIKTIG: din addPayment er (id, amount, note?, dateIso?)
     addPayment(payFor.id, a, payNote.trim() || undefined, iso);
     setPayFor(null);
+  }
+
+  function openEdit(r: Receivable) {
+    setEdit(r);
+    setETitle(r.title ?? "Gjeld");
+    setEName(r.debtorName ?? "");
+    setEAmount(String(r.amount ?? 0));
+    setEDue(r.dueDate ?? "");
+    setENote(r.note ?? "");
+  }
+
+  function saveEdit() {
+    if (!edit) return;
+
+    const n = eName.trim();
+    if (!n) return alert("Navn kan ikke være tomt.");
+    const a = toNum(eAmount);
+    if (a <= 0) return alert("Beløp må være over 0.");
+
+    // ✅ Dette lar deg “legge på mer” ved å øke totalbeløpet
+    upsert({
+      ...edit,
+      title: eTitle.trim() ? eTitle.trim() : "Gjeld",
+      debtorName: n,
+      amount: a,
+      dueDate: eDue.trim() ? eDue.trim() : undefined,
+      note: eNote.trim() ? eNote.trim() : undefined,
+      payments: Array.isArray(edit.payments) ? edit.payments : [],
+    } as any);
+
+    setEdit(null);
   }
 
   return (
     <div className="card">
       <div className="cardTitle">Gjeld til meg</div>
       <div className="cardSub">
-        Utestående: <b>{fmtKr(stats.totalRemaining)}</b> • Forfalt (utestående):{" "}
-        <b>{fmtKr(stats.overdueRemaining)}</b> • Innbetalt: <b>{fmtKr(stats.totalPaid)}</b> • Totalt opprettet:{" "}
-        <b>{fmtKr(stats.totalOriginal)}</b>
+        Utestående: <b>{fmtKr(stats.totalRemaining)}</b> • Forfalt (utestående): <b>{fmtKr(stats.overdueRemaining)}</b> • Innbetalt:{" "}
+        <b>{fmtKr(stats.totalPaid)}</b> • Totalt opprettet: <b>{fmtKr(stats.totalOriginal)}</b>
       </div>
 
       <div className="card" style={{ marginTop: 0 }}>
         <div className="cardTitle">Legg til gjeld</div>
-
         <div className="fieldGrid">
           <div className="row3">
             <div>
               <label className="label">Tittel</label>
-              <input
-                className="input"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="F.eks. Faktura / Lån / Diverse"
-              />
+              <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Gjeld / Lån / Faktura ..." />
             </div>
-
             <div>
               <label className="label">Hvem skylder?</label>
-              <input
-                className="input"
-                value={debtorName}
-                onChange={(e) => setDebtorName(e.target.value)}
-                placeholder="Navn / referanse"
-              />
+              <input className="input" value={debtorName} onChange={(e) => setDebtorName(e.target.value)} placeholder="Navn / referanse" />
             </div>
-
             <div>
               <label className="label">Beløp (kr)</label>
               <input className="input" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} />
@@ -181,8 +187,7 @@ export function Gjeld() {
               <label className="label">Forfallsdato</label>
               <input className="input" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
             </div>
-
-            <div style={{ gridColumn: "span 2" as any }}>
+            <div style={{ gridColumn: "span 2" } as any}>
               <label className="label">Notat</label>
               <input className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Valgfritt" />
             </div>
@@ -212,16 +217,12 @@ export function Gjeld() {
             <div key={r.id} className={overdue ? "item low" : "item"}>
               <div className="itemTop">
                 <div>
-                  <p className="itemTitle">{r.debtorName}</p>
+                  <p className="itemTitle">
+                    {r.title ? `${r.title} — ` : ""}{r.debtorName}
+                  </p>
 
                   <div className="itemMeta">
-                    {r.title ? (
-                      <>
-                        Tittel: <b>{r.title}</b> •{" "}
-                      </>
-                    ) : null}
-                    Opprinnelig: <b>{fmtKr(r.amount)}</b> • Innbetalt: <b>{fmtKr(paid)}</b> • Gjenstår:{" "}
-                    <b>{fmtKr(rem)}</b>
+                    Opprinnelig: <b>{fmtKr(r.amount)}</b> • Innbetalt: <b>{fmtKr(paid)}</b> • Gjenstår: <b>{fmtKr(rem)}</b>
                     {r.dueDate ? (
                       <>
                         {" "}
@@ -232,45 +233,30 @@ export function Gjeld() {
                     • Status: <b>{rem <= 0 ? "Betalt" : overdue ? "Forfalt" : "Utestående"}</b>
                   </div>
 
-                  {r.note ? (
-                    <div className="itemMeta">
-                      Notat: <b>{r.note}</b>
-                    </div>
-                  ) : null}
+                  {r.note ? <div className="itemMeta">Notat: <b>{r.note}</b></div> : null}
 
                   {Array.isArray(r.payments) && r.payments.length > 0 ? (
                     <div className="itemMeta" style={{ marginTop: 8 }}>
                       <b>Innbetalinger:</b>
-                      {r.payments
-                        .slice()
-                        .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""))
-                        .slice(0, 8)
-                        .map((p) => (
-                          <div key={p.id} style={{ marginTop: 4 }}>
-                            • {new Date(p.createdAt).toLocaleDateString("nb-NO")} – <b>{fmtKr(p.amount)}</b>
-                            {p.note ? <> ({p.note})</> : null}
-                          </div>
-                        ))}
-
-                      {r.payments.length > 8 ? (
-                        <div style={{ marginTop: 6, opacity: 0.9 }}>… +{r.payments.length - 8} til</div>
-                      ) : null}
+                      {r.payments.slice(0, 6).map((p) => (
+                        <div key={p.id} style={{ marginTop: 4 }}>
+                          • {new Date(p.createdAt).toLocaleDateString("nb-NO")} – <b>{fmtKr(p.amount)}</b>
+                          {p.note ? <> ({p.note})</> : null}
+                        </div>
+                      ))}
+                      {r.payments.length > 6 ? <div style={{ marginTop: 4, opacity: 0.9 }}>… +{r.payments.length - 6} til</div> : null}
                     </div>
                   ) : null}
                 </div>
               </div>
 
               <div className="itemActions">
-                {rem > 0 ? (
-                  <button className="btn btnPrimary" type="button" onClick={() => openPayment(r)}>
-                    Registrer innbetaling
-                  </button>
-                ) : (
-                  <button className="btn" type="button" disabled>
-                    Betalt
-                  </button>
-                )}
-
+                <button className="btn btnPrimary" type="button" onClick={() => openPayment(r)}>
+                  Registrer innbetaling
+                </button>
+                <button className="btn" type="button" onClick={() => openEdit(r)}>
+                  Rediger
+                </button>
                 <button
                   className="btn btnDanger"
                   type="button"
@@ -292,15 +278,7 @@ export function Gjeld() {
         {payFor ? (
           <div className="fieldGrid" style={{ marginTop: 0 }}>
             <div className="itemMeta" style={{ marginTop: 0 }}>
-              <b>{payFor.debtorName}</b>
-              {payFor.title ? (
-                <>
-                  {" "}
-                  • <b>{payFor.title}</b>
-                </>
-              ) : null}
-              {" "}
-              • Gjenstår nå: <b>{fmtKr(Math.max(0, receivableRemaining(payFor)))}</b>
+              <b>{payFor.debtorName}</b> • Gjenstår nå: <b>{fmtKr(Math.max(0, receivableRemaining(payFor)))}</b>
             </div>
 
             <div className="row3">
@@ -323,6 +301,52 @@ export function Gjeld() {
                 Lagre innbetaling
               </button>
               <button className="btn" type="button" onClick={() => setPayFor(null)}>
+                Avbryt
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
+
+      <Modal open={!!edit} title="Rediger gjeld" onClose={() => setEdit(null)}>
+        {edit ? (
+          <div className="fieldGrid" style={{ marginTop: 0 }}>
+            <div className="row3">
+              <div>
+                <label className="label">Tittel</label>
+                <input className="input" value={eTitle} onChange={(e) => setETitle(e.target.value)} />
+              </div>
+              <div>
+                <label className="label">Hvem skylder?</label>
+                <input className="input" value={eName} onChange={(e) => setEName(e.target.value)} />
+              </div>
+              <div>
+                <label className="label">Totalbeløp (kr)</label>
+                <input className="input" inputMode="decimal" value={eAmount} onChange={(e) => setEAmount(e.target.value)} />
+              </div>
+            </div>
+
+            <div className="row3">
+              <div>
+                <label className="label">Forfall</label>
+                <input className="input" type="date" value={eDue} onChange={(e) => setEDue(e.target.value)} />
+              </div>
+              <div style={{ gridColumn: "span 2" } as any}>
+                <label className="label">Notat</label>
+                <input className="input" value={eNote} onChange={(e) => setENote(e.target.value)} />
+              </div>
+            </div>
+
+            <div className="itemMeta">
+              Innbetalt: <b>{fmtKr(receivablePaidSum(edit))}</b> • Gjenstår (etter endring):{" "}
+              <b>{fmtKr(Math.max(0, round2(toNum(eAmount) - receivablePaidSum(edit))))}</b>
+            </div>
+
+            <div className="btnRow">
+              <button className="btn btnPrimary" type="button" onClick={saveEdit}>
+                Lagre
+              </button>
+              <button className="btn" type="button" onClick={() => setEdit(null)}>
                 Avbryt
               </button>
             </div>
