@@ -1,6 +1,13 @@
 // src/pages/Backup.tsx
 import React, { useMemo } from "react";
-import { downloadExportAll, getStorageSummary, pickImportAllFile, clearAllData, fmtKr } from "../app/storage";
+import {
+  clearAllData,
+  downloadExportAll,
+  fmtKr,
+  getStorageSummary,
+  pickImportAllFileMerge,
+  pickImportAllFileReplace,
+} from "../app/storage";
 
 function fmtBytes(n: number) {
   if (!Number.isFinite(n) || n <= 0) return "0 B";
@@ -15,19 +22,20 @@ function fmtBytes(n: number) {
 }
 
 export function Backup() {
+  // (memo) greit siden dette kun er en "status" skjerm
   const summary = useMemo(() => getStorageSummary(), []);
 
   return (
     <div className="card">
-      <div className="cardTitle">Backup</div>
+      <div className="cardTitle">Data</div>
       <div className="cardSub">Eksporter/Importer alt. Dette ligger kun lokalt i nettleseren.</div>
 
       <div className="list">
         <div className="item">
           <p className="itemTitle">Status</p>
           <div className="itemMeta">
-            Varer: <b>{summary.itemsCount}</b> • Kunder: <b>{summary.customersCount}</b> • Salg: <b>{summary.salesCount}</b> • Gjeld:
-            <b> {summary.receivablesCount}</b>
+            Varer: <b>{summary.itemsCount}</b> • Kunder: <b>{summary.customersCount}</b> • Salg: <b>{summary.salesCount}</b> • Gjeld:{" "}
+            <b>{summary.receivablesCount}</b>
             <br />
             Utestående salg: <b>{fmtKr(summary.unpaidSales)}</b>
             <br />
@@ -44,12 +52,15 @@ export function Backup() {
         <button className="btn btnPrimary" type="button" onClick={() => downloadExportAll()}>
           Eksporter ALT
         </button>
-        <button className="btn" type="button" onClick={() => pickImportAllFile("replace")}>
+
+        <button className="btn" type="button" onClick={pickImportAllFileReplace}>
           Importer (erstatt)
         </button>
-        <button className="btn" type="button" onClick={() => pickImportAllFile("merge")}>
+
+        <button className="btn" type="button" onClick={pickImportAllFileMerge}>
           Importer (slå sammen)
         </button>
+
         <button
           className="btn btnDanger"
           type="button"
