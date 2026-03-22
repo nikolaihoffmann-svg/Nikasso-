@@ -1,24 +1,16 @@
 // src/app/App.tsx
 import React, { useEffect, useMemo, useState } from "react";
-import {
-  applyThemeToDom,
-  clearAllData,
-  downloadExportAll,
-  getTheme,
-  pickImportAllFileMerge,
-  pickImportAllFileReplace,
-  setTheme,
-  Theme,
-} from "./storage";
+import { applyThemeToDom, clearAllData, downloadExportAll, getTheme, pickImportAllFile, setTheme, Theme } from "./storage";
 
 import { Oversikt } from "../pages/Oversikt";
 import { Varer } from "../pages/Varer";
+import { Innkjop } from "../pages/Innkjop";
 import { Salg } from "../pages/Salg";
 import { Kunder } from "../pages/Kunder";
 import { Gjeld } from "../pages/Gjeld";
 import { Backup } from "../pages/Backup";
 
-type TabKey = "oversikt" | "varer" | "salg" | "kunder" | "gjeld" | "backup";
+type TabKey = "oversikt" | "varer" | "innkjop" | "salg" | "kunder" | "gjeld" | "backup";
 
 export function App() {
   const [theme, setThemeState] = useState<Theme>(() => getTheme());
@@ -36,6 +28,7 @@ export function App() {
   const content = useMemo(() => {
     if (tab === "oversikt") return <Oversikt />;
     if (tab === "varer") return <Varer />;
+    if (tab === "innkjop") return <Innkjop />;
     if (tab === "salg") return <Salg />;
     if (tab === "kunder") return <Kunder />;
     if (tab === "gjeld") return <Gjeld />;
@@ -68,6 +61,9 @@ export function App() {
           <button className={`tab ${tab === "varer" ? "active" : ""}`} onClick={() => setTab("varer")} type="button">
             Varer
           </button>
+          <button className={`tab ${tab === "innkjop" ? "active" : ""}`} onClick={() => setTab("innkjop")} type="button">
+            Innkjøp
+          </button>
           <button className={`tab ${tab === "salg" ? "active" : ""}`} onClick={() => setTab("salg")} type="button">
             Salg
           </button>
@@ -88,20 +84,17 @@ export function App() {
               <button className="btn btnPrimary" type="button" onClick={() => downloadExportAll()}>
                 Eksporter ALT
               </button>
-
-              <button className="btn" type="button" onClick={pickImportAllFileReplace}>
+              <button className="btn" type="button" onClick={() => pickImportAllFile("replace")}>
                 Importer (erstatt)
               </button>
-
-              <button className="btn" type="button" onClick={pickImportAllFileMerge}>
+              <button className="btn" type="button" onClick={() => pickImportAllFile("merge")}>
                 Importer (slå sammen)
               </button>
-
               <button
                 className="btn btnDanger"
                 type="button"
                 onClick={() => {
-                  if (confirm("Slette ALL data i nettleseren? (Varer, kunder, salg, gjeld, saldo)")) clearAllData();
+                  if (confirm("Slette ALL data i nettleseren? (Varer, kunder, salg, gjeld, leverandørgjeld, innkjøp, saldo)")) clearAllData();
                 }}
               >
                 Nullstill
