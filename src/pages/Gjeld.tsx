@@ -1,6 +1,6 @@
 // src/pages/Gjeld.tsx
 import React, { useMemo, useState } from "react";
-import { fmtKr, uid, useReceivables, receivablePaidSum, receivableRemaining, Receivable } from "../app/storage";
+import { fmtKr, uid, useReceivables, receivablePaidSum, receivableRemaining, Receivable, round2 } from "../app/storage";
 
 function toNum(v: string) {
   const n = Number(String(v).replace(",", "."));
@@ -77,12 +77,7 @@ export function Gjeld() {
       return a;
     }, 0);
 
-    return {
-      totalOriginal,
-      totalPaid,
-      totalRemaining,
-      overdueRemaining,
-    };
+    return { totalOriginal, totalPaid, totalRemaining, overdueRemaining };
   }, [receivables]);
 
   function add() {
@@ -142,7 +137,6 @@ export function Gjeld() {
     const a = toNum(eAmount);
     if (a <= 0) return alert("Beløp må være over 0.");
 
-    // ✅ Dette lar deg “legge på mer” ved å øke totalbeløpet
     upsert({
       ...edit,
       title: eTitle.trim() ? eTitle.trim() : "Gjeld",
@@ -218,7 +212,8 @@ export function Gjeld() {
               <div className="itemTop">
                 <div>
                   <p className="itemTitle">
-                    {r.title ? `${r.title} — ` : ""}{r.debtorName}
+                    {r.title ? `${r.title} — ` : ""}
+                    {r.debtorName}
                   </p>
 
                   <div className="itemMeta">
@@ -228,12 +223,15 @@ export function Gjeld() {
                         {" "}
                         • Forfall: <b>{r.dueDate}</b>
                       </>
-                    ) : null}
-                    {" "}
+                    ) : null}{" "}
                     • Status: <b>{rem <= 0 ? "Betalt" : overdue ? "Forfalt" : "Utestående"}</b>
                   </div>
 
-                  {r.note ? <div className="itemMeta">Notat: <b>{r.note}</b></div> : null}
+                  {r.note ? (
+                    <div className="itemMeta">
+                      Notat: <b>{r.note}</b>
+                    </div>
+                  ) : null}
 
                   {Array.isArray(r.payments) && r.payments.length > 0 ? (
                     <div className="itemMeta" style={{ marginTop: 8 }}>
