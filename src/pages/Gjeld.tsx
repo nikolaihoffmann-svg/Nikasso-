@@ -1,13 +1,13 @@
 // src/pages/Gjeld.tsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
   fmtKr,
+  uid,
+  useReceivables,
   receivablePaidSum,
   receivableRemaining,
   Receivable,
   round2,
-  uid,
-  useReceivables,
 } from "../app/storage";
 
 function toNum(v: string) {
@@ -15,12 +15,36 @@ function toNum(v: string) {
   return Number.isFinite(n) ? n : 0;
 }
 
+function parseDateOnly(dateStr?: string) {
+  if (!dateStr) return null;
+  const d = new Date(`${dateStr}T12:00:00`);
+  return Number.isFinite(d.getTime()) ? d : null;
+}
+
 function isOverdue(dueDate?: string) {
-  if (!dueDate) return false;
-  const d = new Date(dueDate);
-  if (!Number.isFinite(d.getTime())) return false;
-  // dato uten klokkeslett: gjør den “forfalt” dagen etter kl 00-ish
-  return d.getTime() < Date.now();
+  const d = parseDateOnly(dueDate);
+  if (!d) return false;
+  const now = new Date();
+  // sammenlign kun dato (midt på dagen brukt i parse)
+  return d.getTime() < new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0, 0).getTime();
+}
+
+function daysUntil(dueDate?: string) {
+  const d = parseDateOnly(dueDate);
+  if (!d) return null;
+  const now = new Date();
+  const base = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0, 0);
+  const diff = d.getTime() - base.getTime();
+  return Math.ceil(diff / (1000 * 60 * 60 * 24));
+}
+
+function dueBadge(dueDate?: string) {
+  const n = daysUntil(dueDate);
+  if (n === null) return null;
+  if (n < 0) return { cls: "danger" as const, text: `Forfalt (${Math.abs(n)}d)` };
+  if (n === 0) return { cls: "warn" as const, text: "Forfaller i dag" };
+  if (n <= 7) return { cls: "warn" as const, text: `Forfaller om ${n}d` };
+  return { cls: "" as const, text: `Forfaller om ${n}d` };
 }
 
 function Modal(props: { open: boolean; title: string; children: React.ReactNode; onClose: () => void }) {
@@ -34,125 +58,49 @@ function Modal(props: { open: boolean; title: string; children: React.ReactNode;
             ✕
           </button>
         </div>
-        {/* ✅ Viktig: gjør modal-body scrollbar på mobil */}
-        <div className="modalBody" style={{ maxHeight: "75vh", overflow: "auto" }}>
-          {props.children}
-        </div>
+        <div className="modalBody">{props.children}</div>
       </div>
     </div>
   );
-}
-
-function ChoiceModal(props: {
-  open: boolean;
-  title: string;
-  children: React.ReactNode;
-  onClose: () => void;
-
-  primaryText: string;
-  onPrimary: () => void;
-
-  secondaryText: string;
-  onSecondary: () => void;
-
-  cancelText: string;
-  onCancel: () => void;
-}) {
-  if (!props.open) return null;
-  return (
-    <div className="modalBackdrop" role="dialog" aria-modal="true" onClick={props.onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modalHeader">
-          <p className="modalTitle">{props.title}</p>
-          <button className="iconBtn" type="button" onClick={props.onClose} aria-label="Lukk">
-            ✕
-          </button>
-        </div>
-
-        <div className="modalBody" style={{ maxHeight: "75vh", overflow: "auto" }}>
-          {props.children}
-
-          <div className="btnRow" style={{ marginTop: 14, justifyContent: "flex-end" }}>
-            <button className="btn" type="button" onClick={props.onCancel}>
-              {props.cancelText}
-            </button>
-            <button className="btn btnDanger" type="button" onClick={props.onSecondary}>
-              {props.secondaryText}
-            </button>
-            <button className="btn btnPrimary" type="button" onClick={props.onPrimary}>
-              {props.primaryText}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function statusFor(r: Receivable) {
-  const rem = Math.max(0, receivableRemaining(r));
-  const overdue = rem > 0 && isOverdue(r.dueDate);
-  const paid = rem <= 0 || Boolean((r as any).paid);
-  return { rem, overdue, paid };
 }
 
 export function Gjeld() {
-  const { receivables, upsert, remove, addPayment } = useReceivables();
+  const { receivables, upsert, remove, addPayment, removePayment } = useReceivables();
 
-  // filters / paging / accordion
+  // filters
   const [q, setQ] = useState("");
-  const [onlyOpen, setOnlyOpen] = useState(false);
+  const [onlyOpen, setOnlyOpen] = useState(true);
   const [onlyOverdue, setOnlyOverdue] = useState(false);
-  const [visibleCount, setVisibleCount] = useState(5);
-  const [openId, setOpenId] = useState<string | null>(null);
 
-  useEffect(() => {
-    setVisibleCount(5);
-    setOpenId(null);
-  }, [onlyOpen, onlyOverdue, q]);
-
-  // NEW modal
-  const [newOpen, setNewOpen] = useState(false);
+  // add/edit
+  const [addOpen, setAddOpen] = useState(false);
   const [title, setTitle] = useState("Gjeld");
   const [debtorName, setDebtorName] = useState("");
   const [amount, setAmount] = useState("0");
   const [dueDate, setDueDate] = useState("");
   const [note, setNote] = useState("");
 
-  // payment modal
-  const [payFor, setPayFor] = useState<Receivable | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [active, setActive] = useState<Receivable | null>(null);
+
+  // payment
+  const [payOpen, setPayOpen] = useState(false);
   const [payAmount, setPayAmount] = useState("0");
   const [payDate, setPayDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [payNote, setPayNote] = useState("");
 
-  // edit modal
-  const [edit, setEdit] = useState<Receivable | null>(null);
-  const [eTitle, setETitle] = useState("");
-  const [eName, setEName] = useState("");
-  const [eAmount, setEAmount] = useState("0");
-  const [eDue, setEDue] = useState("");
-  const [eNote, setENote] = useState("");
-
-  // delete modal
-  const [del, setDel] = useState<Receivable | null>(null);
-
   const stats = useMemo(() => {
-    const totalOriginal = receivables.reduce((a, r) => a + (Number(r.amount) || 0), 0);
-    const totalPaid = receivables.reduce((a, r) => a + receivablePaidSum(r), 0);
-    const totalRemaining = receivables.reduce((a, r) => a + Math.max(0, receivableRemaining(r)), 0);
-
-    const overdueRemaining = receivables.reduce((a, r) => {
-      const rem = Math.max(0, receivableRemaining(r));
-      if (rem > 0 && isOverdue(r.dueDate)) return a + rem;
-      return a;
-    }, 0);
-
-    return {
-      totalOriginal: round2(totalOriginal),
-      totalPaid: round2(totalPaid),
-      totalRemaining: round2(totalRemaining),
-      overdueRemaining: round2(overdueRemaining),
-    };
+    const totalOriginal = round2(receivables.reduce((a, r) => a + (Number(r.amount) || 0), 0));
+    const totalPaid = round2(receivables.reduce((a, r) => a + receivablePaidSum(r), 0));
+    const totalRemaining = round2(receivables.reduce((a, r) => a + Math.max(0, receivableRemaining(r)), 0));
+    const overdueRemaining = round2(
+      receivables.reduce((a, r) => {
+        const rem = Math.max(0, receivableRemaining(r));
+        if (rem > 0 && isOverdue(r.dueDate)) return a + rem;
+        return a;
+      }, 0)
+    );
+    return { totalOriginal, totalPaid, totalRemaining, overdueRemaining };
   }, [receivables]);
 
   const filtered = useMemo(() => {
@@ -160,6 +108,7 @@ export function Gjeld() {
 
     let list = receivables.slice();
 
+    // filter
     if (qq) {
       list = list.filter((r) => {
         const hay = `${r.title ?? ""} ${r.debtorName ?? ""} ${r.note ?? ""} ${r.dueDate ?? ""}`.toLowerCase();
@@ -167,43 +116,33 @@ export function Gjeld() {
       });
     }
 
-    if (onlyOpen) {
-      list = list.filter((r) => Math.max(0, receivableRemaining(r)) > 0);
-    }
+    if (onlyOpen) list = list.filter((r) => Math.max(0, receivableRemaining(r)) > 0);
+    if (onlyOverdue) list = list.filter((r) => Math.max(0, receivableRemaining(r)) > 0 && isOverdue(r.dueDate));
 
-    if (onlyOverdue) {
-      list = list.filter((r) => {
-        const rem = Math.max(0, receivableRemaining(r));
-        return rem > 0 && isOverdue(r.dueDate);
-      });
-    }
-
-    // sort: overdue first, then highest remaining, then newest updatedAt/createdAt
+    // sort: overdue first, then highest remaining, then name
     list.sort((a, b) => {
-      const sa = statusFor(a);
-      const sb = statusFor(b);
-      if (sa.overdue !== sb.overdue) return sa.overdue ? -1 : 1;
-      if (sb.rem !== sa.rem) return sb.rem - sa.rem;
-      const au = (a.updatedAt || a.createdAt || "");
-      const bu = (b.updatedAt || b.createdAt || "");
-      return bu.localeCompare(au);
+      const ar = Math.max(0, receivableRemaining(a));
+      const br = Math.max(0, receivableRemaining(b));
+      const ao = ar > 0 && isOverdue(a.dueDate);
+      const bo = br > 0 && isOverdue(b.dueDate);
+      if (ao !== bo) return ao ? -1 : 1;
+      if (br !== ar) return br - ar;
+      return (a.debtorName || "").localeCompare(b.debtorName || "", "nb-NO", { sensitivity: "base" });
     });
 
     return list;
   }, [receivables, q, onlyOpen, onlyOverdue]);
 
-  const visible = useMemo(() => filtered.slice(0, visibleCount), [filtered, visibleCount]);
-
-  function openNew() {
+  function openAdd() {
     setTitle("Gjeld");
     setDebtorName("");
     setAmount("0");
     setDueDate("");
     setNote("");
-    setNewOpen(true);
+    setAddOpen(true);
   }
 
-  function saveNew() {
+  function saveAdd() {
     const n = debtorName.trim();
     if (!n) return alert("Navn kan ikke være tomt.");
     const a = toNum(amount);
@@ -213,233 +152,144 @@ export function Gjeld() {
       id: uid("rcv"),
       title: title.trim() ? title.trim() : "Gjeld",
       debtorName: n,
-      amount: a,
+      amount: round2(a),
       dueDate: dueDate.trim() ? dueDate.trim() : undefined,
       note: note.trim() ? note.trim() : undefined,
       payments: [],
     } as any);
 
-    setNewOpen(false);
+    setAddOpen(false);
   }
 
-  function toggleOpen(id: string) {
-    setOpenId((cur) => (cur === id ? null : id));
+  function openDetails(r: Receivable) {
+    setActive(r);
+    setDetailsOpen(true);
   }
 
-  function openPayment(r: Receivable) {
-    const rem = Math.max(0, receivableRemaining(r));
-    setPayFor(r);
-    setPayAmount(String(rem || 0));
+  function openPay(r: Receivable) {
+    setActive(r);
+    setPayAmount(String(Math.max(0, receivableRemaining(r)) || 0));
     setPayNote("");
     setPayDate(new Date().toISOString().slice(0, 10));
+    setPayOpen(true);
   }
 
-  function savePayment() {
-    if (!payFor) return;
+  function savePay() {
+    if (!active) return;
     const a = toNum(payAmount);
     if (a <= 0) return alert("Innbetaling må være over 0.");
-
     const iso = payDate ? new Date(`${payDate}T12:00:00`).toISOString() : undefined;
-    addPayment(payFor.id, a, payNote.trim() || undefined, iso);
-    setPayFor(null);
+    addPayment(active.id, round2(a), payNote.trim() || undefined, iso);
+    setPayOpen(false);
   }
 
-  function markPaid(r: Receivable) {
+  function statusBadge(r: Receivable) {
     const rem = Math.max(0, receivableRemaining(r));
-    if (rem <= 0) return;
-    const iso = new Date().toISOString();
-    addPayment(r.id, rem, "Markert betalt", iso);
-  }
-
-  function openEdit(r: Receivable) {
-    setEdit(r);
-    setETitle(r.title ?? "Gjeld");
-    setEName(r.debtorName ?? "");
-    setEAmount(String(r.amount ?? 0));
-    setEDue(r.dueDate ?? "");
-    setENote(r.note ?? "");
-  }
-
-  function saveEdit() {
-    if (!edit) return;
-
-    const n = eName.trim();
-    if (!n) return alert("Navn kan ikke være tomt.");
-    const a = toNum(eAmount);
-    if (a <= 0) return alert("Beløp må være over 0.");
-
-    upsert({
-      ...edit,
-      title: eTitle.trim() ? eTitle.trim() : "Gjeld",
-      debtorName: n,
-      amount: a,
-      dueDate: eDue.trim() ? eDue.trim() : undefined,
-      note: eNote.trim() ? eNote.trim() : undefined,
-      payments: Array.isArray(edit.payments) ? edit.payments : [],
-    } as any);
-
-    setEdit(null);
-  }
-
-  function askDelete(r: Receivable) {
-    setDel(r);
-  }
-
-  function doDelete() {
-    if (!del) return;
-    remove(del.id);
-    setDel(null);
-    setOpenId(null);
-  }
-
-  function showMore() {
-    setVisibleCount((n) => Math.min(filtered.length, n + 10));
+    if (rem <= 0) return <span className="badge success">Betalt</span>;
+    if (isOverdue(r.dueDate)) return <span className="badge danger">Forfalt</span>;
+    return <span className="badge danger">Utestående</span>;
   }
 
   return (
     <div className="card">
-      <div className="cardTitle">Gjeld</div>
-      <div className="cardSub">
-        Utestående: <b className="dangerText">{fmtKr(stats.totalRemaining)}</b> • Forfalt:{" "}
-        <b className="warnText">{fmtKr(stats.overdueRemaining)}</b> • Innbetalt: <b className="successText">{fmtKr(stats.totalPaid)}</b> • Totalt:
-        <b> {fmtKr(stats.totalOriginal)}</b>
+      <div className="cardTitle">Gjeld til meg</div>
+      <div className="cardSub">Kompakt liste. Trykk en rad for detaljer.</div>
+
+      <div className="metricGrid">
+        <div className="metricCard">
+          <div className="metricTitle">Utestående</div>
+          <div className="metricValue">{fmtKr(stats.totalRemaining)}</div>
+        </div>
+        <div className="metricCard">
+          <div className="metricTitle">Forfalt (utestående)</div>
+          <div className="metricValue">{fmtKr(stats.overdueRemaining)}</div>
+        </div>
+        <div className="metricCard">
+          <div className="metricTitle">Innbetalt</div>
+          <div className="metricValue">{fmtKr(stats.totalPaid)}</div>
+        </div>
       </div>
 
       <div className="btnRow" style={{ justifyContent: "space-between" }}>
-        <button className="btn btnPrimary" type="button" onClick={openNew}>
+        <button className="btn btnPrimary" type="button" onClick={openAdd}>
           + Ny gjeld
         </button>
 
         <div className="btnRow" style={{ marginTop: 0 }}>
           <button className="btn" type="button" onClick={() => setOnlyOpen((v) => !v)}>
-            {onlyOpen ? "Vis alle" : "Kun utestående"}
+            {onlyOpen ? "Vis alle" : "Vis utestående"}
           </button>
           <button className="btn" type="button" onClick={() => setOnlyOverdue((v) => !v)}>
-            {onlyOverdue ? "Vis alt" : "Kun forfalt"}
+            {onlyOverdue ? "Alle frister" : "Kun forfalt"}
           </button>
         </div>
       </div>
 
       <div style={{ marginTop: 10 }}>
-        <input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Søk i gjeld (navn, tittel, notat…)" />
+        <input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Søk i gjeld..." />
       </div>
 
-      <div className="card" style={{ marginTop: 12 }}>
-        <div className="cardTitle">Liste</div>
-        <div className="cardSub">
-          Viser <b>{Math.min(visibleCount, filtered.length)}</b> av <b>{filtered.length}</b>
-        </div>
+      {/* LIST (single level – no nested cards) */}
+      <div className="list">
+        {filtered.map((r) => {
+          const rem = Math.max(0, receivableRemaining(r));
+          const due = dueBadge(r.dueDate);
 
-        <div className="list">
-          {visible.map((r) => {
-            const { rem, overdue, paid } = statusFor(r);
-            const paidSum = receivablePaidSum(r);
-
-            const statusText = paid ? "Betalt" : overdue ? "Forfalt" : "Utestående";
-            const statusClass = paid ? "successText" : overdue ? "warnText" : "dangerText";
-
-            const isOpen = openId === r.id;
-
-            const titleText = r.title ? r.title : "Gjeld";
-            const rightBadge = paid ? "Betalt" : overdue ? "Forfalt" : "Utestående";
-
-            return (
-              <div key={r.id} className="item">
-                {/* compact row */}
-                <div className="rowItem" onClick={() => toggleOpen(r.id)} role="button" tabIndex={0} style={{ cursor: "pointer" }}>
-                  <div>
-                    <p className="rowItemTitle">{r.debtorName || "Ukjent"}</p>
-                    <div className="rowItemSub">
-                      <b>{fmtKr(rem)}</b> gjenstår • <span className={statusClass}>{statusText}</span> • {titleText}
-                      {r.dueDate ? <> • Forfall {r.dueDate}</> : null}
-                    </div>
-                  </div>
-
-                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    <span className={`badge ${paid ? "success" : overdue ? "warn" : "danger"}`}>{rightBadge}</span>
-                    <span className="badge">{isOpen ? "−" : "+"}</span>
-                  </div>
+          return (
+            <div key={r.id} className="rowItem" onClick={() => openDetails(r)} role="button" tabIndex={0}>
+              <div style={{ minWidth: 0 }}>
+                <div className="rowItemTitle" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.debtorName}</span>
+                  {statusBadge(r)}
+                  {due && rem > 0 ? <span className={`badge ${due.cls}`}>{due.text}</span> : null}
                 </div>
 
-                {/* details */}
-                {isOpen ? (
-                  <div style={{ marginTop: 10 }}>
-                    <div className="itemMeta">
-                      Opprinnelig: <b>{fmtKr(r.amount)}</b> • Innbetalt:{" "}
-                      <b className={paid ? "successText" : ""}>{fmtKr(paidSum)}</b> • Gjenstår:{" "}
-                      <b className={rem > 0 ? "dangerText" : "successText"}>{fmtKr(rem)}</b>
-                    </div>
+                <div className="rowItemSub">
+                  Gjenstår:{" "}
+                  <b className={rem > 0 ? "dangerText" : "successText"}>
+                    {fmtKr(rem)}
+                  </b>
+                  {r.title ? (
+                    <>
+                      {" "}
+                      • <span style={{ opacity: 0.9 }}>{r.title}</span>
+                    </>
+                  ) : null}
+                  {r.dueDate ? (
+                    <>
+                      {" "}
+                      • Forfall: <b>{r.dueDate}</b>
+                    </>
+                  ) : null}
+                </div>
+              </div>
 
-                    {r.note ? (
-                      <div className="itemMeta" style={{ marginTop: 8 }}>
-                        Notat: <b>{r.note}</b>
-                      </div>
-                    ) : null}
-
-                    {Array.isArray(r.payments) && r.payments.length > 0 ? (
-                      <div className="itemMeta" style={{ marginTop: 10 }}>
-                        <b>Innbetalinger:</b>
-                        <div style={{ marginTop: 6 }}>
-                          {r.payments
-                            .slice()
-                            .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""))
-                            .slice(0, 8)
-                            .map((p) => (
-                              <div key={p.id}>
-                                • {new Date(p.createdAt).toLocaleDateString("nb-NO")} – <b>{fmtKr(p.amount)}</b>
-                                {p.note ? <> ({p.note})</> : null}
-                              </div>
-                            ))}
-                          {r.payments.length > 8 ? <div style={{ opacity: 0.85, marginTop: 4 }}>… +{r.payments.length - 8} til</div> : null}
-                        </div>
-                      </div>
-                    ) : null}
-
-                    <div className="btnRow" style={{ marginTop: 12 }}>
-                      {rem > 0 ? (
-                        <button className="btn btnPrimary" type="button" onClick={() => openPayment(r)}>
-                          Registrer innbetaling
-                        </button>
-                      ) : (
-                        <button className="btn" type="button" disabled>
-                          Betalt
-                        </button>
-                      )}
-
-                      {rem > 0 ? (
-                        <button className="btn" type="button" onClick={() => markPaid(r)}>
-                          Marker betalt
-                        </button>
-                      ) : null}
-
-                      <button className="btn" type="button" onClick={() => openEdit(r)}>
-                        Rediger
-                      </button>
-
-                      <button className="btn btnDanger" type="button" onClick={() => askDelete(r)}>
-                        Slett
-                      </button>
-                    </div>
-                  </div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                {/* quick pay */}
+                {rem > 0 ? (
+                  <button
+                    className="iconBtn"
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openPay(r);
+                    }}
+                    aria-label="Registrer innbetaling"
+                    title="Registrer innbetaling"
+                  >
+                    +
+                  </button>
                 ) : null}
               </div>
-            );
-          })}
+            </div>
+          );
+        })}
 
-          {filtered.length === 0 ? <div className="item">Ingen treff.</div> : null}
-        </div>
-
-        {filtered.length > visibleCount ? (
-          <div className="btnRow" style={{ marginTop: 12, justifyContent: "center" }}>
-            <button className="btn" type="button" onClick={showMore}>
-              Vis 10 til
-            </button>
-          </div>
-        ) : null}
+        {filtered.length === 0 ? <div className="item">Ingen treff.</div> : null}
       </div>
 
-      {/* NEW */}
-      <Modal open={newOpen} title="Ny gjeld" onClose={() => setNewOpen(false)}>
+      {/* ADD */}
+      <Modal open={addOpen} title="Ny gjeld" onClose={() => setAddOpen(false)}>
         <div className="fieldGrid" style={{ marginTop: 0 }}>
           <div className="row3">
             <div>
@@ -451,14 +301,14 @@ export function Gjeld() {
               <input className="input" value={debtorName} onChange={(e) => setDebtorName(e.target.value)} placeholder="Navn / referanse" />
             </div>
             <div>
-              <label className="label">Beløp</label>
+              <label className="label">Beløp (kr)</label>
               <input className="input" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} />
             </div>
           </div>
 
           <div className="row3">
             <div>
-              <label className="label">Forfallsdato</label>
+              <label className="label">Forfall (valgfritt)</label>
               <input className="input" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
             </div>
             <div style={{ gridColumn: "span 2" } as any}>
@@ -468,23 +318,137 @@ export function Gjeld() {
           </div>
 
           <div className="btnRow" style={{ justifyContent: "flex-end" }}>
-            <button className="btn" type="button" onClick={() => setNewOpen(false)}>
+            <button className="btn" type="button" onClick={() => setAddOpen(false)}>
               Avbryt
             </button>
-            <button className="btn btnPrimary" type="button" onClick={saveNew}>
+            <button className="btn btnPrimary" type="button" onClick={saveAdd}>
               Lagre
             </button>
           </div>
         </div>
       </Modal>
 
-      {/* PAYMENT */}
-      <Modal open={!!payFor} title="Registrer innbetaling" onClose={() => setPayFor(null)}>
-        {payFor ? (
+      {/* DETAILS */}
+      <Modal open={detailsOpen} title="Detaljer" onClose={() => setDetailsOpen(false)}>
+        {active ? (
+          <div className="fieldGrid" style={{ marginTop: 0 }}>
+            <div className="item">
+              <div className="itemTop" style={{ alignItems: "center" }}>
+                <div style={{ minWidth: 0 }}>
+                  <div className="itemTitle" style={{ marginBottom: 6 }}>
+                    {active.debtorName}
+                  </div>
+
+                  <div className="itemMeta">
+                    {active.title ? (
+                      <>
+                        <b>{active.title}</b> {" • "}
+                      </>
+                    ) : null}
+                    Status: {statusBadge(active)}
+                  </div>
+
+                  <div className="itemMeta" style={{ marginTop: 8 }}>
+                    Opprinnelig: <b>{fmtKr(active.amount)}</b>
+                    {" • "}Innbetalt: <b>{fmtKr(receivablePaidSum(active))}</b>
+                    {" • "}Gjenstår:{" "}
+                    <b className={Math.max(0, receivableRemaining(active)) > 0 ? "dangerText" : "successText"}>
+                      {fmtKr(Math.max(0, receivableRemaining(active)))}
+                    </b>
+                  </div>
+
+                  {active.dueDate ? (
+                    <div className="itemMeta" style={{ marginTop: 6 }}>
+                      Forfall: <b>{active.dueDate}</b>{" "}
+                      {dueBadge(active.dueDate) && Math.max(0, receivableRemaining(active)) > 0 ? (
+                        <span className={`badge ${dueBadge(active.dueDate)!.cls}`} style={{ marginLeft: 8 }}>
+                          {dueBadge(active.dueDate)!.text}
+                        </span>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  {active.note ? (
+                    <div className="itemMeta" style={{ marginTop: 6 }}>
+                      Notat: <b>{active.note}</b>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="btnRow" style={{ marginTop: 12 }}>
+                {Math.max(0, receivableRemaining(active)) > 0 ? (
+                  <button className="btn btnPrimary" type="button" onClick={() => openPay(active)}>
+                    Registrer innbetaling
+                  </button>
+                ) : (
+                  <button className="btn" type="button" disabled>
+                    Betalt
+                  </button>
+                )}
+
+                <button
+                  className="btn btnDanger"
+                  type="button"
+                  onClick={() => {
+                    if (confirm(`Slette "${active.debtorName}"?`)) {
+                      remove(active.id);
+                      setDetailsOpen(false);
+                    }
+                  }}
+                >
+                  Slett
+                </button>
+              </div>
+            </div>
+
+            <div className="card" style={{ marginTop: 0 }}>
+              <div className="cardTitle">Innbetalinger</div>
+              <div className="cardSub">Klikk “x” for å fjerne en feilregistrering.</div>
+
+              <div className="list">
+                {Array.isArray(active.payments) && active.payments.length > 0 ? (
+                  active.payments
+                    .slice()
+                    .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""))
+                    .map((p) => (
+                      <div key={p.id} className="rowItem" style={{ cursor: "default" }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div className="rowItemTitle">{fmtKr(p.amount)}</div>
+                          <div className="rowItemSub">
+                            {new Date(p.createdAt).toLocaleDateString("nb-NO")}
+                            {p.note ? <> • {p.note}</> : null}
+                          </div>
+                        </div>
+
+                        <button
+                          className="iconBtn"
+                          type="button"
+                          aria-label="Fjern innbetaling"
+                          title="Fjern innbetaling"
+                          onClick={() => {
+                            if (confirm("Fjerne denne innbetalingen?")) removePayment(active.id, p.id);
+                          }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))
+                ) : (
+                  <div className="item">Ingen innbetalinger registrert.</div>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
+
+      {/* PAY */}
+      <Modal open={payOpen} title="Registrer innbetaling" onClose={() => setPayOpen(false)}>
+        {active ? (
           <div className="fieldGrid" style={{ marginTop: 0 }}>
             <div className="itemMeta" style={{ marginTop: 0 }}>
-              <b>{payFor.debtorName}</b> • Gjenstår nå:{" "}
-              <b className="dangerText">{fmtKr(Math.max(0, receivableRemaining(payFor)))}</b>
+              <b>{active.debtorName}</b> • Gjenstår nå: <b>{fmtKr(Math.max(0, receivableRemaining(active)))}</b>
             </div>
 
             <div className="row3">
@@ -493,7 +457,7 @@ export function Gjeld() {
                 <input className="input" type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} />
               </div>
               <div>
-                <label className="label">Beløp</label>
+                <label className="label">Beløp (kr)</label>
                 <input className="input" inputMode="decimal" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} />
               </div>
               <div>
@@ -503,86 +467,16 @@ export function Gjeld() {
             </div>
 
             <div className="btnRow" style={{ justifyContent: "flex-end" }}>
-              <button className="btn" type="button" onClick={() => setPayFor(null)}>
+              <button className="btn" type="button" onClick={() => setPayOpen(false)}>
                 Avbryt
               </button>
-              <button className="btn btnPrimary" type="button" onClick={savePayment}>
+              <button className="btn btnPrimary" type="button" onClick={savePay}>
                 Lagre
               </button>
             </div>
           </div>
         ) : null}
       </Modal>
-
-      {/* EDIT */}
-      <Modal open={!!edit} title="Rediger gjeld" onClose={() => setEdit(null)}>
-        {edit ? (
-          <div className="fieldGrid" style={{ marginTop: 0 }}>
-            <div className="row3">
-              <div>
-                <label className="label">Tittel</label>
-                <input className="input" value={eTitle} onChange={(e) => setETitle(e.target.value)} />
-              </div>
-              <div>
-                <label className="label">Hvem skylder?</label>
-                <input className="input" value={eName} onChange={(e) => setEName(e.target.value)} />
-              </div>
-              <div>
-                <label className="label">Totalbeløp</label>
-                <input className="input" inputMode="decimal" value={eAmount} onChange={(e) => setEAmount(e.target.value)} />
-              </div>
-            </div>
-
-            <div className="row3">
-              <div>
-                <label className="label">Forfall</label>
-                <input className="input" type="date" value={eDue} onChange={(e) => setEDue(e.target.value)} />
-              </div>
-              <div style={{ gridColumn: "span 2" } as any}>
-                <label className="label">Notat</label>
-                <input className="input" value={eNote} onChange={(e) => setENote(e.target.value)} />
-              </div>
-            </div>
-
-            <div className="itemMeta">
-              Innbetalt: <b className="successText">{fmtKr(receivablePaidSum(edit))}</b> • Gjenstår etter endring:{" "}
-              <b className="dangerText">{fmtKr(Math.max(0, round2(toNum(eAmount) - receivablePaidSum(edit))))}</b>
-            </div>
-
-            <div className="btnRow" style={{ justifyContent: "flex-end" }}>
-              <button className="btn" type="button" onClick={() => setEdit(null)}>
-                Avbryt
-              </button>
-              <button className="btn btnPrimary" type="button" onClick={saveEdit}>
-                Lagre
-              </button>
-            </div>
-          </div>
-        ) : null}
-      </Modal>
-
-      {/* DELETE */}
-      <ChoiceModal
-        open={!!del}
-        title="Slette gjeld?"
-        onClose={() => setDel(null)}
-        cancelText="Avbryt"
-        onCancel={() => setDel(null)}
-        secondaryText="Slett"
-        onSecondary={doDelete}
-        primaryText="Avbryt"
-        onPrimary={() => setDel(null)}
-      >
-        {del ? (
-          <div className="itemMeta" style={{ marginTop: 0 }}>
-            <b>{del.debtorName}</b>
-            <br />
-            Gjenstår: <b className="dangerText">{fmtKr(Math.max(0, receivableRemaining(del)))}</b>
-            <br />
-            <span style={{ opacity: 0.9 }}>Dette kan ikke angres.</span>
-          </div>
-        ) : null}
-      </ChoiceModal>
     </div>
   );
 }
