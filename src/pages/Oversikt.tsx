@@ -78,7 +78,7 @@ export function Oversikt() {
   const [saldoOpen, setSaldoOpen] = useState(false);
   const [saldoInput, setSaldoInput] = useState(String(saldo));
 
-  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
 
   const byItemId = useMemo(() => {
     const items = getItems();
@@ -91,16 +91,24 @@ export function Oversikt() {
   const from30 = useMemo(() => new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), []);
   const fromMonth = useMemo(() => startOfMonth(new Date()), []);
 
-  function calcProfitForSale(s: Sale) {
-    const lines = saleLinesSafe(s);
-    return lines.reduce((acc, l) => {
-      const unitCost = Number.isFinite(Number(l.unitCostAtSale))
-        ? Number(l.unitCostAtSale)
-        : byItemId.get(l.itemId)?.cost ?? 0;
-      const qty = Number(l.qty ?? 0);
-      const unitPrice = Number(l.unitPrice ?? 0);
-      return acc + (unitPrice - unitCost) * qty;
-    }, 0);
+  function calcProfitForSale(s: any) {
+    const lines = saleLinesSafe(s as Sale);
+    if (lines.length > 0) {
+      return lines.reduce((acc, l) => {
+        const unitCost = Number.isFinite(Number(l.unitCostAtSale))
+          ? Number(l.unitCostAtSale)
+          : byItemId.get(l.itemId)?.cost ?? 0;
+        const qty = Number(l.qty ?? 0);
+        const unitPrice = Number(l.unitPrice ?? 0);
+        return acc + (unitPrice - unitCost) * qty;
+      }, 0);
+    }
+
+    const unitCost =
+      Number.isFinite(Number(s.unitCostAtSale)) ? Number(s.unitCostAtSale) : byItemId.get(s.itemId)?.cost ?? 0;
+    const qty = Number(s.qty ?? 0);
+    const unitPrice = Number(s.unitPrice ?? 0);
+    return (unitPrice - unitCost) * qty;
   }
 
   const totals = useMemo(() => {
@@ -111,10 +119,10 @@ export function Oversikt() {
     const s7 = sales.filter((s) => isAfter(s.createdAt, from7));
     const s30 = sales.filter((s) => isAfter(s.createdAt, from30));
     const sm = sales.filter((s) => isAfter(s.createdAt, fromMonth));
-    const sall = sales;
+    const sall = sales; // ✅ alt siden start
 
-    const sumRevenue = (list: Sale[]) => list.reduce((a, b) => a + (Number(b.total) || 0), 0);
-    const sumProfit = (list: Sale[]) => list.reduce((a, b) => a + calcProfitForSale(b), 0);
+    const sumRevenue = (list: any[]) => list.reduce((a, b) => a + (Number(b.total) || 0), 0);
+    const sumProfit = (list: any[]) => list.reduce((a, b) => a + calcProfitForSale(b), 0);
 
     return {
       unpaidSalesTotal,
@@ -141,6 +149,7 @@ export function Oversikt() {
 
   const mostSoldAll = useMemo(() => {
     const map = new Map<string, { itemId: string; name: string; qty: number; revenue: number; profit: number }>();
+
     for (const s of sales) {
       const lines = saleLinesSafe(s);
       for (const l of lines) {
@@ -186,7 +195,7 @@ export function Oversikt() {
 
     const arr = Array.from(map.values());
     arr.sort((a, b) => b.revenue - a.revenue);
-    return arr.slice(0, 10);
+    return arr.slice(0, 20);
   }, [sales, customers, byItemId]);
 
   function openSaldoModal() {
@@ -205,75 +214,101 @@ export function Oversikt() {
       <div className="cardTitle">Oversikt</div>
       <div className="cardSub">Kort dashboard. Detaljer ligger under “Vis mer”.</div>
 
-      {/* Penger (kort og tydelig) */}
+      {/* Penger */}
       <div className="card" style={{ marginTop: 0 }}>
-        <div className="cardTitle" style={{ fontSize: 18, marginBottom: 8 }}>Penger</div>
+        <div className="cardTitle" style={{ fontSize: 18, marginBottom: 8 }}>
+          Penger
+        </div>
 
         <div className="moneyBig">{fmtKr(saldo)}</div>
 
-        <div className="miniRow" style={{ marginTop: 8 }}>
-          <span>Utestående salg: <b className="dangerText">{fmtKr(totals.unpaidSalesTotal)}</b></span>
-          <span>Gjeld til deg: <b className="dangerText">{fmtKr(totals.unpaidReceivablesTotal)}</b></span>
-          <span>Total når alt er betalt: <b>{fmtKr(totals.grand)}</b></span>
+        <div className="itemMeta" style={{ marginTop: 10 }}>
+          Utestående salg: <b className="dangerText">{fmtKr(totals.unpaidSalesTotal)}</b> • Gjeld til deg:{" "}
+          <b className="dangerText">{fmtKr(totals.unpaidReceivablesTotal)}</b>
         </div>
 
-        <div className="btnRow" style={{ marginTop: 10 }}>
-          <button className="btn btnPrimary" type="button" onClick={openSaldoModal}>Oppdater saldo</button>
-          <button className="btn" type="button" onClick={() => setDetailsOpen(true)}>Vis mer</button>
+        <div className="itemMeta" style={{ marginTop: 8 }}>
+          Total når alt er betalt: <b>{fmtKr(totals.grand)}</b>
+        </div>
+
+        <div className="btnRow" style={{ marginTop: 12 }}>
+          <button className="btn btnPrimary" type="button" onClick={openSaldoModal}>
+            Oppdater saldo
+          </button>
+          <button className="btn" type="button" onClick={() => setMoreOpen(true)}>
+            Vis mer
+          </button>
         </div>
       </div>
 
-      {/* Tre kompakte perioder */}
+      {/* Kompakt metrics */}
       <div className="metricGrid" style={{ marginTop: 12 }}>
         <div className="metricCard">
           <p className="metricTitle">Siste 7 dager</p>
-          <p className="metricValue">{fmtKr(totals.revenue7)}</p>
-          <div className="miniRow">
-            <span>Profitt: <b>{fmtKr(totals.profit7)}</b></span>
-            <span>Salg: <b>{totals.count7}</b></span>
-          </div>
+          <p className="metricValue">
+            {fmtKr(totals.revenue7)} • <span className="successText">{fmtKr(totals.profit7)}</span> • {totals.count7}
+          </p>
         </div>
 
         <div className="metricCard">
           <p className="metricTitle">Siste 30 dager</p>
-          <p className="metricValue">{fmtKr(totals.revenue30)}</p>
-          <div className="miniRow">
-            <span>Profitt: <b>{fmtKr(totals.profit30)}</b></span>
-            <span>Salg: <b>{totals.count30}</b></span>
-          </div>
+          <p className="metricValue">
+            {fmtKr(totals.revenue30)} • <span className="successText">{fmtKr(totals.profit30)}</span> • {totals.count30}
+          </p>
         </div>
 
         <div className="metricCard">
-          <p className="metricTitle">All-time</p>
-          <p className="metricValue">{fmtKr(totals.revenueAll)}</p>
-          <div className="miniRow">
-            <span>Profitt: <b>{fmtKr(totals.profitAll)}</b></span>
-            <span>Salg: <b>{totals.countAll}</b></span>
-          </div>
+          <p className="metricTitle">ALT (siden start)</p>
+          <p className="metricValue">
+            {fmtKr(totals.revenueAll)} • <span className="successText">{fmtKr(totals.profitAll)}</span> • {totals.countAll}
+          </p>
         </div>
       </div>
 
-      {/* DETAILS MODAL */}
-      <Modal open={detailsOpen} title="Oversikt – detaljer" onClose={() => setDetailsOpen(false)}>
+      <Modal open={saldoOpen} title="Oppdater saldo" onClose={() => setSaldoOpen(false)}>
+        <div className="fieldGrid" style={{ marginTop: 0 }}>
+          <div>
+            <label className="label">Saldo (kr)</label>
+            <input className="input" inputMode="decimal" value={saldoInput} onChange={(e) => setSaldoInput(e.target.value)} />
+          </div>
+
+          <div className="btnRow" style={{ justifyContent: "flex-end" }}>
+            <button className="btn" type="button" onClick={() => setSaldoOpen(false)}>
+              Avbryt
+            </button>
+            <button className="btn btnPrimary" type="button" onClick={saveSaldo}>
+              Lagre
+            </button>
+          </div>
+
+          <div className="itemMeta" style={{ marginTop: 6 }}>
+            Tips: Saldo endres manuelt. Utestående oppdateres automatisk.
+          </div>
+        </div>
+      </Modal>
+
+      <Modal open={moreOpen} title="Detaljer" onClose={() => setMoreOpen(false)}>
         <div className="fieldGrid" style={{ marginTop: 0 }}>
           <div className="card" style={{ marginTop: 0 }}>
-            <div className="cardTitle">Mest solgt (all-time)</div>
-            <div className="cardSub">Topp 5 basert på antall solgte enheter.</div>
+            <div className="cardTitle">Denne måneden</div>
+            <div className="itemMeta">
+              Solgt: <b>{fmtKr(totals.revenueM)}</b> • Profitt: <b className="successText">{fmtKr(totals.profitM)}</b> • Salg: <b>{totals.countM}</b>
+            </div>
+          </div>
+
+          <div className="card" style={{ marginTop: 0 }}>
+            <div className="cardTitle">Mest solgt (ALT)</div>
+            <div className="cardSub">Topp 5 basert på antall solgte enheter (med omsetning/profitt).</div>
 
             <div className="list">
               {mostSoldAll.length === 0 ? (
-                <div className="item">Ingen salg registrert.</div>
+                <div className="item">Ingen salg registrert enda.</div>
               ) : (
                 mostSoldAll.map((x) => (
                   <div key={x.itemId || x.name} className="item">
-                    <div className="itemTop">
-                      <div>
-                        <p className="itemTitle">{x.name}</p>
-                        <div className="itemMeta">
-                          Antall: <b>{x.qty}</b> • Omsetning: <b>{fmtKr(x.revenue)}</b> • Profitt: <b>{fmtKr(x.profit)}</b>
-                        </div>
-                      </div>
-                      <span className="badge">{x.qty} stk</span>
+                    <p className="itemTitle">{x.name}</p>
+                    <div className="itemMeta">
+                      Antall: <b>{x.qty}</b> • Solgt: <b>{fmtKr(x.revenue)}</b> • Profitt: <b className="successText">{fmtKr(x.profit)}</b>
                     </div>
                   </div>
                 ))
@@ -282,19 +317,19 @@ export function Oversikt() {
           </div>
 
           <div className="card" style={{ marginTop: 0 }}>
-            <div className="cardTitle">Topp kunder (all-time)</div>
-            <div className="cardSub">Topp 10 basert på omsetning.</div>
+            <div className="cardTitle">Topp kunder (ALT)</div>
+            <div className="cardSub">Topp 20 basert på omsetning.</div>
 
             <div className="list">
               {perCustomerAll.length === 0 ? (
-                <div className="item">Ingen salg registrert.</div>
+                <div className="item">Ingen salg enda.</div>
               ) : (
                 perCustomerAll.map((c) => (
                   <div key={c.name} className="item">
                     <p className="itemTitle">{c.name}</p>
                     <div className="itemMeta">
-                      Omsetning: <b>{fmtKr(c.revenue)}</b> • Profitt: <b>{fmtKr(c.profit)}</b> • Salg: <b>{c.count}</b>{" "}
-                      • Utestående: <b className={c.unpaid > 0 ? "dangerText" : "successText"}>{fmtKr(c.unpaid)}</b>
+                      Solgt: <b>{fmtKr(c.revenue)}</b> • Profitt: <b className="successText">{fmtKr(c.profit)}</b> • Salg: <b>{c.count}</b> • Utestående:{" "}
+                      <b className={c.unpaid > 0 ? "dangerText" : "successText"}>{fmtKr(c.unpaid)}</b>
                     </div>
                   </div>
                 ))
@@ -303,30 +338,9 @@ export function Oversikt() {
           </div>
 
           <div className="btnRow" style={{ justifyContent: "flex-end" }}>
-            <button className="btn" type="button" onClick={() => setDetailsOpen(false)}>Lukk</button>
-          </div>
-        </div>
-      </Modal>
-
-      <Modal open={saldoOpen} title="Oppdater saldo" onClose={() => setSaldoOpen(false)}>
-        <div className="fieldGrid" style={{ marginTop: 0 }}>
-          <div>
-            <label className="label">Saldo (kr)</label>
-            <input
-              className="input"
-              inputMode="decimal"
-              value={saldoInput}
-              onChange={(e) => setSaldoInput(e.target.value)}
-            />
-          </div>
-
-          <div className="btnRow">
-            <button className="btn btnPrimary" type="button" onClick={saveSaldo}>Lagre</button>
-            <button className="btn" type="button" onClick={() => setSaldoOpen(false)}>Avbryt</button>
-          </div>
-
-          <div className="itemMeta" style={{ marginTop: 6 }}>
-            Tips: Saldo endres manuelt. Utestående oppdateres automatisk av salg/gjeld og innbetalinger.
+            <button className="btn" type="button" onClick={() => setMoreOpen(false)}>
+              Lukk
+            </button>
           </div>
         </div>
       </Modal>
