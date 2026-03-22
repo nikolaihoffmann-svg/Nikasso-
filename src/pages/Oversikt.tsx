@@ -3,7 +3,11 @@ import React, { useMemo, useState } from "react";
 import {
   fmtKr,
   getItems,
+  getPayables,
+  getPurchases,
+  payableRemaining,
   receivableRemaining,
+  round2,
   saleRemaining,
   setSaldo,
   useCustomers,
@@ -23,9 +27,9 @@ function toNum(v: string) {
   return Number.isFinite(n) ? n : 0;
 }
 
-function isAfter(dateIso: string, from: Date) {
-  const d = new Date(dateIso);
-  return Number.isFinite(d.getTime()) && d.getTime() >= from.getTime();
+function clamp01(x: number) {
+  if (!Number.isFinite(x)) return 0;
+  return Math.min(1, Math.max(0, x));
 }
 
 function startOfMonth(d = new Date()) {
@@ -44,19 +48,21 @@ function monthLabel(ym: string) {
   return `${m}.${String(y).slice(2)}`;
 }
 
-function clamp01(x: number) {
-  if (!Number.isFinite(x)) return 0;
-  return Math.min(1, Math.max(0, x));
+function safeDate(iso: string | undefined) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  return Number.isFinite(d.getTime()) ? d : null;
 }
 
-function round2(n: number) {
-  return Math.round((n + Number.EPSILON) * 100) / 100;
+function addMonths(d: Date, delta: number) {
+  return new Date(d.getFullYear(), d.getMonth() + delta, 1);
 }
 
 function saleLinesSafe(s: Sale): SaleLine[] {
   const lines = Array.isArray((s as any).lines) ? ((s as any).lines as SaleLine[]) : [];
   if (lines.length > 0) return lines;
 
+  // legacy fallback
   const itemName = (s as any).itemName;
   const itemId = (s as any).itemId;
   const qty = (s as any).qty;
@@ -77,17 +83,18 @@ function saleLinesSafe(s: Sale): SaleLine[] {
 }
 
 /* =========================
-   Lightweight SVG charts
+   Mini SVG Charts (no libs)
 ========================= */
 
 function LineChart(props: {
   title: string;
-  series: { name: string; values: number[] }[];
+  subtitle?: string;
   labels: string[];
+  series: { name: string; values: number[]; color: string }[];
 }) {
-  const W = 640;
-  const H = 220;
-  const pad = 26;
+  const W = 680;
+  const H = 240;
+  const pad = 28;
   const innerW = W - pad * 2;
   const innerH = H - pad * 2;
 
@@ -103,36 +110,66 @@ function LineChart(props: {
   return (
     <div className="card">
       <div className="cardTitle">{props.title}</div>
-      <div className="cardSub">Siste {props.labels.length} måneder</div>
+      <div className="cardSub">{props.subtitle ?? ""}</div>
 
       <div style={{ overflowX: "auto" }}>
-        <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} role="img" aria-label={props.title} style={{ display: "block" }}>
+        <svg
+          width={W}
+          height={H}
+          viewBox={`0 0 ${W} ${H}`}
+          role="img"
+          aria-label={props.title}
+          style={{ display: "block" }}
+        >
           {/* grid */}
           {grid.map((g) => {
             const yy = pad + (g / gridLines) * innerH;
-            return <line key={g} x1={pad} y1={yy} x2={W - pad} y2={yy} stroke="rgba(255,255,255,0.08)" strokeWidth="1" />;
+            return (
+              <line
+                key={g}
+                x1={pad}
+                y1={yy}
+                x2={W - pad}
+                y2={yy}
+                stroke="rgba(255,255,255,0.08)"
+                strokeWidth="1"
+              />
+            );
           })}
 
           {/* series */}
-          {props.series.map((s, si) => {
+          {props.series.map((s) => {
             const pts = s.values.map((v, i) => `${x(i)},${y(v)}`).join(" ");
-            const stroke = si === 0 ? "rgba(79,131,255,0.95)" : si === 1 ? "rgba(255,90,95,0.85)" : "rgba(53,208,127,0.9)";
             return (
               <g key={s.name}>
-                <polyline fill="none" stroke={stroke} strokeWidth="3" points={pts} strokeLinejoin="round" strokeLinecap="round" />
+                <polyline
+                  fill="none"
+                  stroke={s.color}
+                  strokeWidth="3"
+                  points={pts}
+                  strokeLinejoin="round"
+                  strokeLinecap="round"
+                />
                 {s.values.map((v, i) => (
-                  <circle key={i} cx={x(i)} cy={y(v)} r="3.5" fill={stroke} />
+                  <circle key={i} cx={x(i)} cy={y(v)} r="3.4" fill={s.color} />
                 ))}
               </g>
             );
           })}
 
-          {/* x labels (sparse) */}
+          {/* x labels */}
           {props.labels.map((lab, i) => {
             const show = props.labels.length <= 6 ? true : i === 0 || i === props.labels.length - 1 || i % 2 === 1;
             if (!show) return null;
             return (
-              <text key={lab} x={x(i)} y={H - 8} fill="rgba(255,255,255,0.55)" fontSize="12" textAnchor="middle">
+              <text
+                key={`${lab}_${i}`}
+                x={x(i)}
+                y={H - 9}
+                fill="rgba(255,255,255,0.55)"
+                fontSize="12"
+                textAnchor="middle"
+              >
                 {lab}
               </text>
             );
@@ -142,7 +179,7 @@ function LineChart(props: {
 
       <div className="miniRow" style={{ marginTop: 8 }}>
         {props.series.map((s) => (
-          <span key={s.name} className="badge" style={{ opacity: 0.95 }}>
+          <span key={s.name} className="badge">
             {s.name}
           </span>
         ))}
@@ -151,12 +188,17 @@ function LineChart(props: {
   );
 }
 
-function BarChart(props: { title: string; values: { label: string; value: number }[]; suffix?: string }) {
+function BarList(props: {
+  title: string;
+  subtitle?: string;
+  values: { label: string; value: number; right?: string }[];
+}) {
   const max = Math.max(1, ...props.values.map((x) => (Number.isFinite(x.value) ? x.value : 0)));
+
   return (
     <div className="card">
       <div className="cardTitle">{props.title}</div>
-      <div className="cardSub">Topp {props.values.length}</div>
+      <div className="cardSub">{props.subtitle ?? ""}</div>
 
       <div className="list">
         {props.values.map((x) => {
@@ -165,10 +207,16 @@ function BarChart(props: { title: string; values: { label: string; value: number
             <div key={x.label} className="item" style={{ padding: 10 }}>
               <div className="itemTop" style={{ alignItems: "center" }}>
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontWeight: 900, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{x.label}</div>
-                  <div className="itemMeta">{fmtKr(x.value)}{props.suffix ? ` ${props.suffix}` : ""}</div>
+                  <div style={{ fontWeight: 900, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {x.label}
+                  </div>
+                  <div className="itemMeta">
+                    <b>{fmtKr(x.value)}</b>
+                    {x.right ? <span style={{ opacity: 0.9 }}> • {x.right}</span> : null}
+                  </div>
                 </div>
-                <div style={{ width: 140 }}>
+
+                <div style={{ width: 160 }}>
                   <div
                     style={{
                       height: 10,
@@ -188,56 +236,6 @@ function BarChart(props: { title: string; values: { label: string; value: number
       </div>
     </div>
   );
-}
-
-/* =========================
-   Purchases (Innkjøp) reader (robust)
-   - Leser fra localStorage hvis du har innkjøp der allerede.
-   - Hvis ikke: blir 0.
-========================= */
-
-type AnyPurchase = {
-  id?: string;
-  total?: number; // brukt/innkjøp total
-  amount?: number;
-  paid?: boolean;
-  payments?: { amount: number }[];
-  createdAt?: string;
-};
-
-function getPurchasesLocal(): AnyPurchase[] {
-  const keys = ["sg.purchases.v1", "sg.innkjop.v1", "sg.purchases", "sg.innkjop"];
-  for (const k of keys) {
-    const raw = localStorage.getItem(k);
-    if (!raw) continue;
-    try {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
-      if (Array.isArray(parsed?.purchases)) return parsed.purchases;
-      if (Array.isArray(parsed?.innkjop)) return parsed.innkjop;
-    } catch {
-      // ignore
-    }
-  }
-  return [];
-}
-
-function purchasePaidSum(p: AnyPurchase) {
-  if (Array.isArray(p.payments) && p.payments.length) {
-    return round2(p.payments.reduce((a, x) => a + (Number(x.amount) || 0), 0));
-  }
-  const total = Number(p.total ?? p.amount ?? 0) || 0;
-  return p.paid ? round2(total) : 0;
-}
-
-function purchaseTotal(p: AnyPurchase) {
-  return round2(Number(p.total ?? p.amount ?? 0) || 0);
-}
-
-function purchaseRemaining(p: AnyPurchase) {
-  const t = purchaseTotal(p);
-  const paid = purchasePaidSum(p);
-  return round2(Math.max(0, t - paid));
 }
 
 /* =========================
@@ -274,7 +272,8 @@ export function Oversikt() {
   const [saldoOpen, setSaldoOpen] = useState(false);
   const [saldoInput, setSaldoInput] = useState(String(saldo));
 
-  const purchases = useMemo(() => getPurchasesLocal(), []);
+  const purchases = useMemo(() => getPurchases(), []);
+  const payables = useMemo(() => getPayables(), []);
 
   const byItemId = useMemo(() => {
     const items = getItems();
@@ -306,49 +305,51 @@ export function Oversikt() {
   const totals = useMemo(() => {
     const unpaidSalesTotal = round2(sales.reduce((a, s) => a + Math.max(0, saleRemaining(s)), 0));
     const unpaidReceivablesTotal = round2(receivables.reduce((a, r) => a + Math.max(0, receivableRemaining(r)), 0));
+    const unpaidPayablesTotal = round2(payables.reduce((a, p) => a + Math.max(0, payableRemaining(p)), 0));
 
-    const totalRevenue = round2(sales.reduce((a, s) => a + (Number(s.total) || 0), 0));
-    const totalProfit = round2(sales.reduce((a, s) => a + calcProfitForSale(s), 0));
+    const revenueTotal = round2(sales.reduce((a, s) => a + (Number(s.total) || 0), 0));
+    const profitTotal = round2(sales.reduce((a, s) => a + calcProfitForSale(s), 0));
+    const spentTotal = round2(purchases.reduce((a, p) => a + (Number(p.total) || 0), 0));
 
-    const spentTotal = round2(purchases.reduce((a, p) => a + purchaseTotal(p), 0));
-    const youOweTotal = round2(purchases.reduce((a, p) => a + purchaseRemaining(p), 0));
+    const countSales = sales.length;
+    const avgSale = countSales ? round2(revenueTotal / countSales) : 0;
+    const marginPct = revenueTotal > 0 ? round2((profitTotal / revenueTotal) * 100) : 0;
 
-    const netWhenSettled = round2(Number(saldo) + unpaidSalesTotal + unpaidReceivablesTotal - youOweTotal);
+    // "Når alt er oppgjort" = saldo + penger inn som forventes (utestående salg + gjeld til deg) - penger ut du skylder (leverandørgjeld)
+    const netWhenSettled = round2(Number(saldo) + unpaidSalesTotal + unpaidReceivablesTotal - unpaidPayablesTotal);
 
-    const avgSale = sales.length ? round2(totalRevenue / sales.length) : 0;
-    const margin = totalRevenue > 0 ? round2((totalProfit / totalRevenue) * 100) : 0;
+    // cashflow-ish (for feel): solgt - brukt
+    const netSalesMinusSpent = round2(revenueTotal - spentTotal);
 
     return {
       unpaidSalesTotal,
       unpaidReceivablesTotal,
-
-      totalRevenue,
-      totalProfit,
-      avgSale,
-      margin,
-
+      unpaidPayablesTotal,
+      revenueTotal,
+      profitTotal,
       spentTotal,
-      youOweTotal,
-
+      countSales,
+      avgSale,
+      marginPct,
       netWhenSettled,
+      netSalesMinusSpent,
     };
-  }, [sales, receivables, saldo, purchases, byItemId]);
+  }, [sales, receivables, payables, purchases, saldo, byItemId]);
 
+  // 12 måneder vindu
   const months = useMemo(() => {
     const now = new Date();
     const list: string[] = [];
     for (let i = 11; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      list.push(yyyymm(d));
+      list.push(yyyymm(addMonths(now, -i)));
     }
     return list;
   }, []);
 
-  const monthlySeries = useMemo(() => {
+  const monthly = useMemo(() => {
     const rev = new Map<string, number>();
     const prof = new Map<string, number>();
     const spent = new Map<string, number>();
-
     for (const ym of months) {
       rev.set(ym, 0);
       prof.set(ym, 0);
@@ -356,8 +357,8 @@ export function Oversikt() {
     }
 
     for (const s of sales) {
-      const d = new Date(s.createdAt);
-      if (!Number.isFinite(d.getTime())) continue;
+      const d = safeDate(s.createdAt);
+      if (!d) continue;
       const key = yyyymm(d);
       if (!rev.has(key)) continue;
       rev.set(key, (rev.get(key) ?? 0) + (Number(s.total) || 0));
@@ -365,21 +366,51 @@ export function Oversikt() {
     }
 
     for (const p of purchases) {
-      const d = new Date(p.createdAt || "");
-      if (!Number.isFinite(d.getTime())) continue;
+      const d = safeDate(p.createdAt);
+      if (!d) continue;
       const key = yyyymm(d);
       if (!spent.has(key)) continue;
-      spent.set(key, (spent.get(key) ?? 0) + purchaseTotal(p));
+      spent.set(key, (spent.get(key) ?? 0) + (Number(p.total) || 0));
     }
 
     const labels = months.map(monthLabel);
-    return {
-      labels,
-      revenue: months.map((m) => round2(rev.get(m) ?? 0)),
-      profit: months.map((m) => round2(prof.get(m) ?? 0)),
-      spent: months.map((m) => round2(spent.get(m) ?? 0)),
-    };
+    const revenue = months.map((m) => round2(rev.get(m) ?? 0));
+    const profit = months.map((m) => round2(prof.get(m) ?? 0));
+    const used = months.map((m) => round2(spent.get(m) ?? 0));
+    const net = months.map((m, i) => round2(revenue[i] - used[i]));
+
+    return { labels, revenue, profit, used, net };
   }, [months, sales, purchases, byItemId]);
+
+  // Kumulativ siden start (sortert eldste -> nyeste)
+  const cumulative = useMemo(() => {
+    const sorted = [...sales].sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || ""));
+    const labels: string[] = [];
+    const cumRevenue: number[] = [];
+    const cumProfit: number[] = [];
+
+    let r = 0;
+    let p = 0;
+
+    // lag maks 18 punkter for ikke å bli “tung”
+    const step = sorted.length <= 18 ? 1 : Math.ceil(sorted.length / 18);
+
+    for (let i = 0; i < sorted.length; i += step) {
+      const s = sorted[i];
+      r += Number(s.total) || 0;
+      p += calcProfitForSale(s);
+      const d = safeDate(s.createdAt);
+      labels.push(d ? `${String(d.getMonth() + 1).padStart(2, "0")}.${String(d.getFullYear()).slice(2)}` : `#${i + 1}`);
+      cumRevenue.push(round2(r));
+      cumProfit.push(round2(p));
+    }
+
+    if (sorted.length === 0) {
+      return { labels: ["0"], cumRevenue: [0], cumProfit: [0] };
+    }
+
+    return { labels, cumRevenue, cumProfit };
+  }, [sales, byItemId]);
 
   const topCustomersAllTime = useMemo(() => {
     const map = new Map<string, { name: string; revenue: number; profit: number; count: number }>();
@@ -451,11 +482,11 @@ export function Oversikt() {
         <div className="moneyBig">{fmtKr(saldo)}</div>
 
         <div className="itemMeta" style={{ marginTop: 10 }}>
-          Utestående salg: <b>{fmtKr(totals.unpaidSalesTotal)}</b>
+          Utestående salg: <b className={totals.unpaidSalesTotal > 0 ? "dangerText" : ""}>{fmtKr(totals.unpaidSalesTotal)}</b>
           {" • "}
-          Gjeld til deg: <b>{fmtKr(totals.unpaidReceivablesTotal)}</b>
+          Gjeld til deg: <b className={totals.unpaidReceivablesTotal > 0 ? "warnText" : ""}>{fmtKr(totals.unpaidReceivablesTotal)}</b>
           {" • "}
-          Du skylder: <b className={totals.youOweTotal > 0 ? "dangerText" : ""}>{fmtKr(totals.youOweTotal)}</b>
+          Du skylder: <b className={totals.unpaidPayablesTotal > 0 ? "dangerText" : ""}>{fmtKr(totals.unpaidPayablesTotal)}</b>
         </div>
 
         <div className="itemMeta" style={{ marginTop: 8 }}>
@@ -469,19 +500,24 @@ export function Oversikt() {
         </div>
       </div>
 
-      {/* Totalt KPI */}
+      {/* KPI (totalt) */}
       <div className="metricGrid" style={{ marginTop: 12 }}>
         <div className="metricCard">
           <p className="metricTitle">Solgt (totalt)</p>
-          <p className="metricValue">{fmtKr(totals.totalRevenue)}</p>
+          <p className="metricValue">{fmtKr(totals.revenueTotal)}</p>
         </div>
         <div className="metricCard">
           <p className="metricTitle">Profitt (totalt)</p>
-          <p className="metricValue">{fmtKr(totals.totalProfit)}</p>
+          <p className="metricValue">{fmtKr(totals.profitTotal)}</p>
         </div>
         <div className="metricCard">
           <p className="metricTitle">Penger brukt (totalt)</p>
           <p className="metricValue">{fmtKr(totals.spentTotal)}</p>
+        </div>
+
+        <div className="metricCard">
+          <p className="metricTitle">Netto (solgt − brukt)</p>
+          <p className="metricValue">{fmtKr(totals.netSalesMinusSpent)}</p>
         </div>
         <div className="metricCard">
           <p className="metricTitle">Snitt pr salg</p>
@@ -489,50 +525,72 @@ export function Oversikt() {
         </div>
         <div className="metricCard">
           <p className="metricTitle">Margin (totalt)</p>
-          <p className="metricValue">{totals.margin.toFixed(1)}%</p>
-        </div>
-        <div className="metricCard">
-          <p className="metricTitle">Salg (antall)</p>
-          <p className="metricValue">{sales.length}</p>
+          <p className="metricValue">{totals.marginPct.toFixed(1)}%</p>
         </div>
       </div>
 
       {/* Grafer */}
       <LineChart
-        title="Rapport"
-        labels={monthlySeries.labels}
+        title="Rapport (12 mnd)"
+        subtitle="Solgt vs brukt vs profitt."
+        labels={monthly.labels}
         series={[
-          { name: "Solgt", values: monthlySeries.revenue },
-          { name: "Brukt", values: monthlySeries.spent },
-          { name: "Profitt", values: monthlySeries.profit },
+          { name: "Solgt", values: monthly.revenue, color: "rgba(79,131,255,0.95)" },
+          { name: "Brukt", values: monthly.used, color: "rgba(255,90,95,0.85)" },
+          { name: "Profitt", values: monthly.profit, color: "rgba(53,208,127,0.9)" },
         ]}
       />
 
       <LineChart
-        title="Solgt vs profitt (zoom)"
-        labels={monthlySeries.labels}
+        title="Netto per måned (12 mnd)"
+        subtitle="Solgt minus brukt."
+        labels={monthly.labels}
         series={[
-          { name: "Solgt", values: monthlySeries.revenue },
-          { name: "Profitt", values: monthlySeries.profit },
+          { name: "Netto", values: monthly.net, color: "rgba(255,204,102,0.95)" },
+        ]}
+      />
+
+      <LineChart
+        title="Kumulativt siden start"
+        subtitle="Oppsamlet omsetning og profitt (glattet til få punkter)."
+        labels={cumulative.labels}
+        series={[
+          { name: "Omsetning", values: cumulative.cumRevenue, color: "rgba(79,131,255,0.95)" },
+          { name: "Profitt", values: cumulative.cumProfit, color: "rgba(53,208,127,0.9)" },
         ]}
       />
 
       {/* Topplister */}
-      <BarChart
+      <BarList
         title="Topp kunder (totalt)"
-        values={topCustomersAllTime.map((c) => ({ label: c.name, value: round2(c.revenue) }))}
+        subtitle="Topp 5 basert på omsetning."
+        values={topCustomersAllTime.map((c) => ({
+          label: c.name,
+          value: round2(c.revenue),
+          right: `Salg: ${c.count}`,
+        }))}
       />
 
-      <BarChart
+      <BarList
         title="Topp varer (totalt)"
-        values={topItemsAllTime.map((x) => ({ label: x.name, value: round2(x.revenue) }))}
+        subtitle="Topp 5 basert på omsetning."
+        values={topItemsAllTime.map((x) => ({
+          label: x.name,
+          value: round2(x.revenue),
+          right: `Antall: ${x.qty}`,
+        }))}
       />
 
       <Modal open={saldoOpen} title="Oppdater saldo" onClose={() => setSaldoOpen(false)}>
         <div className="fieldGrid" style={{ marginTop: 0 }}>
           <div>
             <label className="label">Saldo (kr)</label>
-            <input className="input" inputMode="decimal" value={saldoInput} onChange={(e) => setSaldoInput(e.target.value)} />
+            <input
+              className="input"
+              inputMode="decimal"
+              value={saldoInput}
+              onChange={(e) => setSaldoInput(e.target.value)}
+            />
           </div>
 
           <div className="btnRow">
