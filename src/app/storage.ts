@@ -31,28 +31,26 @@ export type Customer = {
 export type Payment = {
   id: string;
   amount: number;
-  /** ISO-tidspunkt for innbetaling */
-  createdAt: string;
+  createdAt: string; // ISO
   note?: string;
 };
 
 export type SaleLine = {
-  id: string; // ✅ trengs i UI
+  id: string;
   itemId: string;
   itemName: string;
   qty: number;
   unitPrice: number;
-  /** kost per stk på salgstidspunktet (for korrekt historikk) */
   unitCostAtSale?: number;
 };
 
 export type Sale = {
   id: string;
 
-  /** Ny modell: flere varer pr salg */
+  // Ny modell
   lines: SaleLine[];
 
-  /** Legacy (for kompatibilitet med eldre UI/lagring) */
+  // Legacy (for gamle visninger)
   itemId?: string;
   itemName?: string;
   qty?: number;
@@ -75,46 +73,89 @@ export type Sale = {
 
 export type Receivable = {
   id: string;
-
-  /** Kort tittel (f.eks "Lån", "Faktura", "Diverse") */
-  title: string;
-
-  /** Hvem skylder deg */
-  debtorName: string;
-
-  /** Totalbeløp som skal inn */
+  title: string; // "Gjeld"
+  debtorName: string; // hvem skylder DEG
   amount: number;
+  dueDate?: string;
+  note?: string;
+  payments: Payment[];
+  paid: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
 
+/** Leverandørgjeld: hva DU skylder andre */
+export type Payable = {
+  id: string;
+  supplierName: string;
+  title: string; // f.eks "Faktura", "Innkjøp", "Deler"
+  amount: number;
+  dueDate?: string;
+  note?: string;
+  payments: Payment[];
+  paid: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PurchaseLine = {
+  id: string;
+  itemId: string;
+  itemName: string;
+  qty: number;
+  unitCost: number;
+};
+
+export type Purchase = {
+  id: string;
+  supplierName?: string;
+  lines: PurchaseLine[];
+  total: number;
+
+  /** hvis ikke betalt: peker til Payable */
+  payableId?: string;
+
+  /** cost-oppdatering som ble brukt da innkjøpet ble registrert */
+  costMode: "weighted" | "set_latest" | "keep";
+
+  paid: boolean;
   dueDate?: string;
   note?: string;
 
-  payments: Payment[];
-  paid: boolean;
-
   createdAt: string;
-  updatedAt: string;
 };
 
 export type AddSaleInput = {
   customerId?: string;
   customerName?: string;
-
-  /** Ny måte */
   lines?: SaleLine[];
 
-  /** Legacy måte (1 vare pr salg) */
+  // legacy
   itemId?: string;
   itemName?: string;
   qty?: number;
   unitPrice?: number;
   unitCostAtSale?: number;
 
-  /** status/innbetaling */
   paid?: boolean;
   payments?: Payment[];
-
   dueDate?: string;
   note?: string;
+};
+
+export type AddPurchaseInput = {
+  supplierName?: string;
+  lines: Array<{
+    itemId: string;
+    itemName: string;
+    qty: number;
+    unitCost: number;
+  }>;
+  paid?: boolean; // default true
+  dueDate?: string;
+  note?: string;
+  costMode?: "weighted" | "set_latest" | "keep"; // default weighted
+  payableTitle?: string; // default "Innkjøp"
 };
 
 /* =========================
@@ -126,6 +167,8 @@ const LS_KEYS = {
   customers: "sg.customers.v1",
   sales: "sg.sales.v1",
   receivables: "sg.receivables.v1",
+  payables: "sg.payables.v1",
+  purchases: "sg.purchases.v1",
   saleDraftCustomer: "sg.saleDraftCustomer.v1",
   theme: "sg.theme.v1",
   saldo: "sg.saldo.v1",
@@ -199,8 +242,25 @@ function normalizeLines(raw: any): SaleLine[] {
     .filter((l) => l.itemId && l.itemName && l.qty !== 0);
 }
 
-function sumLineTotal(lines: SaleLine[]): number {
+function normalizePurchaseLines(raw: any): PurchaseLine[] {
+  const arr: any[] = Array.isArray(raw) ? raw : [];
+  return arr
+    .map((l) => ({
+      id: str(l.id, uid("pl")),
+      itemId: str(l.itemId),
+      itemName: str(l.itemName),
+      qty: Math.trunc(num(l.qty, 0)),
+      unitCost: round2(num(l.unitCost, 0)),
+    }))
+    .filter((l) => l.itemId && l.itemName && l.qty !== 0);
+}
+
+function sumSaleLinesTotal(lines: SaleLine[]): number {
   return round2(lines.reduce((a, l) => a + round2(num(l.qty, 0) * num(l.unitPrice, 0)), 0));
+}
+
+function sumPurchaseLinesTotal(lines: PurchaseLine[]): number {
+  return round2(lines.reduce((a, l) => a + round2(num(l.qty, 0) * num(l.unitCost, 0)), 0));
 }
 
 function saleLinesFromLegacy(x: any): SaleLine[] {
@@ -222,7 +282,7 @@ function saleLinesFromLegacy(x: any): SaleLine[] {
 }
 
 function enrichLegacyFieldsFromLines(s: Sale): Sale {
-  if (Array.isArray(s.lines) && s.lines.length > 0) {
+  if (s.lines.length > 0) {
     const first = s.lines[0];
     return {
       ...s,
@@ -303,7 +363,7 @@ export function useSaldo(): [number, (n: number) => void] {
 }
 
 /* =========================
-   Items (Varer)
+   Items
 ========================= */
 
 export function getItems(): Vare[] {
@@ -374,7 +434,7 @@ export function useItems() {
 }
 
 /* =========================
-   Customers (Kunder)
+   Customers
 ========================= */
 
 export function getCustomers(): Customer[] {
@@ -434,7 +494,7 @@ export function useCustomers() {
 }
 
 /* =========================
-   Sales (Salg)
+   Sales
 ========================= */
 
 export function salePaidSum(s: Sale): number {
@@ -462,7 +522,7 @@ export function getSales(): Sale[] {
       return saleLinesFromLegacy(x);
     })();
 
-    const total = round2(num(x.total, lines.length ? sumLineTotal(lines) : round2(num(x.qty, 0) * num(x.unitPrice, 0))));
+    const total = round2(num(x.total, lines.length ? sumSaleLinesTotal(lines) : round2(num(x.qty, 0) * num(x.unitPrice, 0))));
 
     const paidSum = payments.length ? payments.reduce((a, p) => a + num(p.amount, 0), 0) : 0;
     const paidLegacy = Boolean(x.paid);
@@ -472,16 +532,12 @@ export function getSales(): Sale[] {
       id: str(x.id, uid("sale")),
       lines,
       total,
-
       customerId: x.customerId ? String(x.customerId) : undefined,
       customerName: x.customerName ? String(x.customerName) : undefined,
-
       payments,
       paid,
-
       dueDate: x.dueDate ? String(x.dueDate) : undefined,
       note: x.note ? String(x.note) : undefined,
-
       createdAt: str(x.createdAt, nowIso()),
     };
 
@@ -523,8 +579,7 @@ export function addSale(input: AddSaleInput): void {
 
   if (lines.length === 0) return;
 
-  const total = sumLineTotal(lines);
-
+  const total = sumSaleLinesTotal(lines);
   const payments = normalizePayments(input.payments);
   const paidFlag = input.paid === undefined ? true : Boolean(input.paid);
 
@@ -533,15 +588,12 @@ export function addSale(input: AddSaleInput): void {
     createdAt,
     lines,
     total,
-
     customerId: input.customerId,
     customerName: input.customerName,
-
     payments: payments.length ? payments : [],
     paid: payments.length ? round2(payments.reduce((a, p) => a + num(p.amount, 0), 0)) >= total : paidFlag,
-
-    dueDate: input.dueDate,
-    note: input.note,
+    dueDate: input.dueDate?.trim() ? input.dueDate.trim() : undefined,
+    note: input.note?.trim() ? input.note.trim() : undefined,
   });
 
   sales.unshift(next);
@@ -552,9 +604,7 @@ function setSalePaidCore(saleId: string, paid: boolean): void {
   const sales = getSales();
   const i = sales.findIndex((x) => x.id === saleId);
   if (i < 0) return;
-
-  const s = sales[i];
-  sales[i] = { ...s, paid };
+  sales[i] = { ...sales[i], paid: Boolean(paid) };
   setSales(sales);
 }
 
@@ -603,40 +653,6 @@ function removeSaleCore(saleId: string, restoreStock: boolean): void {
   setSales(sales);
 }
 
-/** ✅ Brukes av Salg-redigering (patch) */
-export function updateSale(saleId: string, patch: Partial<Sale>): void {
-  const sales = getSales();
-  const i = sales.findIndex((x) => x.id === saleId);
-  if (i < 0) return;
-
-  const current = sales[i];
-
-  const next: Sale = enrichLegacyFieldsFromLines({
-    ...(current as any),
-    ...(patch as any),
-    id: current.id,
-    createdAt: current.createdAt,
-    lines: Array.isArray((patch as any).lines) ? normalizeLines((patch as any).lines) : current.lines,
-    payments: Array.isArray((patch as any).payments) ? normalizePayments((patch as any).payments) : current.payments,
-    total:
-      typeof (patch as any).total === "number"
-        ? round2(num((patch as any).total, current.total))
-        : Array.isArray((patch as any).lines)
-        ? sumLineTotal(normalizeLines((patch as any).lines))
-        : current.total,
-    paid: typeof (patch as any).paid === "boolean" ? Boolean((patch as any).paid) : current.paid,
-  });
-
-  // hvis payments finnes, la payments styre "paid" automatisk
-  if (Array.isArray(next.payments) && next.payments.length > 0) {
-    const paidSum = round2(next.payments.reduce((a, p) => a + num(p.amount, 0), 0));
-    next.paid = paidSum >= round2(num(next.total, 0));
-  }
-
-  sales[i] = next;
-  setSales(sales);
-}
-
 export function useSales() {
   const [sales, setState] = useState<Sale[]>(() => getSales());
 
@@ -655,14 +671,11 @@ export function useSales() {
       sales,
       setPaid: (saleId: string, paid: boolean) => setSalePaidCore(saleId, paid),
       removeSale: (saleId: string, restoreStock: boolean) => removeSaleCore(saleId, restoreStock),
-      addPayment: (saleId: string, amount: number, note?: string, dateIso?: string) => addSalePaymentCore(saleId, amount, note, dateIso),
-      setAll: (all: Sale[]) => setSales(all), // ✅ nå finnes setAll igjen
     }),
     [sales]
   );
 }
 
-/** ✅ Direkte exports (noen sider importerer disse) */
 export function setSalePaid(saleId: string, paid: boolean): void {
   setSalePaidCore(saleId, paid);
 }
@@ -672,7 +685,7 @@ export function addSalePayment(saleId: string, amount: number, note?: string, da
 }
 
 /* =========================
-   Receivables (Gjeld til deg)
+   Receivables (gjeld til deg)
 ========================= */
 
 export function receivablePaidSum(r: Receivable): number {
@@ -690,7 +703,6 @@ export function receivableRemaining(r: Receivable): number {
 
 export function getReceivables(): Receivable[] {
   const raw = safeJsonParse<any[]>(localStorage.getItem(LS_KEYS.receivables), []);
-
   const normalized: Receivable[] = (raw || []).map((x) => {
     const payments = normalizePayments(x.payments);
     const amount = round2(num(x.amount, 0));
@@ -727,11 +739,8 @@ function upsertReceivableCore(r: Omit<Receivable, "createdAt" | "updatedAt" | "p
   const amount = round2(num((r as any).amount, 0));
   const paid = receivableRemaining({ ...(r as any), payments, amount } as Receivable) <= 0;
 
-  if (i >= 0) {
-    list[i] = { ...list[i], ...r, amount, payments, paid, updatedAt: nowIso() };
-  } else {
-    list.unshift({ ...(r as any), amount, payments, paid, createdAt: nowIso(), updatedAt: nowIso() });
-  }
+  if (i >= 0) list[i] = { ...list[i], ...r, amount, payments, paid, updatedAt: nowIso() };
+  else list.unshift({ ...(r as any), amount, payments, paid, createdAt: nowIso(), updatedAt: nowIso() });
 
   setReceivables(list);
 }
@@ -798,6 +807,264 @@ export function useReceivables() {
 }
 
 /* =========================
+   Payables (DU skylder)
+========================= */
+
+export function payablePaidSum(p: Payable): number {
+  if (Array.isArray(p.payments) && p.payments.length > 0) {
+    return round2(p.payments.reduce((a, x) => a + num(x.amount, 0), 0));
+  }
+  return p.paid ? round2(num(p.amount, 0)) : 0;
+}
+
+export function payableRemaining(p: Payable): number {
+  const total = round2(num(p.amount, 0));
+  const paid = payablePaidSum(p);
+  return round2(Math.max(0, total - paid));
+}
+
+export function getPayables(): Payable[] {
+  const raw = safeJsonParse<any[]>(localStorage.getItem(LS_KEYS.payables), []);
+  const normalized: Payable[] = (raw || []).map((x) => {
+    const payments = normalizePayments(x.payments);
+    const amount = round2(num(x.amount, 0));
+    const paidSum = payments.length ? payments.reduce((a, p) => a + num(p.amount, 0), 0) : 0;
+    const paidLegacy = Boolean(x.paid);
+    const paid = payments.length ? round2(paidSum) >= amount : paidLegacy;
+
+    return {
+      id: str(x.id, uid("payable")),
+      supplierName: str(x.supplierName, "Ukjent"),
+      title: str(x.title, "Faktura"),
+      amount,
+      dueDate: x.dueDate ? String(x.dueDate) : undefined,
+      note: x.note ? String(x.note) : undefined,
+      payments,
+      paid,
+      createdAt: str(x.createdAt, nowIso()),
+      updatedAt: str(x.updatedAt, nowIso()),
+    };
+  });
+
+  normalized.sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
+  return normalized;
+}
+
+export function setPayables(next: Payable[]) {
+  localStorage.setItem(LS_KEYS.payables, JSON.stringify(next));
+  emitChange();
+}
+
+function upsertPayableCore(p: Omit<Payable, "createdAt" | "updatedAt" | "paid">) {
+  const list = getPayables();
+  const i = list.findIndex((x) => x.id === p.id);
+
+  const payments = normalizePayments((p as any).payments);
+  const amount = round2(num((p as any).amount, 0));
+  const paid = payableRemaining({ ...(p as any), payments, amount, paid: false } as Payable) <= 0;
+
+  if (i >= 0) list[i] = { ...list[i], ...p, amount, payments, paid, updatedAt: nowIso() };
+  else list.unshift({ ...(p as any), amount, payments, paid, createdAt: nowIso(), updatedAt: nowIso() });
+
+  setPayables(list);
+}
+
+function removePayableCore(id: string) {
+  setPayables(getPayables().filter((x) => x.id !== id));
+}
+
+function addPayablePaymentCore(id: string, amount: number, note?: string, dateIso?: string) {
+  const list = getPayables();
+  const i = list.findIndex((x) => x.id === id);
+  if (i < 0) return;
+
+  const p = list[i];
+  const payments = [...(p.payments || [])];
+  payments.push({
+    id: uid("pay"),
+    amount: round2(num(amount, 0)),
+    createdAt: dateIso && dateIso.trim() ? dateIso : nowIso(),
+    note: note?.trim() ? note.trim() : undefined,
+  });
+
+  const paid = payableRemaining({ ...p, payments }) <= 0;
+  list[i] = { ...p, payments, paid, updatedAt: nowIso() };
+  setPayables(list);
+}
+
+export function usePayables() {
+  const [payables, setState] = useState<Payable[]>(() => getPayables());
+
+  useEffect(() => {
+    const onChange = () => setState(getPayables());
+    window.addEventListener("storage", onChange);
+    window.addEventListener(EVT, onChange);
+    return () => {
+      window.removeEventListener("storage", onChange);
+      window.removeEventListener(EVT, onChange);
+    };
+  }, []);
+
+  return useMemo(
+    () => ({
+      payables,
+      upsert: (p: Omit<Payable, "createdAt" | "updatedAt" | "paid">) => upsertPayableCore(p),
+      remove: (id: string) => removePayableCore(id),
+      addPayment: (id: string, amount: number, note?: string, dateIso?: string) => addPayablePaymentCore(id, amount, note, dateIso),
+      setAll: (all: Payable[]) => setPayables(all),
+    }),
+    [payables]
+  );
+}
+
+/* =========================
+   Purchases (Penger brukt)
+========================= */
+
+export function getPurchases(): Purchase[] {
+  const raw = safeJsonParse<any[]>(localStorage.getItem(LS_KEYS.purchases), []);
+  const normalized: Purchase[] = (raw || []).map((x) => {
+    const lines = normalizePurchaseLines(x.lines);
+    const total = round2(num(x.total, lines.length ? sumPurchaseLinesTotal(lines) : 0));
+    const paid = Boolean(x.paid);
+
+    return {
+      id: str(x.id, uid("pur")),
+      supplierName: x.supplierName ? String(x.supplierName) : undefined,
+      lines,
+      total,
+      payableId: x.payableId ? String(x.payableId) : undefined,
+      costMode: x.costMode === "set_latest" || x.costMode === "keep" ? x.costMode : "weighted",
+      paid,
+      dueDate: x.dueDate ? String(x.dueDate) : undefined,
+      note: x.note ? String(x.note) : undefined,
+      createdAt: str(x.createdAt, nowIso()),
+    };
+  });
+
+  normalized.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+  return normalized;
+}
+
+export function setPurchases(next: Purchase[]) {
+  localStorage.setItem(LS_KEYS.purchases, JSON.stringify(next));
+  emitChange();
+}
+
+/** Oppdater vare.cost ved innkjøp */
+function applyCostUpdate(item: Vare, qtyBought: number, unitCost: number, mode: "weighted" | "set_latest" | "keep"): Vare {
+  const q = Math.max(0, Math.trunc(num(qtyBought, 0)));
+  const uc = round2(num(unitCost, 0));
+  if (q <= 0 || uc <= 0) return item;
+
+  if (mode === "keep") return item;
+
+  if (mode === "set_latest") {
+    return { ...item, cost: uc, updatedAt: nowIso() };
+  }
+
+  // weighted average: ((oldCost*oldStock) + (newCost*qty)) / (oldStock+qty)
+  const oldStock = Math.max(0, Math.trunc(num(item.stock, 0)));
+  const oldCost = round2(num(item.cost, 0));
+  const denom = oldStock + q;
+  const nextCost = denom > 0 ? round2(((oldCost * oldStock) + (uc * q)) / denom) : uc;
+  return { ...item, cost: nextCost, updatedAt: nowIso() };
+}
+
+/** Registrer innkjøp + øk lager + evt opprett leverandørgjeld (payable) */
+export function addPurchase(input: AddPurchaseInput): void {
+  const purchases = getPurchases();
+
+  const lines: PurchaseLine[] = (input.lines || [])
+    .map((l) => ({
+      id: uid("pl"),
+      itemId: String(l.itemId || ""),
+      itemName: String(l.itemName || ""),
+      qty: Math.trunc(num(l.qty, 0)),
+      unitCost: round2(num(l.unitCost, 0)),
+    }))
+    .filter((l) => l.itemId && l.itemName && l.qty > 0);
+
+  if (lines.length === 0) return;
+
+  const total = sumPurchaseLinesTotal(lines);
+  const paid = input.paid === undefined ? true : Boolean(input.paid);
+  const costMode = input.costMode || "weighted";
+
+  // 1) Oppdater varer: stock + cost
+  const itemsNow = getItems();
+  for (const ln of lines) {
+    const idx = itemsNow.findIndex((it) => it.id === ln.itemId);
+    if (idx < 0) continue; // hvis vare mangler (bør ikke skje)
+    const it = itemsNow[idx];
+    const nextStock = Math.trunc(num(it.stock, 0)) + Math.trunc(num(ln.qty, 0));
+    const updatedCostItem = applyCostUpdate({ ...it, stock: nextStock }, ln.qty, ln.unitCost, costMode);
+    itemsNow[idx] = { ...updatedCostItem, stock: nextStock, updatedAt: nowIso() };
+  }
+  setItems(itemsNow);
+
+  // 2) Opprett payable hvis ikke betalt
+  let payableId: string | undefined = undefined;
+  if (!paid) {
+    const payables = getPayables();
+    payableId = uid("payable");
+    const p: Payable = {
+      id: payableId,
+      supplierName: input.supplierName?.trim() ? input.supplierName.trim() : "Ukjent",
+      title: input.payableTitle?.trim() ? input.payableTitle.trim() : "Innkjøp",
+      amount: total,
+      dueDate: input.dueDate?.trim() ? input.dueDate.trim() : undefined,
+      note: input.note?.trim() ? input.note.trim() : undefined,
+      payments: [],
+      paid: false,
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+    };
+    payables.unshift(p);
+    setPayables(payables);
+  }
+
+  // 3) Lagre purchase
+  const next: Purchase = {
+    id: uid("pur"),
+    supplierName: input.supplierName?.trim() ? input.supplierName.trim() : undefined,
+    lines,
+    total,
+    payableId,
+    costMode,
+    paid,
+    dueDate: input.dueDate?.trim() ? input.dueDate.trim() : undefined,
+    note: input.note?.trim() ? input.note.trim() : undefined,
+    createdAt: nowIso(),
+  };
+  purchases.unshift(next);
+  setPurchases(purchases);
+}
+
+export function usePurchases() {
+  const [purchases, setState] = useState<Purchase[]>(() => getPurchases());
+
+  useEffect(() => {
+    const onChange = () => setState(getPurchases());
+    window.addEventListener("storage", onChange);
+    window.addEventListener(EVT, onChange);
+    return () => {
+      window.removeEventListener("storage", onChange);
+      window.removeEventListener(EVT, onChange);
+    };
+  }, []);
+
+  return useMemo(
+    () => ({
+      purchases,
+      add: (input: AddPurchaseInput) => addPurchase(input),
+      setAll: (all: Purchase[]) => setPurchases(all),
+    }),
+    [purchases]
+  );
+}
+
+/* =========================
    Sale draft customer
 ========================= */
 
@@ -830,6 +1097,8 @@ export type ExportAllPayloadV1 = {
   customers: Customer[];
   sales: Sale[];
   receivables: Receivable[];
+  payables: Payable[];
+  purchases: Purchase[];
 };
 
 export function makeExportAllPayload(): ExportAllPayloadV1 {
@@ -842,6 +1111,8 @@ export function makeExportAllPayload(): ExportAllPayloadV1 {
     customers: getCustomers(),
     sales: getSales(),
     receivables: getReceivables(),
+    payables: getPayables(),
+    purchases: getPurchases(),
   };
 }
 
@@ -872,6 +1143,8 @@ export async function importAllFromFile(file: File, mode: "replace" | "merge" = 
           customers: Array.isArray(parsed?.customers) ? parsed.customers : [],
           sales: Array.isArray(parsed?.sales) ? parsed.sales : [],
           receivables: Array.isArray(parsed?.receivables) ? parsed.receivables : [],
+          payables: Array.isArray(parsed?.payables) ? parsed.payables : [],
+          purchases: Array.isArray(parsed?.purchases) ? parsed.purchases : [],
         };
 
   const nextItems = (Array.isArray(payload.items) ? payload.items : []).map((x: any) => ({
@@ -897,15 +1170,12 @@ export async function importAllFromFile(file: File, mode: "replace" | "merge" = 
 
   const nextSales = (Array.isArray(payload.sales) ? payload.sales : []).map((x: any) => {
     const payments = normalizePayments(x.payments);
-
     const lines = (() => {
       const ln = normalizeLines(x.lines);
       if (ln.length) return ln;
       return saleLinesFromLegacy(x);
     })();
-
-    const total = round2(num(x.total, lines.length ? sumLineTotal(lines) : round2(num(x.qty, 0) * num(x.unitPrice, 0))));
-
+    const total = round2(num(x.total, lines.length ? sumSaleLinesTotal(lines) : round2(num(x.qty, 0) * num(x.unitPrice, 0))));
     const paidSum = payments.length ? payments.reduce((a, p) => a + num(p.amount, 0), 0) : 0;
     const paid = payments.length ? round2(paidSum) >= total : Boolean(x.paid);
 
@@ -942,6 +1212,41 @@ export async function importAllFromFile(file: File, mode: "replace" | "merge" = 
     } as Receivable;
   });
 
+  const nextPayables = (Array.isArray(payload.payables) ? payload.payables : []).map((x: any) => {
+    const amount = round2(num(x.amount, 0));
+    const payments = normalizePayments(x.payments);
+    const paid = payments.length ? round2(payments.reduce((a, p) => a + num(p.amount, 0), 0)) >= amount : Boolean(x.paid);
+
+    return {
+      id: str(x.id, uid("payable")),
+      supplierName: str(x.supplierName, "Ukjent"),
+      title: str(x.title, "Faktura"),
+      amount,
+      dueDate: x.dueDate ? String(x.dueDate) : undefined,
+      note: x.note ? String(x.note) : undefined,
+      payments,
+      paid,
+      createdAt: str(x.createdAt, nowIso()),
+      updatedAt: str(x.updatedAt, nowIso()),
+    } as Payable;
+  });
+
+  const nextPurchases = (Array.isArray(payload.purchases) ? payload.purchases : []).map((x: any) => {
+    const lines = normalizePurchaseLines(x.lines);
+    return {
+      id: str(x.id, uid("pur")),
+      supplierName: x.supplierName ? String(x.supplierName) : undefined,
+      lines,
+      total: round2(num(x.total, lines.length ? sumPurchaseLinesTotal(lines) : 0)),
+      payableId: x.payableId ? String(x.payableId) : undefined,
+      costMode: x.costMode === "set_latest" || x.costMode === "keep" ? x.costMode : "weighted",
+      paid: Boolean(x.paid),
+      dueDate: x.dueDate ? String(x.dueDate) : undefined,
+      note: x.note ? String(x.note) : undefined,
+      createdAt: str(x.createdAt, nowIso()),
+    } as Purchase;
+  });
+
   if (mode === "merge") {
     const byId = <T extends { id: string }>(a: T[], b: T[]) => {
       const m = new Map<string, T>();
@@ -954,11 +1259,15 @@ export async function importAllFromFile(file: File, mode: "replace" | "merge" = 
     setCustomers(byId(getCustomers(), nextCustomers));
     setSales(byId(getSales(), nextSales));
     setReceivables(byId(getReceivables(), nextReceivables));
+    setPayables(byId(getPayables(), nextPayables));
+    setPurchases(byId(getPurchases(), nextPurchases));
   } else {
     setItems(nextItems);
     setCustomers(nextCustomers);
     setSales(nextSales);
     setReceivables(nextReceivables);
+    setPayables(nextPayables);
+    setPurchases(nextPurchases);
   }
 
   setSaldo(round2(num((payload as any).saldo, 0)));
@@ -976,16 +1285,15 @@ export function clearAllData(): void {
   localStorage.removeItem(LS_KEYS.customers);
   localStorage.removeItem(LS_KEYS.sales);
   localStorage.removeItem(LS_KEYS.receivables);
+  localStorage.removeItem(LS_KEYS.payables);
+  localStorage.removeItem(LS_KEYS.purchases);
   localStorage.removeItem(LS_KEYS.saleDraftCustomer);
   localStorage.removeItem(LS_KEYS.saldo);
   emitChange();
 }
 
-/* =========================
-   Backup helper: pick file (for onClick)
-========================= */
-
-function pickImportAllFileInternal(mode: "replace" | "merge" = "replace"): void {
+/** File picker for import (for onClick) */
+export function pickImportAllFile(mode: "replace" | "merge" = "replace"): void {
   const input = document.createElement("input");
   input.type = "file";
   input.accept = "application/json";
@@ -997,32 +1305,17 @@ function pickImportAllFileInternal(mode: "replace" | "merge" = "replace"): void 
   input.click();
 }
 
-/** ✅ onClick-vennlig (ingen args) */
-export function pickImportAllFileReplace(): void {
-  pickImportAllFileInternal("replace");
-}
-
-/** ✅ onClick-vennlig (ingen args) */
-export function pickImportAllFileMerge(): void {
-  pickImportAllFileInternal("merge");
-}
-
-/** Bakoverkompatibel: hvis noe importerer pickImportAllFile (uten args) */
-export function pickImportAllFile(): void {
-  pickImportAllFileInternal("replace");
-}
-
-/* =========================
-   Summary (nyttig i Backup.tsx)
-========================= */
-
 export type StorageSummary = {
   itemsCount: number;
   customersCount: number;
   salesCount: number;
   receivablesCount: number;
+  payablesCount: number;
+  purchasesCount: number;
   unpaidSales: number;
   unpaidReceivables: number;
+  unpaidPayables: number;
+  spentTotal: number;
   saldo: number;
   approxBytes: number;
 };
@@ -1032,15 +1325,21 @@ export function getStorageSummary(): StorageSummary {
   const customers = getCustomers();
   const sales = getSales();
   const receivables = getReceivables();
+  const payables = getPayables();
+  const purchases = getPurchases();
 
   const unpaidSales = round2(sales.reduce((a, s) => a + Math.max(0, saleRemaining(s)), 0));
   const unpaidReceivables = round2(receivables.reduce((a, r) => a + Math.max(0, receivableRemaining(r)), 0));
+  const unpaidPayables = round2(payables.reduce((a, p) => a + Math.max(0, payableRemaining(p)), 0));
+  const spentTotal = round2(purchases.reduce((a, p) => a + (Number(p.total) || 0), 0));
 
   const approxBytes =
     (localStorage.getItem(LS_KEYS.items)?.length || 0) +
     (localStorage.getItem(LS_KEYS.customers)?.length || 0) +
     (localStorage.getItem(LS_KEYS.sales)?.length || 0) +
     (localStorage.getItem(LS_KEYS.receivables)?.length || 0) +
+    (localStorage.getItem(LS_KEYS.payables)?.length || 0) +
+    (localStorage.getItem(LS_KEYS.purchases)?.length || 0) +
     (localStorage.getItem(LS_KEYS.saldo)?.length || 0);
 
   return {
@@ -1048,8 +1347,12 @@ export function getStorageSummary(): StorageSummary {
     customersCount: customers.length,
     salesCount: sales.length,
     receivablesCount: receivables.length,
+    payablesCount: payables.length,
+    purchasesCount: purchases.length,
     unpaidSales,
     unpaidReceivables,
+    unpaidPayables,
+    spentTotal,
     saldo: getSaldo(),
     approxBytes,
   };
