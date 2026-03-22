@@ -12,6 +12,7 @@ import {
   saleRemaining,
   setItems,
   uid,
+  updateSale,
   useCustomers,
   useItems,
   useSales,
@@ -33,7 +34,6 @@ function saleLinesSafe(s: Sale): SaleLine[] {
   const lines = Array.isArray((s as any).lines) ? ((s as any).lines as SaleLine[]) : [];
   if (lines.length > 0) return lines;
 
-  // fallback for eldre salg (1 vare pr salg)
   const itemName = (s as any).itemName;
   const itemId = (s as any).itemId;
   const qty = (s as any).qty;
@@ -125,45 +125,34 @@ function ChoiceModal(props: {
 type DraftLine = {
   id: string;
   itemId: string;
-  qty: string; // text input
-  unitPrice: string; // text input
+  qty: string;
+  unitPrice: string;
 };
 
 export function Salg() {
   const { items } = useItems();
   const { customers } = useCustomers();
-  const { sales, removeSale, setAll } = useSales();
+  const { sales, removeSale } = useSales();
 
-  // ✅ Vis 5 default, vis mer +10
   const [showCount, setShowCount] = useState<number>(5);
-
-  // ✅ Vis kun utestående
   const [onlyOutstanding, setOnlyOutstanding] = useState<boolean>(false);
 
-  // form
   const [customerId, setCustomerId] = useState<string>("");
-  const [paid, setPaid] = useState<boolean>(true); // ✅ default betalt
+  const [paid, setPaid] = useState<boolean>(true);
   const [note, setNote] = useState<string>("");
   const [dueDate, setDueDate] = useState<string>("");
 
-  // flere linjer
-  const [lines, setLines] = useState<DraftLine[]>(() => [
-    { id: uid("dline"), itemId: "", qty: "1", unitPrice: "" },
-  ]);
+  const [lines, setLines] = useState<DraftLine[]>(() => [{ id: uid("dline"), itemId: "", qty: "1", unitPrice: "" }]);
 
-  // low stock popup
   const [lowPopup, setLowPopup] = useState<{ item: Vare; newStock: number } | null>(null);
 
-  // betaling modal
   const [paySale, setPaySale] = useState<Sale | null>(null);
   const [payAmount, setPayAmount] = useState("0");
   const [payDate, setPayDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [payNote, setPayNote] = useState("");
 
-  // slett modal (2 valg)
   const [delSale, setDelSale] = useState<Sale | null>(null);
 
-  // rediger salg modal
   const [editSale, setEditSale] = useState<Sale | null>(null);
   const [editCustomerId, setEditCustomerId] = useState<string>("");
   const [editPaid, setEditPaid] = useState<boolean>(false);
@@ -171,7 +160,6 @@ export function Salg() {
   const [editNote, setEditNote] = useState<string>("");
   const [editLines, setEditLines] = useState<DraftLine[]>([]);
 
-  // forhåndsvalg kunde fra Kunder-siden
   useEffect(() => {
     const draft = getSaleDraftCustomer();
     if (draft) {
@@ -180,7 +168,6 @@ export function Salg() {
     }
   }, []);
 
-  // map items
   const itemsById = useMemo(() => {
     const m = new Map<string, Vare>();
     for (const it of items) m.set(it.id, it);
@@ -249,7 +236,6 @@ export function Salg() {
   const visibleSales = useMemo(() => filteredSales.slice(0, showCount), [filteredSales, showCount]);
   const canShowMore = filteredSales.length > showCount;
 
-  // mest solgt (totalt)
   const topSold = useMemo(() => {
     const map = new Map<string, { itemId: string; name: string; qty: number; revenue: number }>();
     for (const s of sales) {
@@ -280,7 +266,6 @@ export function Salg() {
   function doSale() {
     if (saleLinesForSave.length === 0) return alert("Legg til minst én varelinje.");
 
-    // trekk lager for alle linjer
     const itemsNow = getItems();
     const itemsIdx = new Map<string, number>();
     itemsNow.forEach((it, idx) => itemsIdx.set(it.id, idx));
@@ -299,10 +284,7 @@ export function Salg() {
 
     setItems(itemsNow);
 
-    // betal status
-    const payments = paid
-      ? [{ id: uid("pay"), amount: formTotal, createdAt: new Date().toISOString() }]
-      : [];
+    const payments = paid ? [{ id: uid("pay"), amount: formTotal, createdAt: new Date().toISOString() }] : [];
 
     addSale({
       customerId: selectedCustomer?.id,
@@ -314,7 +296,6 @@ export function Salg() {
       note: note.trim() ? note.trim() : undefined,
     } as any);
 
-    // popup hvis vi traff min-lager på minst en vare
     if (lowHits.length > 0) setLowPopup(lowHits[0]);
 
     resetForm();
@@ -349,7 +330,7 @@ export function Salg() {
   function openEdit(s: Sale) {
     setEditSale(s);
     setEditCustomerId(s.customerId ?? "");
-    setEditPaid(saleRemaining(s) <= 0); // “betalt” hvis ingenting utestående
+    setEditPaid(saleRemaining(s) <= 0);
     setEditDueDate((s as any).dueDate ?? "");
     setEditNote((s as any).note ?? "");
 
@@ -413,25 +394,18 @@ export function Salg() {
     if (outLines.length === 0) return alert("Minst én varelinje må være med.");
 
     const total = calcSaleTotal(outLines);
-
-    // ⚠️ Vi endrer ikke lager her (for å unngå dobbel justering).
-    // Betalt/ubetalt: hvis “betalt” -> sett payments = [full betaling] (beholder evt historikk? her gjør vi enkelt)
     const payments = editPaid ? [{ id: uid("pay"), amount: total, createdAt: new Date().toISOString() }] : [];
 
-    const nextSale: Sale = {
-      ...editSale,
+    updateSale(editSale.id, {
       customerId: nextCustomer?.id,
       customerName: nextCustomer?.name,
-      lines: outLines as any,
+      lines: outLines,
       total,
       paid: editPaid,
-      payments: payments as any,
+      payments,
       dueDate: editDueDate.trim() ? editDueDate.trim() : undefined,
       note: editNote.trim() ? editNote.trim() : undefined,
-    } as any;
-
-    const nextAll = sales.map((s) => (s.id === editSale.id ? nextSale : s));
-    setAll(nextAll);
+    } as any);
 
     setEditSale(null);
   }
@@ -443,7 +417,6 @@ export function Salg() {
         <b>Utestående salg totalt:</b> <b>{fmtKr(outstandingTotal)}</b>
       </div>
 
-      {/* Mest solgt */}
       <div className="card" style={{ marginTop: 0 }}>
         <div className="cardTitle">Mest solgt</div>
         <div className="cardSub">Topp 10 basert på antall solgte enheter.</div>
@@ -463,7 +436,6 @@ export function Salg() {
         </div>
       </div>
 
-      {/* Nytt salg (flere linjer) */}
       <div className="card">
         <div className="cardTitle">Nytt salg</div>
         <div className="cardSub">Legg til flere varer før du lagrer.</div>
@@ -502,7 +474,6 @@ export function Salg() {
             </div>
           </div>
 
-          {/* Linjer */}
           <div className="list" style={{ marginTop: 6 }}>
             {lines.map((l, idx) => (
               <div key={l.id} className="item">
@@ -543,12 +514,7 @@ export function Salg() {
                       <input
                         className="input"
                         readOnly
-                        value={fmtKr(
-                          lineTotal(
-                            Math.trunc(toNum(l.qty)),
-                            toNum(l.unitPrice || String(itemsById.get(l.itemId)?.price ?? 0))
-                          )
-                        )}
+                        value={fmtKr(lineTotal(Math.trunc(toNum(l.qty)), toNum(l.unitPrice || String(itemsById.get(l.itemId)?.price ?? 0))))}
                       />
                     </div>
                   </div>
@@ -581,12 +547,13 @@ export function Salg() {
         </div>
       </div>
 
-      {/* Liste */}
       <div className="card">
         <div className="cardTitle">Salg</div>
 
         <div className="subRow" style={{ marginTop: 6 }}>
-          <div className="sub">Viser {Math.min(showCount, filteredSales.length)} av {filteredSales.length}</div>
+          <div className="sub">
+            Viser {Math.min(showCount, filteredSales.length)} av {filteredSales.length}
+          </div>
         </div>
 
         <div className="btnRow" style={{ marginTop: 10 }}>
@@ -610,7 +577,6 @@ export function Salg() {
                   {new Date(s.createdAt).toLocaleString("nb-NO")}
                 </div>
 
-                {/* Pent: hva kunden kjøpte */}
                 {sl.length > 0 ? (
                   <div className="itemMeta" style={{ marginTop: 10 }}>
                     <b>Kjøpt:</b>
@@ -619,20 +585,6 @@ export function Salg() {
                         • {l.itemName} — <b>{l.qty} stk</b> × <b>{fmtKr(l.unitPrice)}</b> = <b>{fmtKr(lineTotal(l.qty, l.unitPrice))}</b>
                       </div>
                     ))}
-                  </div>
-                ) : null}
-
-                {/* Innbetalinger */}
-                {Array.isArray((s as any).payments) && (s as any).payments.length > 0 ? (
-                  <div className="itemMeta" style={{ marginTop: 10 }}>
-                    <b>Innbetalinger:</b>
-                    {(s as any).payments.slice(0, 4).map((p: any) => (
-                      <div key={p.id} style={{ marginTop: 4 }}>
-                        • {new Date(p.createdAt).toLocaleDateString("nb-NO")} – <b>{fmtKr(p.amount)}</b>
-                        {p.note ? <> ({p.note})</> : null}
-                      </div>
-                    ))}
-                    {(s as any).payments.length > 4 ? <div style={{ marginTop: 4, opacity: 0.9 }}>… +{(s as any).payments.length - 4} til</div> : null}
                   </div>
                 ) : null}
 
@@ -671,7 +623,6 @@ export function Salg() {
         ) : null}
       </div>
 
-      {/* Popups */}
       <Modal open={!!lowPopup} title="⚠️ Lav lagerbeholdning" onClose={() => setLowPopup(null)}>
         {lowPopup ? (
           <div>
@@ -834,11 +785,8 @@ export function Salg() {
               </button>
             </div>
 
-            <div className="itemMeta">
-              Ny total: <b>{fmtKr(calcSaleTotal(editLines.map((l) => ({ id: l.id, itemId: l.itemId, itemName: itemsById.get(l.itemId)?.name ?? "", qty: Math.trunc(toNum(l.qty)), unitPrice: toNum(l.unitPrice) } as any)).filter((x) => x.itemId && x.itemName && x.qty !== 0)))}</b>
-              <div style={{ marginTop: 6, opacity: 0.9 }}>
-                NB: Redigering endrer ikke lager automatisk (for å unngå feil). Bruk slett + “legg tilbake på lager” om du må korrigere lager.
-              </div>
+            <div className="itemMeta" style={{ marginTop: 10, opacity: 0.9 }}>
+              NB: Redigering endrer ikke lager automatisk (for å unngå feil). Bruk slett + “legg tilbake på lager” om du må korrigere lager.
             </div>
 
             <div className="btnRow">
