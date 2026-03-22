@@ -43,11 +43,13 @@ function potentialProfit(i: Vare) {
 export function Varer() {
   const { items, upsert, remove, adjust, setAll } = useItems();
 
-  const [q, setQ] = useState("");
-  const [limit, setLimit] = useState(10);
+  const [name, setName] = useState("");
+  const [price, setPrice] = useState("0");
+  const [cost, setCost] = useState("0");
+  const [stock, setStock] = useState("0");
+  const [minStock, setMinStock] = useState("10");
 
-  // modaler
-  const [addOpen, setAddOpen] = useState(false);
+  const [q, setQ] = useState("");
   const [edit, setEdit] = useState<Vare | null>(null);
   const [details, setDetails] = useState<Vare | null>(null);
 
@@ -60,22 +62,44 @@ export function Varer() {
   const stats = useMemo(() => {
     const count = items.length;
     const totalStock = items.reduce((a, b) => a + (b.stock || 0), 0);
+    const lowCount = items.reduce(
+      (a, b) => a + ((b.stock ?? 0) <= (b.minStock ?? 0) && (b.minStock ?? 0) > 0 ? 1 : 0),
+      0
+    );
+
     const totalCostValue = items.reduce((a, b) => a + (b.cost || 0) * (b.stock || 0), 0);
     const totalSaleValue = items.reduce((a, b) => a + (b.price || 0) * (b.stock || 0), 0);
     const totalPotentialProfit = items.reduce((a, b) => a + ((b.price || 0) - (b.cost || 0)) * (b.stock || 0), 0);
-    const lowCount = items.reduce((a, b) => a + ((b.stock ?? 0) <= (b.minStock ?? 0) && (b.minStock ?? 0) > 0 ? 1 : 0), 0);
 
     return {
       count,
       totalStock,
+      lowCount,
       totalCostValue: round2(totalCostValue),
       totalSaleValue: round2(totalSaleValue),
       totalPotentialProfit: round2(totalPotentialProfit),
-      lowCount,
     };
   }, [items]);
 
-  const visible = useMemo(() => filtered.slice(0, limit), [filtered, limit]);
+  function addItem() {
+    const n = name.trim();
+    if (!n) return;
+
+    upsert({
+      id: uid("item"),
+      name: n,
+      price: round2(toNum(price)),
+      cost: round2(toNum(cost)),
+      stock: Math.trunc(toNum(stock)),
+      minStock: Math.trunc(toNum(minStock)),
+    });
+
+    setName("");
+    setPrice("0");
+    setCost("0");
+    setStock("0");
+    setMinStock("10");
+  }
 
   function exportJson() {
     const payload = { version: 1, exportedAt: new Date().toISOString(), items };
@@ -125,192 +149,146 @@ export function Varer() {
     <div className="card">
       <div className="cardTitle">Varer</div>
       <div className="cardSub">
-        Varer <b>{stats.count}</b> • Lager <b>{stats.totalStock}</b> stk • Kostverdi <b>{fmtKr(stats.totalCostValue)}</b> • Salgsverdi{" "}
-        <b>{fmtKr(stats.totalSaleValue)}</b> • Pot. profitt <b>{fmtKr(stats.totalPotentialProfit)}</b>
-        {stats.lowCount > 0 ? (
-          <>
-            {" "}
-            • <b>⚠️ Lavt lager: {stats.lowCount}</b>
-          </>
-        ) : null}
+        Antall: <b>{stats.count}</b> • Lager (stk): <b>{stats.totalStock}</b> • Lavt lager:{" "}
+        <b className={stats.lowCount > 0 ? "warnText" : ""}>{stats.lowCount}</b>
       </div>
 
-      {/* Top actions (kompakt) */}
       <div className="btnRow">
-        <button className="btn btnPrimary" type="button" onClick={() => setAddOpen(true)}>
-          + Ny vare
-        </button>
-        <button className="btn" type="button" onClick={exportJson}>
-          Eksporter
-        </button>
-        <button className="btn" type="button" onClick={importJson}>
-          Importer
-        </button>
+        <button className="btn" type="button" onClick={exportJson}>Eksporter</button>
+        <button className="btn" type="button" onClick={importJson}>Importer</button>
+      </div>
+
+      <div className="card" style={{ marginTop: 12 }}>
+        <div className="cardTitle">Legg til vare</div>
+        <div className="fieldGrid">
+          <div>
+            <label className="label">Navn</label>
+            <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Navn (f.eks. Bremseklosser foran)" />
+          </div>
+
+          <div className="row3">
+            <div>
+              <label className="label">Pris</label>
+              <input className="input" inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} />
+            </div>
+            <div>
+              <label className="label">Kost</label>
+              <input className="input" inputMode="decimal" value={cost} onChange={(e) => setCost(e.target.value)} />
+            </div>
+            <div>
+              <label className="label">Lager</label>
+              <input className="input" inputMode="numeric" value={stock} onChange={(e) => setStock(e.target.value)} />
+            </div>
+          </div>
+
+          <div>
+            <label className="label">Min lager (varsel)</label>
+            <input className="input" inputMode="numeric" value={minStock} onChange={(e) => setMinStock(e.target.value)} placeholder="0 = ingen varsel" />
+          </div>
+
+          <div className="btnRow">
+            <button className="btn btnPrimary" type="button" onClick={addItem}>+ Legg til</button>
+          </div>
+        </div>
       </div>
 
       <div style={{ height: 10 }} />
 
-      {/* Søk */}
-      <input className="input" value={q} onChange={(e) => { setQ(e.target.value); setLimit(10); }} placeholder="Søk i varer..." />
+      <input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Søk i varer..." />
 
-      <div className="card" style={{ marginTop: 10 }}>
-        <div className="cardTitle" style={{ marginBottom: 4 }}>Liste</div>
-        <div className="cardSub" style={{ marginBottom: 0 }}>
-          Viser <b>{Math.min(limit, filtered.length)}</b> av <b>{filtered.length}</b>
-          {filtered.length > limit ? (
-            <>
-              {" "}
-              • <button className="btn" type="button" onClick={() => setLimit((n) => n + 10)} style={{ padding: "7px 10px", minHeight: 30 }}>
-                Vis 10 til
-              </button>
-            </>
-          ) : null}
-        </div>
-
-        <div className="list" style={{ marginTop: 10 }}>
-          {visible.map((i) => (
-            <div key={i.id} className={isLow(i) ? "item low" : "item"}>
+      <div className="list">
+        {filtered.map((i) => {
+          const low = isLow(i);
+          return (
+            <div key={i.id} className="item">
               <div className="itemTop">
                 <div>
-                  <div className="itemTitle" style={{ marginBottom: 2 }}>
-                    {i.name}
+                  <p className="itemTitle">{i.name}</p>
+                  <div className="miniRow">
+                    <span>Lager: <b className={low ? "warnText" : ""}>{i.stock}</b></span>
+                    <span>Min: <b>{i.minStock}</b></span>
+                    {low ? <span className="badge warn">⚠️ lav</span> : null}
                   </div>
-
-                  {/* Kompakt 2-linjers meta */}
-                  <div className="itemMeta">
-                    Lager <b>{i.stock}</b> • Min <b>{i.minStock}</b>
-                    {isLow(i) ? <> • <b>⚠️ Lav</b></> : null}
-                  </div>
-                  <div className="itemMeta" style={{ marginTop: 4 }}>
-                    Pris <b>{fmtKr(i.price)}</b> • Kost <b>{fmtKr(i.cost)}</b>
+                  <div className="miniRow" style={{ marginTop: 6 }}>
+                    <span>Pris: <b>{fmtKr(i.price)}</b></span>
+                    <span>Kost: <b>{fmtKr(i.cost)}</b></span>
                   </div>
                 </div>
 
-                {/* Pen stepper */}
-                <div className="stockStepper">
-                  <button className="stepBtn" type="button" onClick={() => adjust(i.id, -1)} title="Trekk 1">
-                    −
-                  </button>
-                  <div className="stepVal">{i.stock}</div>
-                  <button className="stepBtn" type="button" onClick={() => adjust(i.id, 1)} title="Legg til 1">
-                    +
-                  </button>
+                <div className="stockBtns">
+                  <button className="stockBtn minus" type="button" onClick={() => adjust(i.id, -1)} title="Trekk 1">−</button>
+                  <div className="stockValue">{i.stock ?? 0}</div>
+                  <button className="stockBtn plus" type="button" onClick={() => adjust(i.id, 1)} title="Legg til 1">+</button>
                 </div>
               </div>
 
-              {/* Actions (kompakt) */}
               <div className="itemActions">
-                <button className="btn" type="button" onClick={() => setDetails(i)}>
-                  Detaljer
-                </button>
-                <button className="btn" type="button" onClick={() => setEdit(i)}>
-                  Rediger
-                </button>
+                <button className="btn" type="button" onClick={() => setDetails(i)}>Detaljer</button>
+                <button className="btn" type="button" onClick={() => setEdit(i)}>Rediger</button>
                 <button
                   className="btn btnDanger"
                   type="button"
-                  onClick={() => {
-                    if (confirm(`Slette "${i.name}"?`)) remove(i.id);
-                  }}
+                  onClick={() => { if (confirm(`Slette "${i.name}"?`)) remove(i.id); }}
                 >
                   Slett
                 </button>
               </div>
             </div>
-          ))}
+          );
+        })}
 
-          {filtered.length === 0 ? <div className="item">Ingen treff.</div> : null}
-        </div>
+        {filtered.length === 0 ? <div className="item">Ingen treff.</div> : null}
       </div>
 
-      {/* Modal: Ny vare */}
-      <Modal open={addOpen} title="Ny vare" onClose={() => setAddOpen(false)}>
-        <ItemForm
-          mode="add"
-          onCancel={() => setAddOpen(false)}
-          onSave={(next) => {
-            upsert(next);
-            setAddOpen(false);
-          }}
-        />
-      </Modal>
-
-      {/* Modal: Rediger */}
-      <Modal open={!!edit} title="Rediger vare" onClose={() => setEdit(null)}>
-        {edit ? (
-          <ItemForm
-            mode="edit"
-            item={edit}
-            onCancel={() => setEdit(null)}
-            onSave={(next) => {
-              upsert(next);
-              setEdit(null);
-            }}
-          />
-        ) : null}
-      </Modal>
-
-      {/* Modal: Detaljer */}
+      {/* DETAILS MODAL */}
       <Modal open={!!details} title="Varedetaljer" onClose={() => setDetails(null)}>
         {details ? (
           <div className="fieldGrid" style={{ marginTop: 0 }}>
             <div className="item">
-              <div className="itemTitle">{details.name}</div>
-              <div className="itemMeta" style={{ marginTop: 6 }}>
-                Lager <b>{details.stock}</b> • Min <b>{details.minStock}</b>
-                {isLow(details) ? <> • <b>⚠️ Lavt lager</b></> : null}
+              <p className="itemTitle">{details.name}</p>
+              <div className="itemMeta">
+                Lager: <b>{details.stock}</b> • Min: <b>{details.minStock}</b>
               </div>
-              <div className="itemMeta" style={{ marginTop: 6 }}>
-                Pris <b>{fmtKr(details.price)}</b> • Kost <b>{fmtKr(details.cost)}</b>
+              <div className="itemMeta" style={{ marginTop: 8 }}>
+                Pris: <b>{fmtKr(details.price)}</b> • Kost: <b>{fmtKr(details.cost)}</b>
               </div>
-              <div className="itemMeta" style={{ marginTop: 6 }}>
-                Kostverdi <b>{fmtKr(costValue(details))}</b> • Salgsverdi <b>{fmtKr(saleValue(details))}</b> • Pot. profitt{" "}
+              <div className="itemMeta" style={{ marginTop: 8 }}>
+                Kostverdi: <b>{fmtKr(costValue(details))}</b> • Salgsverdi: <b>{fmtKr(saleValue(details))}</b> • Pot. profitt:{" "}
                 <b>{fmtKr(potentialProfit(details))}</b>
               </div>
             </div>
-
-            <div className="btnRow" style={{ marginTop: 0 }}>
-              <button className="btn" type="button" onClick={() => adjust(details.id, -1)}>
-                −1
-              </button>
-              <button className="btn" type="button" onClick={() => adjust(details.id, 1)}>
-                +1
-              </button>
-              <button className="btn" type="button" onClick={() => { setEdit(details); setDetails(null); }}>
-                Rediger
-              </button>
-              <button className="btn btnDanger" type="button" onClick={() => { if (confirm(`Slette "${details.name}"?`)) { remove(details.id); setDetails(null); } }}>
-                Slett
-              </button>
+            <div className="btnRow" style={{ justifyContent: "flex-end" }}>
+              <button className="btn" type="button" onClick={() => setDetails(null)}>Lukk</button>
             </div>
           </div>
+        ) : null}
+      </Modal>
+
+      {/* EDIT MODAL */}
+      <Modal open={!!edit} title="Rediger vare" onClose={() => setEdit(null)}>
+        {edit ? (
+          <EditForm
+            item={edit}
+            onSave={(next) => { upsert(next); setEdit(null); }}
+          />
         ) : null}
       </Modal>
     </div>
   );
 }
 
-function ItemForm(props: {
-  mode: "add" | "edit";
-  item?: Vare;
-  onSave: (next: Omit<Vare, "createdAt" | "updatedAt">) => void;
-  onCancel: () => void;
-}) {
-  const it = props.item;
-
-  const [name, setName] = useState(it?.name ?? "");
-  const [price, setPrice] = useState(String(it?.price ?? 0));
-  const [cost, setCost] = useState(String(it?.cost ?? 0));
-  const [stock, setStock] = useState(String(it?.stock ?? 0));
-  const [minStock, setMinStock] = useState(String(it?.minStock ?? 10));
-
-  const canSave = name.trim().length > 0;
+function EditForm(props: { item: Vare; onSave: (next: Omit<Vare, "createdAt" | "updatedAt">) => void }) {
+  const [name, setName] = useState(props.item.name);
+  const [price, setPrice] = useState(String(props.item.price ?? 0));
+  const [cost, setCost] = useState(String(props.item.cost ?? 0));
+  const [stock, setStock] = useState(String(props.item.stock ?? 0));
+  const [minStock, setMinStock] = useState(String(props.item.minStock ?? 10));
 
   return (
     <div className="fieldGrid" style={{ marginTop: 0 }}>
       <div>
         <label className="label">Navn</label>
-        <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="F.eks. Bremseklosser foran" />
+        <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
       </div>
 
       <div className="row3">
@@ -329,18 +307,17 @@ function ItemForm(props: {
       </div>
 
       <div>
-        <label className="label">Min lager (varsel)</label>
-        <input className="input" inputMode="numeric" value={minStock} onChange={(e) => setMinStock(e.target.value)} placeholder="0 = ingen varsel" />
+        <label className="label">Min lager</label>
+        <input className="input" inputMode="numeric" value={minStock} onChange={(e) => setMinStock(e.target.value)} />
       </div>
 
-      <div className="btnRow" style={{ marginTop: 0 }}>
+      <div className="btnRow">
         <button
           className="btn btnPrimary"
           type="button"
-          disabled={!canSave}
           onClick={() =>
             props.onSave({
-              id: props.mode === "edit" && it ? it.id : uid("item"),
+              id: props.item.id,
               name: name.trim(),
               price: round2(toNum(price)),
               cost: round2(toNum(cost)),
@@ -350,9 +327,6 @@ function ItemForm(props: {
           }
         >
           Lagre
-        </button>
-        <button className="btn" type="button" onClick={props.onCancel}>
-          Avbryt
         </button>
       </div>
     </div>
