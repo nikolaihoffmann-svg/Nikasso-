@@ -1,5 +1,5 @@
 // src/pages/Kunder.tsx
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
   Customer,
   Sale,
@@ -11,11 +11,8 @@ import {
   uid,
   useCustomers,
   useSales,
+  SaleLine,
 } from "../app/storage";
-
-/* =========================
-   Small helpers
-========================= */
 
 function Modal(props: { open: boolean; title: string; children: React.ReactNode; onClose: () => void }) {
   if (!props.open) return null;
@@ -43,46 +40,62 @@ function toNum(v: string) {
   return Number.isFinite(n) ? n : 0;
 }
 
-function shortMeta(c: Customer) {
-  const bits: string[] = [];
-  if (c.phone) bits.push(`Tlf: ${c.phone}`);
-  if (c.address) bits.push(`Adr: ${c.address}`);
-  if (c.note) bits.push(`Notat: ${c.note}`);
-  return bits.join(" • ");
+function saleLinesSafe(s: Sale): SaleLine[] {
+  const lines = Array.isArray((s as any).lines) ? ((s as any).lines as SaleLine[]) : [];
+  if (lines.length > 0) return lines;
+
+  const itemName = (s as any).itemName;
+  const itemId = (s as any).itemId;
+  const qty = (s as any).qty;
+  const unitPrice = (s as any).unitPrice;
+  if (itemName && itemId && Number(qty)) {
+    return [
+      {
+        id: "legacy",
+        itemId: String(itemId),
+        itemName: String(itemName),
+        qty: Number(qty) || 0,
+        unitPrice: Number(unitPrice) || 0,
+        unitCostAtSale: (s as any).unitCostAtSale,
+      } as any,
+    ];
+  }
+  return [];
 }
 
-function isTruthyString(x: any): x is string {
-  return typeof x === "string" && x.trim().length > 0;
+function saleCompactText(s: Sale) {
+  const lines = saleLinesSafe(s);
+  const first = lines.slice(0, 2).map((l) => `${l.qty}× ${l.itemName}`).join(", ");
+  const more = lines.length > 2 ? ` +${lines.length - 2}` : "";
+  return (first ? `${first}${more}` : "Salg");
 }
-
-/* =========================
-   Page
-========================= */
 
 export function Kunder() {
   const { customers, upsert, remove, setAll } = useCustomers();
   const { sales } = useSales();
 
-  // Search-first
   const [q, setQ] = useState("");
-  const searchRef = useRef<HTMLInputElement | null>(null);
-
-  // Modes / modals
-  const [newOpen, setNewOpen] = useState(false);
-  const [sel, setSel] = useState<Customer | null>(null);
-
-  // Filter modes
+  const [showAll, setShowAll] = useState(false);
   const [onlyOutstanding, setOnlyOutstanding] = useState(false);
 
-  // Paging
-  const [showCount, setShowCount] = useState(6); // results at a time (search/outstanding)
-  const PAGE_SIZE = 6;
+  const [newOpen, setNewOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [address, setAddress] = useState("");
+  const [note, setNote] = useState("");
 
-  // --- outstanding per customer
+  const [edit, setEdit] = useState<Customer | null>(null);
+
+  const sorted = useMemo(() => {
+    const copy = [...customers];
+    copy.sort((a, b) => (a.name || "").localeCompare(b.name || "", "nb-NO", { sensitivity: "base" }));
+    return copy;
+  }, [customers]);
+
   const outstandingByCustomerId = useMemo(() => {
     const map = new Map<string, number>();
     for (const s of sales) {
-      if (!isTruthyString(s.customerId)) continue;
+      if (!s.customerId) continue;
       const rem = Math.max(0, saleRemaining(s));
       if (rem <= 0) continue;
       map.set(s.customerId, (map.get(s.customerId) ?? 0) + rem);
@@ -91,83 +104,49 @@ export function Kunder() {
     return map;
   }, [sales]);
 
-  // --- “last used” based on latest sale date per customer
-  const lastUsedAtByCustomerId = useMemo(() => {
-    const m = new Map<string, string>();
+  const lastUsedCustomers = useMemo(() => {
+    // “sist brukt”: ta siste salg pr kunde
+    const lastById = new Map<string, string>(); // customerId -> createdAt
     for (const s of sales) {
-      if (!isTruthyString(s.customerId)) continue;
-      const prev = m.get(s.customerId);
-      if (!prev || String(s.createdAt || "") > prev) m.set(s.customerId, String(s.createdAt || ""));
+      if (!s.customerId) continue;
+      const prev = lastById.get(s.customerId);
+      if (!prev || (s.createdAt || "").localeCompare(prev) > 0) lastById.set(s.customerId, s.createdAt);
     }
-    return m;
-  }, [sales]);
 
-  const customersSortedByName = useMemo(() => {
-    const copy = [...customers];
-    copy.sort((a, b) => (a.name || "").localeCompare(b.name || "", "nb-NO", { sensitivity: "base" }));
-    return copy;
-  }, [customers]);
+    const arr = sorted
+      .filter((c) => lastById.has(c.id))
+      .map((c) => ({ c, last: lastById.get(c.id)! }))
+      .sort((a, b) => (b.last || "").localeCompare(a.last || ""))
+      .slice(0, 6)
+      .map((x) => x.c);
 
-  const customersById = useMemo(() => {
-    const m = new Map<string, Customer>();
-    for (const c of customers) m.set(c.id, c);
-    return m;
-  }, [customers]);
+    return arr;
+  }, [sales, sorted]);
 
-  const recentCustomers = useMemo(() => {
-    const arr: Array<{ c: Customer; last: string }> = [];
-    for (const c of customers) {
-      const last = lastUsedAtByCustomerId.get(c.id);
-      if (last) arr.push({ c, last });
-    }
-    arr.sort((a, b) => (b.last || "").localeCompare(a.last || ""));
-    // fallback: if no sales yet, show last updated/created
-    if (arr.length === 0) {
-      const fallback = [...customers];
-      fallback.sort((a, b) => (String(b.updatedAt || b.createdAt || "")).localeCompare(String(a.updatedAt || a.createdAt || "")));
-      return fallback.slice(0, 5);
-    }
-    return arr.slice(0, 5).map((x) => x.c);
-  }, [customers, lastUsedAtByCustomerId]);
+  const outstandingCustomers = useMemo(() => {
+    const arr = sorted
+      .map((c) => ({ c, out: outstandingByCustomerId.get(c.id) ?? 0 }))
+      .filter((x) => x.out > 0)
+      .sort((a, b) => b.out - a.out)
+      .slice(0, 8);
+    return arr;
+  }, [sorted, outstandingByCustomerId]);
 
-  const outstandingCustomersSorted = useMemo(() => {
-    const list: Array<{ c: Customer; out: number }> = [];
-    for (const [id, out] of outstandingByCustomerId.entries()) {
-      const c = customersById.get(id);
-      if (!c) continue;
-      if (out > 0) list.push({ c, out });
-    }
-    list.sort((a, b) => b.out - a.out || (a.c.name || "").localeCompare(b.c.name || "", "nb-NO", { sensitivity: "base" }));
-    return list;
-  }, [outstandingByCustomerId, customersById]);
-
-  const searchResults = useMemo(() => {
+  const filteredAll = useMemo(() => {
     const qq = q.trim().toLowerCase();
-    if (!qq) return [];
-    return customersSortedByName.filter((c) => {
+    let base = sorted;
+
+    if (onlyOutstanding) {
+      base = base.filter((c) => (outstandingByCustomerId.get(c.id) ?? 0) > 0);
+    }
+
+    if (!qq) return base;
+
+    return base.filter((c) => {
       const hay = `${c.name} ${c.phone ?? ""} ${c.address ?? ""} ${c.note ?? ""}`.toLowerCase();
       return hay.includes(qq);
     });
-  }, [q, customersSortedByName]);
-
-  // Reset paging when mode changes
-  useEffect(() => {
-    setShowCount(6);
-  }, [q, onlyOutstanding]);
-
-  // UX: when toggling “only outstanding”, clear search (optional but makes it feel clean)
-  function toggleOutstanding() {
-    setOnlyOutstanding((v) => {
-      const next = !v;
-      if (next) setQ("");
-      return next;
-    });
-  }
-
-  function startSaleForCustomer(c: Customer) {
-    setSaleDraftCustomer(c.id);
-    alert(`Klar! Gå til "Salg" fanen – kunden "${c.name}" er forhåndsvalgt.`);
-  }
+  }, [sorted, q, onlyOutstanding, outstandingByCustomerId]);
 
   function exportJson() {
     const payload = { version: 1, exportedAt: new Date().toISOString(), customers };
@@ -213,257 +192,201 @@ export function Kunder() {
     input.click();
   }
 
-  // Decide what to show under the search bar
-  const mode: "search" | "outstanding" | "recent" = useMemo(() => {
-    if (onlyOutstanding) return "outstanding";
-    if (q.trim()) return "search";
-    return "recent";
-  }, [q, onlyOutstanding]);
+  function startSaleForCustomer(c: Customer) {
+    setSaleDraftCustomer(c.id);
+    alert(`Klar! Gå til "Salg" fanen – kunden "${c.name}" er forhåndsvalgt.`);
+  }
 
-  const visibleSearch = useMemo(() => searchResults.slice(0, showCount), [searchResults, showCount]);
-  const visibleOutstanding = useMemo(() => outstandingCustomersSorted.slice(0, showCount), [outstandingCustomersSorted, showCount]);
+  function addCustomer() {
+    const n = normalizeName(name);
+    if (!n) return alert("Kundenavn kan ikke være tomt.");
+
+    upsert({
+      id: uid("cust"),
+      name: n,
+      phone: phone.trim() || undefined,
+      address: address.trim() || undefined,
+      note: note.trim() || undefined,
+    });
+
+    setName("");
+    setPhone("");
+    setAddress("");
+    setNote("");
+    setNewOpen(false);
+  }
+
+  // Default: IKKE vis hele kundelista uten søk / “vis alle”
+  const shouldShowAllList = showAll || q.trim().length > 0 || onlyOutstanding;
 
   return (
     <div className="card">
       <div className="cardTitle">Kunder</div>
-      <div className="cardSub">
-        Søk først. Åpne kunde for handlinger. • Antall: <b>{customers.length}</b>
-      </div>
+      <div className="cardSub">Søk først. Åpne kunde for handlinger. • Antall: <b>{customers.length}</b></div>
 
-      {/* Top actions */}
-      <div className="btnRow" style={{ marginTop: 10 }}>
-        <button className="btn btnPrimary" type="button" onClick={() => setNewOpen(true)}>
-          + Ny kunde
-        </button>
-
-        <button className={`btn ${onlyOutstanding ? "btnPrimary" : ""}`} type="button" onClick={toggleOutstanding}>
+      <div className="btnRow">
+        <button className="btn btnPrimary" type="button" onClick={() => setNewOpen(true)}>+ Ny kunde</button>
+        <button className="btn" type="button" onClick={() => setOnlyOutstanding((v) => !v)}>
           {onlyOutstanding ? "Vis alle" : "Utestående"}
         </button>
-
-        <button className="btn" type="button" onClick={exportJson}>
-          Eksporter
-        </button>
-        <button className="btn" type="button" onClick={importJson}>
-          Importer
-        </button>
+        <button className="btn" type="button" onClick={exportJson}>Eksporter</button>
+        <button className="btn" type="button" onClick={importJson}>Importer</button>
       </div>
 
-      {/* Search */}
-      <div style={{ marginTop: 12 }}>
-        <input
-          ref={searchRef}
-          className="input"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder={onlyOutstanding ? "Søk i utestående..." : "Søk i kunder..."}
-        />
-      </div>
+      <div style={{ height: 10 }} />
 
-      {/* Content */}
-      {mode === "recent" ? (
-        <div className="card" style={{ marginTop: 12 }}>
-          <div className="cardTitle" style={{ fontSize: 18 }}>
-            Sist brukt
-          </div>
-          <div className="cardSub" style={{ marginBottom: 0 }}>
-            Trykk en kunde for detaljer / nytt salg.
-          </div>
+      <input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Søk i kunder..." />
 
-          <div className="list" style={{ marginTop: 10 }}>
-            {recentCustomers.length === 0 ? (
-              <div className="item">Ingen kunder enda. Trykk “+ Ny kunde”.</div>
-            ) : (
-              recentCustomers.map((c) => {
-                const out = outstandingByCustomerId.get(c.id) ?? 0;
-                return (
-                  <button
-                    key={c.id}
-                    type="button"
-                    className={out > 0 ? "item low" : "item"}
-                    style={{ textAlign: "left", cursor: "pointer" }}
-                    onClick={() => setSel(c)}
-                  >
-                    <div className="itemTop">
-                      <div>
-                        <p className="itemTitle" style={{ marginBottom: 2 }}>
-                          {c.name}
-                        </p>
-                        <div className="itemMeta">
-                          {out > 0 ? (
-                            <>
-                              Utestående: <b>{fmtKr(out)}</b>
-                            </>
-                          ) : (
-                            <span style={{ opacity: 0.85 }}>Ingen utestående</span>
-                          )}
-                          {shortMeta(c) ? <> • {shortMeta(c)}</> : null}
-                        </div>
-                      </div>
-                    </div>
-                  </button>
-                );
-              })
-            )}
+      {/* Utestående */}
+      {outstandingCustomers.length > 0 ? (
+        <div className="card">
+          <div className="cardTitle">Utestående</div>
+          <div className="cardSub">Kunder med penger utestående.</div>
+
+          <div className="list">
+            {outstandingCustomers.map(({ c, out }) => (
+              <div
+                key={c.id}
+                className="rowItem"
+                onClick={() => setEdit(c)}
+                role="button"
+                tabIndex={0}
+              >
+                <div>
+                  <p className="rowItemTitle">{c.name}</p>
+                  <div className="rowItemSub">
+                    Utestående: <b className="dangerText">{fmtKr(out)}</b>
+                    {c.address ? <> • Adr: <b>{c.address}</b></> : null}
+                  </div>
+                </div>
+                <span className="badge danger">Ubetalt</span>
+              </div>
+            ))}
           </div>
         </div>
       ) : null}
 
-      {mode === "search" ? (
-        <div className="card" style={{ marginTop: 12 }}>
-          <div className="cardTitle" style={{ fontSize: 18 }}>
-            Treff
-          </div>
-          <div className="cardSub" style={{ marginBottom: 0 }}>
-            Viser <b>{Math.min(showCount, searchResults.length)}</b> av <b>{searchResults.length}</b>
-          </div>
+      {/* Sist brukt */}
+      {lastUsedCustomers.length > 0 ? (
+        <div className="card">
+          <div className="cardTitle">Sist brukt</div>
+          <div className="cardSub">Trykk en kunde for detaljer / nytt salg.</div>
 
-          <div className="list" style={{ marginTop: 10 }}>
-            {visibleSearch.length === 0 ? (
-              <div className="item">Ingen treff.</div>
-            ) : (
-              visibleSearch.map((c) => {
-                const out = outstandingByCustomerId.get(c.id) ?? 0;
-                return (
-                  <button
-                    key={c.id}
-                    type="button"
-                    className={out > 0 ? "item low" : "item"}
-                    style={{ textAlign: "left", cursor: "pointer" }}
-                    onClick={() => setSel(c)}
-                  >
-                    <div className="itemTop">
-                      <div>
-                        <p className="itemTitle" style={{ marginBottom: 2 }}>
-                          {c.name}
-                        </p>
-                        <div className="itemMeta">
-                          {out > 0 ? (
-                            <>
-                              Utestående: <b>{fmtKr(out)}</b>
-                            </>
-                          ) : (
-                            <span style={{ opacity: 0.85 }}>Ingen utestående</span>
-                          )}
-                          {shortMeta(c) ? <> • {shortMeta(c)}</> : null}
-                        </div>
-                      </div>
-                    </div>
-                  </button>
-                );
-              })
-            )}
-          </div>
-
-          {searchResults.length > visibleSearch.length ? (
-            <div className="btnRow" style={{ justifyContent: "center" }}>
-              <button className="btn" type="button" onClick={() => setShowCount((n) => n + PAGE_SIZE)}>
-                Vis {PAGE_SIZE} til
-              </button>
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-
-      {mode === "outstanding" ? (
-        <div className="card" style={{ marginTop: 12 }}>
-          <div className="cardTitle" style={{ fontSize: 18 }}>
-            Utestående
-          </div>
-          <div className="cardSub" style={{ marginBottom: 0 }}>
-            Kun kunder med utestående. Sortert etter høyest beløp.
-          </div>
-
-          <div className="list" style={{ marginTop: 10 }}>
-            {visibleOutstanding.length === 0 ? (
-              <div className="item">Ingen utestående akkurat nå 🎉</div>
-            ) : (
-              visibleOutstanding.map(({ c, out }) => (
-                <button
+          <div className="list">
+            {lastUsedCustomers.map((c) => {
+              const out = outstandingByCustomerId.get(c.id) ?? 0;
+              return (
+                <div
                   key={c.id}
-                  type="button"
-                  className="item low"
-                  style={{ textAlign: "left", cursor: "pointer" }}
-                  onClick={() => setSel(c)}
+                  className="rowItem"
+                  onClick={() => setEdit(c)}
+                  role="button"
+                  tabIndex={0}
                 >
-                  <div className="itemTop">
-                    <div>
-                      <p className="itemTitle" style={{ marginBottom: 2 }}>
-                        {c.name}
-                      </p>
-                      <div className="itemMeta">
-                        Utestående: <b>{fmtKr(out)}</b>
-                        {shortMeta(c) ? <> • {shortMeta(c)}</> : null}
-                      </div>
+                  <div>
+                    <p className="rowItemTitle">{c.name}</p>
+                    <div className="rowItemSub">
+                      {out > 0 ? (
+                        <>Utestående: <b className="dangerText">{fmtKr(out)}</b></>
+                      ) : (
+                        <span className="successText">Ingen utestående</span>
+                      )}
                     </div>
                   </div>
-                </button>
-              ))
-            )}
+                  {out > 0 ? <span className="badge danger">Utestående</span> : <span className="badge success">OK</span>}
+                </div>
+              );
+            })}
           </div>
-
-          {outstandingCustomersSorted.length > visibleOutstanding.length ? (
-            <div className="btnRow" style={{ justifyContent: "center" }}>
-              <button className="btn" type="button" onClick={() => setShowCount((n) => n + PAGE_SIZE)}>
-                Vis {PAGE_SIZE} til
-              </button>
-            </div>
-          ) : null}
         </div>
       ) : null}
 
-      {/* New customer modal */}
+      {/* “Alle kunder” (kun når relevant) */}
+      <div className="card">
+        <div className="cardTitle">Alle kunder</div>
+        <div className="cardSub">
+          {shouldShowAllList
+            ? `Viser ${filteredAll.length} treff.`
+            : "Skjult for å unngå scrolling. Søk eller trykk “Vis alle”."
+          }
+        </div>
+
+        {!shouldShowAllList ? (
+          <div className="btnRow">
+            <button className="btn" type="button" onClick={() => setShowAll(true)}>Vis alle</button>
+          </div>
+        ) : (
+          <div className="list">
+            {filteredAll.slice(0, 30).map((c) => {
+              const out = outstandingByCustomerId.get(c.id) ?? 0;
+              return (
+                <div key={c.id} className="rowItem" onClick={() => setEdit(c)} role="button" tabIndex={0}>
+                  <div>
+                    <p className="rowItemTitle">{c.name}</p>
+                    <div className="rowItemSub">
+                      {out > 0 ? (
+                        <>Utestående: <b className="dangerText">{fmtKr(out)}</b></>
+                      ) : (
+                        <span className="successText">Ingen utestående</span>
+                      )}
+                    </div>
+                  </div>
+                  {out > 0 ? <span className="badge danger">Ubetalt</span> : <span className="badge success">Betalt</span>}
+                </div>
+              );
+            })}
+
+            {filteredAll.length > 30 ? (
+              <div className="item">
+                Viser 30 av {filteredAll.length}. (Søk for å snevre inn)
+              </div>
+            ) : null}
+
+            {filteredAll.length === 0 ? <div className="item">Ingen treff.</div> : null}
+          </div>
+        )}
+      </div>
+
+      {/* NEW CUSTOMER MODAL */}
       <Modal open={newOpen} title="Ny kunde" onClose={() => setNewOpen(false)}>
-        <CustomerUpsertForm
-          mode="new"
-          initial={{ name: "", phone: "", address: "", note: "" }}
-          onSave={(draft) => {
-            const n = normalizeName(draft.name);
-            if (!n) return alert("Kundenavn kan ikke være tomt.");
+        <div className="fieldGrid" style={{ marginTop: 0 }}>
+          <div>
+            <label className="label">Navn</label>
+            <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Navn (f.eks. Ola Nordmann)" />
+          </div>
 
-            const exists = customers.some((c) => normalizeName(c.name).toLowerCase() === n.toLowerCase());
-            if (exists) {
-              if (!confirm(`"${n}" finnes allerede. Legge til likevel?`)) return;
-            }
+          <div className="row3">
+            <div>
+              <label className="label">Telefon</label>
+              <input className="input" inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Valgfritt" />
+            </div>
+            <div>
+              <label className="label">Adresse</label>
+              <input className="input" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Valgfritt" />
+            </div>
+            <div>
+              <label className="label">Notat</label>
+              <input className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Valgfritt" />
+            </div>
+          </div>
 
-            upsert({
-              id: uid("cust"),
-              name: n,
-              phone: draft.phone.trim() || undefined,
-              address: draft.address.trim() || undefined,
-              note: draft.note.trim() || undefined,
-            });
-
-            setNewOpen(false);
-            // nice flow: focus search after closing
-            setTimeout(() => searchRef.current?.focus(), 100);
-          }}
-        />
+          <div className="btnRow">
+            <button className="btn btnPrimary" type="button" onClick={addCustomer}>Lagre</button>
+            <button className="btn" type="button" onClick={() => setNewOpen(false)}>Avbryt</button>
+          </div>
+        </div>
       </Modal>
 
-      {/* Customer details modal */}
-      <Modal open={!!sel} title={sel ? sel.name : "Kunde"} onClose={() => setSel(null)}>
-        {sel ? (
-          <CustomerQuickPanel
-            customer={sel}
+      {/* CUSTOMER DETAILS MODAL (SCROLLS INSIDE) */}
+      <Modal open={!!edit} title={edit ? edit.name : "Kunde"} onClose={() => setEdit(null)}>
+        {edit ? (
+          <CustomerDetails
+            customer={edit}
+            onClose={() => setEdit(null)}
+            onSave={(next) => { upsert(next); }}
+            onStartSale={() => startSaleForCustomer(edit)}
+            onDelete={() => { if (confirm(`Slette "${edit.name}"?`)) { remove(edit.id); setEdit(null); } }}
             sales={sales}
-            outstanding={(outstandingByCustomerId.get(sel.id) ?? 0) as number}
-            onStartSale={() => startSaleForCustomer(sel)}
-            onDelete={() => {
-              if (confirm(`Slette "${sel.name}"?`)) {
-                remove(sel.id);
-                setSel(null);
-              }
-            }}
-            onUpdate={(next) => {
-              upsert(next);
-              // keep modal open but update local selected customer object for immediate UI consistency
-              const updated: Customer = {
-                ...sel,
-                ...next,
-                updatedAt: new Date().toISOString(),
-              };
-              setSel(updated);
-            }}
           />
         ) : null}
       </Modal>
@@ -471,98 +394,36 @@ export function Kunder() {
   );
 }
 
-/* =========================
-   Reusable: upsert form
-========================= */
-
-function CustomerUpsertForm(props: {
-  mode: "new" | "edit";
-  initial: { name: string; phone: string; address: string; note: string };
-  onSave: (draft: { name: string; phone: string; address: string; note: string }) => void;
-  onCancel?: () => void;
-}) {
-  const [name, setName] = useState(props.initial.name);
-  const [phone, setPhone] = useState(props.initial.phone);
-  const [address, setAddress] = useState(props.initial.address);
-  const [note, setNote] = useState(props.initial.note);
-
-  return (
-    <div className="fieldGrid" style={{ marginTop: 0 }}>
-      <div>
-        <label className="label">Navn</label>
-        <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Navn (f.eks. Ola Nordmann)" />
-      </div>
-
-      <div className="row3">
-        <div>
-          <label className="label">Telefon</label>
-          <input className="input" inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Valgfritt" />
-        </div>
-        <div>
-          <label className="label">Adresse</label>
-          <input className="input" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Valgfritt" />
-        </div>
-        <div>
-          <label className="label">Notat</label>
-          <input className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Valgfritt" />
-        </div>
-      </div>
-
-      <div className="btnRow" style={{ justifyContent: "flex-end" }}>
-        {props.onCancel ? (
-          <button className="btn" type="button" onClick={props.onCancel}>
-            Avbryt
-          </button>
-        ) : null}
-
-        <button className="btn btnPrimary" type="button" onClick={() => props.onSave({ name, phone, address, note })}>
-          Lagre
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/* =========================
-   Customer modal panel
-========================= */
-
-function CustomerQuickPanel(props: {
+function CustomerDetails(props: {
   customer: Customer;
-  sales: Sale[];
-  outstanding: number;
-
+  onClose: () => void;
+  onSave: (next: Omit<Customer, "createdAt" | "updatedAt">) => void;
   onStartSale: () => void;
   onDelete: () => void;
-  onUpdate: (next: Omit<Customer, "createdAt" | "updatedAt">) => void;
+  sales: Sale[];
 }) {
-  const [editMode, setEditMode] = useState(false);
+  const [name, setName] = useState(props.customer.name);
+  const [phone, setPhone] = useState(props.customer.phone ?? "");
+  const [address, setAddress] = useState(props.customer.address ?? "");
+  const [note, setNote] = useState(props.customer.note ?? "");
 
-  // Sales list paging inside modal
-  const [salesShow, setSalesShow] = useState(5);
-  const SALES_PAGE = 5;
-
-  // Payment modal per sale
   const [paySale, setPaySale] = useState<Sale | null>(null);
   const [payAmount, setPayAmount] = useState("0");
   const [payDate, setPayDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [payNote, setPayNote] = useState("");
 
   const customerSales = useMemo(() => {
-    // newest first
     return props.sales
       .filter((s) => s.customerId === props.customer.id)
       .slice()
-      .sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+      .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
   }, [props.sales, props.customer.id]);
 
   const totalSpent = useMemo(() => customerSales.reduce((a, b) => a + (Number(b.total) || 0), 0), [customerSales]);
-
-  const outstanding = useMemo(() => {
-    return Math.round(customerSales.reduce((a, s) => a + Math.max(0, saleRemaining(s)), 0) * 100) / 100;
-  }, [customerSales]);
-
-  const visibleSales = useMemo(() => customerSales.slice(0, salesShow), [customerSales, salesShow]);
+  const outstanding = useMemo(
+    () => Math.round(customerSales.reduce((a, s) => a + Math.max(0, saleRemaining(s)), 0) * 100) / 100,
+    [customerSales]
+  );
 
   function openPayment(s: Sale) {
     setPaySale(s);
@@ -582,108 +443,81 @@ function CustomerQuickPanel(props: {
 
   return (
     <div className="fieldGrid" style={{ marginTop: 0 }}>
-      {/* Top summary */}
-      <div className="item" style={{ marginTop: 0 }}>
-        <div className="itemTop">
-          <div>
-            <p className="itemTitle" style={{ marginBottom: 2 }}>
-              {props.customer.name}
-            </p>
-            <div className="itemMeta">
-              {shortMeta(props.customer) ? shortMeta(props.customer) : <span style={{ opacity: 0.9 }}>Ingen kontaktinfo</span>}
-            </div>
-            <div className="itemMeta" style={{ marginTop: 6 }}>
-              Utestående salg: <b>{fmtKr(props.outstanding)}</b> • Totalt solgt: <b>{fmtKr(totalSpent)}</b>
-            </div>
-          </div>
-        </div>
+      <div className="miniRow">
+        <span>Sum solgt: <b>{fmtKr(totalSpent)}</b></span>
+        <span>Utestående: <b className={outstanding > 0 ? "dangerText" : "successText"}>{fmtKr(outstanding)}</b></span>
+      </div>
 
-        <div className="btnRow" style={{ marginTop: 10 }}>
-          <button className="btn btnPrimary" type="button" onClick={props.onStartSale}>
-            Nytt salg
-          </button>
-          <button className="btn" type="button" onClick={() => setEditMode((v) => !v)}>
-            {editMode ? "Lukk redigering" : "Rediger"}
-          </button>
-          <button className="btn btnDanger" type="button" onClick={props.onDelete}>
-            Slett
-          </button>
+      <div className="row3">
+        <div>
+          <label className="label">Navn</label>
+          <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
+        </div>
+        <div>
+          <label className="label">Telefon</label>
+          <input className="input" inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)} />
+        </div>
+        <div>
+          <label className="label">Adresse</label>
+          <input className="input" value={address} onChange={(e) => setAddress(e.target.value)} />
         </div>
       </div>
 
-      {/* Edit */}
-      {editMode ? (
-        <div className="card" style={{ marginTop: 0 }}>
-          <div className="cardTitle" style={{ fontSize: 18 }}>
-            Rediger kunde
-          </div>
-          <CustomerUpsertForm
-            mode="edit"
-            initial={{
-              name: props.customer.name,
-              phone: props.customer.phone ?? "",
-              address: props.customer.address ?? "",
-              note: props.customer.note ?? "",
-            }}
-            onSave={(draft) => {
-              const n = normalizeName(draft.name);
-              if (!n) return alert("Kundenavn kan ikke være tomt.");
-              props.onUpdate({
-                id: props.customer.id,
-                name: n,
-                phone: draft.phone.trim() || undefined,
-                address: draft.address.trim() || undefined,
-                note: draft.note.trim() || undefined,
-              });
-              setEditMode(false);
-            }}
-            onCancel={() => setEditMode(false)}
-          />
-        </div>
-      ) : null}
+      <div>
+        <label className="label">Notat</label>
+        <input className="input" value={note} onChange={(e) => setNote(e.target.value)} />
+      </div>
 
-      {/* Sales */}
-      <div className="card" style={{ marginTop: 0 }}>
-        <div className="cardTitle" style={{ fontSize: 18 }}>
-          Salg
-        </div>
-        <div className="cardSub" style={{ marginBottom: 0 }}>
-          Viser {Math.min(salesShow, customerSales.length)} av {customerSales.length} • Utestående: <b>{fmtKr(outstanding)}</b>
-        </div>
+      <div className="btnRow">
+        <button
+          className="btn btnPrimary"
+          type="button"
+          onClick={() => {
+            const n = normalizeName(name);
+            if (!n) return alert("Kundenavn kan ikke være tomt.");
+            props.onSave({
+              id: props.customer.id,
+              name: n,
+              phone: phone.trim() || undefined,
+              address: address.trim() || undefined,
+              note: note.trim() || undefined,
+            });
+          }}
+        >
+          Lagre
+        </button>
 
-        <div className="list" style={{ marginTop: 10 }}>
-          {visibleSales.length === 0 ? <div className="item">Ingen salg registrert på denne kunden enda.</div> : null}
+        <button className="btn" type="button" onClick={props.onStartSale}>Nytt salg</button>
+        <button className="btn btnDanger" type="button" onClick={props.onDelete}>Slett kunde</button>
+        <button className="btn" type="button" onClick={props.onClose}>Lukk</button>
+      </div>
 
-          {visibleSales.map((s) => {
+      <div className="card" style={{ marginTop: 10 }}>
+        <div className="cardTitle">Salg</div>
+        <div className="cardSub">Trykk “Registrer innbetaling” på utestående salg.</div>
+
+        <div className="list">
+          {customerSales.map((s) => {
             const paid = salePaidSum(s);
             const rem = Math.max(0, saleRemaining(s));
-
-            // Show “pent” what they bought (handles multi-line or legacy)
-            const lines: any[] = Array.isArray((s as any).lines) ? ((s as any).lines as any[]) : [];
-            const boughtText =
-              lines.length > 0
-                ? lines
-                    .slice(0, 3)
-                    .map((l) => `${Number(l.qty) || 0}× ${String(l.itemName || "")}`)
-                    .filter(Boolean)
-                    .join(", ")
-                : s.itemName
-                ? `${s.qty ?? ""}× ${s.itemName}`
-                : "—";
+            const paidOk = rem <= 0 || s.paid;
 
             return (
-              <div key={s.id} className={rem > 0 ? "item low" : "item"}>
+              <div key={s.id} className="item">
                 <div className="itemTop">
                   <div>
-                    <p className="itemTitle" style={{ marginBottom: 2 }}>
-                      {fmtKr(s.total)}
-                    </p>
+                    <p className="itemTitle">{fmtKr(s.total)}</p>
                     <div className="itemMeta">
-                      Kjøpt: <b>{boughtText}</b>
-                      <br />
-                      Innbetalt: <b>{fmtKr(paid)}</b> • Utestående: <b>{fmtKr(rem)}</b> • {new Date(s.createdAt).toLocaleString("nb-NO")}
+                      Kjøpt: <b>{saleCompactText(s)}</b>
+                    </div>
+                    <div className="itemMeta" style={{ marginTop: 6 }}>
+                      Innbetalt: <b className={paidOk ? "successText" : ""}>{fmtKr(paid)}</b> •{" "}
+                      Utestående: <b className={rem > 0 ? "dangerText" : "successText"}>{fmtKr(rem)}</b> •{" "}
+                      {new Date(s.createdAt).toLocaleString("nb-NO")}
                     </div>
                   </div>
+
+                  {paidOk ? <span className="badge success">Betalt</span> : <span className="badge danger">Ubetalt</span>}
                 </div>
 
                 <div className="itemActions">
@@ -692,31 +526,22 @@ function CustomerQuickPanel(props: {
                       Registrer innbetaling
                     </button>
                   ) : (
-                    <button className="btn" type="button" disabled>
-                      Betalt
-                    </button>
+                    <button className="btn" type="button" disabled>OK</button>
                   )}
                 </div>
               </div>
             );
           })}
-        </div>
 
-        {customerSales.length > visibleSales.length ? (
-          <div className="btnRow" style={{ justifyContent: "center" }}>
-            <button className="btn" type="button" onClick={() => setSalesShow((n) => n + SALES_PAGE)}>
-              Vis {SALES_PAGE} til
-            </button>
-          </div>
-        ) : null}
+          {customerSales.length === 0 ? <div className="item">Ingen salg på denne kunden enda.</div> : null}
+        </div>
       </div>
 
-      {/* Payment modal */}
       <Modal open={!!paySale} title="Registrer innbetaling" onClose={() => setPaySale(null)}>
         {paySale ? (
           <div className="fieldGrid" style={{ marginTop: 0 }}>
             <div className="itemMeta" style={{ marginTop: 0 }}>
-              Utestående: <b>{fmtKr(Math.max(0, saleRemaining(paySale)))}</b>
+              Utestående nå: <b className="dangerText">{fmtKr(Math.max(0, saleRemaining(paySale)))}</b>
             </div>
 
             <div className="row3">
@@ -725,7 +550,7 @@ function CustomerQuickPanel(props: {
                 <input className="input" type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} />
               </div>
               <div>
-                <label className="label">Beløp (kr)</label>
+                <label className="label">Beløp</label>
                 <input className="input" inputMode="decimal" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} />
               </div>
               <div>
@@ -734,13 +559,9 @@ function CustomerQuickPanel(props: {
               </div>
             </div>
 
-            <div className="btnRow" style={{ justifyContent: "flex-end" }}>
-              <button className="btn" type="button" onClick={() => setPaySale(null)}>
-                Avbryt
-              </button>
-              <button className="btn btnPrimary" type="button" onClick={savePayment}>
-                Lagre
-              </button>
+            <div className="btnRow">
+              <button className="btn btnPrimary" type="button" onClick={savePayment}>Lagre</button>
+              <button className="btn" type="button" onClick={() => setPaySale(null)}>Avbryt</button>
             </div>
           </div>
         ) : null}
