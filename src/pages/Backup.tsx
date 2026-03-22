@@ -19,15 +19,15 @@ export function Backup() {
 
   return (
     <div className="card">
-      <div className="cardTitle">Backup</div>
+      <div className="cardTitle">Data</div>
       <div className="cardSub">Eksporter/Importer alt. Dette ligger kun lokalt i nettleseren.</div>
 
       <div className="list">
         <div className="item">
           <p className="itemTitle">Status</p>
           <div className="itemMeta">
-            Varer: <b>{summary.itemsCount}</b> • Kunder: <b>{summary.customersCount}</b> • Salg: <b>{summary.salesCount}</b> • Gjeld:
-            <b> {summary.receivablesCount}</b>
+            Varer: <b>{summary.itemsCount}</b> • Kunder: <b>{summary.customersCount}</b> • Salg: <b>{summary.salesCount}</b> • Gjeld:{" "}
+            <b>{summary.receivablesCount}</b>
             <br />
             Utestående salg: <b>{fmtKr(summary.unpaidSales)}</b>
             <br />
@@ -44,15 +44,12 @@ export function Backup() {
         <button className="btn btnPrimary" type="button" onClick={() => downloadExportAll()}>
           Eksporter ALT
         </button>
-
         <button className="btn" type="button" onClick={() => pickImportAllFile("replace")}>
           Importer (erstatt)
         </button>
-
         <button className="btn" type="button" onClick={() => pickImportAllFile("merge")}>
           Importer (slå sammen)
         </button>
-
         <button
           className="btn btnDanger"
           type="button"
