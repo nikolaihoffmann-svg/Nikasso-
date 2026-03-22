@@ -18,14 +18,12 @@ import {
   useSales,
   Sale,
   SaleLine,
-  Vare,
 } from "../app/storage";
 
 function toNum(v: string) {
   const n = Number(String(v).replace(",", "."));
   return Number.isFinite(n) ? n : 0;
 }
-
 function toInt(v: string) {
   const n = Math.trunc(toNum(v));
   return Number.isFinite(n) ? n : 0;
@@ -81,11 +79,9 @@ function ChoiceModal(props: {
             <button className="btn" type="button" onClick={props.onCancel}>
               {props.cancelText}
             </button>
-
             <button className="btn btnDanger" type="button" onClick={props.onSecondary}>
               {props.secondaryText}
             </button>
-
             <button className="btn btnPrimary" type="button" onClick={props.onPrimary}>
               {props.primaryText}
             </button>
@@ -118,38 +114,40 @@ function fmtLineCompact(l: SaleLine) {
   return `${l.qty}× ${l.itemName} (${fmtKr(lineSum)})`;
 }
 
+function isPaid(s: Sale) {
+  const rem = Math.max(0, saleRemaining(s));
+  return rem <= 0 || Boolean(s.paid);
+}
+
 export function Salg() {
   const { items } = useItems();
   const { customers } = useCustomers();
   const { sales, removeSale } = useSales();
 
-  // UI state
   const [onlyUnpaid, setOnlyUnpaid] = useState(false);
   const [visibleCount, setVisibleCount] = useState(5);
 
-  // "Nytt salg" modal
+  // New sale modal
   const [newOpen, setNewOpen] = useState(false);
   const [customerId, setCustomerId] = useState<string>("");
   const [paidFlag, setPaidFlag] = useState<boolean>(true);
   const [dueDate, setDueDate] = useState<string>("");
   const [note, setNote] = useState<string>("");
 
-  const [draftLines, setDraftLines] = useState<DraftLine[]>(() => [
-    { id: uid("dl"), itemId: "", qty: "1", unitPrice: "" },
-  ]);
+  const [draftLines, setDraftLines] = useState<DraftLine[]>(() => [{ id: uid("dl"), itemId: "", qty: "1", unitPrice: "" }]);
 
-  // betaling modal
+  // Payment modal
   const [paySale, setPaySale] = useState<Sale | null>(null);
   const [payAmount, setPayAmount] = useState("0");
-  const [payDate, setPayDate] = useState<string>(new Date().toISOString().slice(0, 10)); // yyyy-mm-dd
+  const [payDate, setPayDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [payNote, setPayNote] = useState("");
 
-  // slett modal
+  // Delete modal
   const [delSale, setDelSale] = useState<Sale | null>(null);
 
   const selectedCustomer = useMemo(() => customers.find((c) => c.id === customerId) ?? null, [customers, customerId]);
 
-  // forhåndsvalg kunde fra Kunder-siden
+  // Preselect customer from Kunder-tab
   useEffect(() => {
     const draft = getSaleDraftCustomer();
     if (draft) {
@@ -158,18 +156,19 @@ export function Salg() {
     }
   }, []);
 
-  const outstandingTotal = useMemo(() => {
-    return round2(sales.reduce((a, s) => a + Math.max(0, saleRemaining(s)), 0));
-  }, [sales]);
+  // Keep list compact: reset "show more" when filter changes
+  useEffect(() => {
+    setVisibleCount(5);
+  }, [onlyUnpaid]);
+
+  const outstandingTotal = useMemo(() => round2(sales.reduce((a, s) => a + Math.max(0, saleRemaining(s)), 0)), [sales]);
 
   const filteredSales = useMemo(() => {
     const base = onlyUnpaid ? sales.filter((s) => Math.max(0, saleRemaining(s)) > 0) : sales;
     return base;
   }, [sales, onlyUnpaid]);
 
-  const visibleSales = useMemo(() => {
-    return filteredSales.slice(0, visibleCount);
-  }, [filteredSales, visibleCount]);
+  const visibleSales = useMemo(() => filteredSales.slice(0, visibleCount), [filteredSales, visibleCount]);
 
   const draftTotal = useMemo(() => sumDraft(draftLines), [draftLines]);
 
@@ -181,14 +180,9 @@ export function Salg() {
     setNewOpen(true);
   }
 
-  function closeNewSale() {
-    setNewOpen(false);
-  }
-
   function addDraftLine() {
     setDraftLines((prev) => [...prev, { id: uid("dl"), itemId: "", qty: "1", unitPrice: "" }]);
   }
-
   function removeDraftLine(id: string) {
     setDraftLines((prev) => (prev.length <= 1 ? prev : prev.filter((x) => x.id !== id)));
   }
@@ -199,7 +193,7 @@ export function Salg() {
         if (l.id !== id) return l;
         const next = { ...l, ...patch };
 
-        // autopopulate pris når vare velges (kun hvis tomt)
+        // Auto price from item if empty
         if (patch.itemId) {
           const it = items.find((x) => x.id === patch.itemId);
           if (it && String(next.unitPrice).trim() === "") next.unitPrice = String(it.price ?? 0);
@@ -210,7 +204,6 @@ export function Salg() {
   }
 
   function saveNewSale() {
-    // valider + bygg lines
     const clean: SaleLine[] = [];
 
     for (const dl of draftLines) {
@@ -221,6 +214,7 @@ export function Salg() {
       if (q <= 0) continue;
 
       const p = round2(toNum(dl.unitPrice || String(it.price ?? 0)));
+
       clean.push({
         id: uid("line"),
         itemId: it.id,
@@ -233,7 +227,7 @@ export function Salg() {
 
     if (clean.length === 0) return alert("Legg til minst én varelinje med vare + antall.");
 
-    // trekk lager lokalt (samme stil som før)
+    // Update stock locally
     const itemsNow = getItems();
     for (const line of clean) {
       const idx = itemsNow.findIndex((x) => x.id === line.itemId);
@@ -247,12 +241,12 @@ export function Salg() {
       customerId: selectedCustomer?.id,
       customerName: selectedCustomer?.name,
       lines: clean,
-      paid: paidFlag, // default true
+      paid: paidFlag,
       dueDate: dueDate.trim() ? dueDate.trim() : undefined,
       note: note.trim() ? note.trim() : undefined,
     });
 
-    // enkel lav-lager varsel (ikke modal – bare alert)
+    // Low stock warning
     const low: string[] = [];
     for (const line of clean) {
       const it = itemsNow.find((x) => x.id === line.itemId);
@@ -263,7 +257,6 @@ export function Salg() {
     if (low.length) alert(`⚠️ Lav lagerbeholdning:\n\n${low.join("\n")}`);
 
     setNewOpen(false);
-    // la kundevalg stå (ofte praktisk)
   }
 
   function openPayment(s: Sale) {
@@ -282,8 +275,12 @@ export function Salg() {
     setPaySale(null);
   }
 
-  function askDelete(s: Sale) {
-    setDelSale(s);
+  function togglePaid(s: Sale) {
+    setSalePaid(s.id, !Boolean(s.paid));
+  }
+
+  function showMore() {
+    setVisibleCount((n) => Math.min(filteredSales.length, n + 10));
   }
 
   function doDelete(restoreStock: boolean) {
@@ -292,23 +289,19 @@ export function Salg() {
     setDelSale(null);
   }
 
-  function togglePaid(s: Sale) {
-    const next = !Boolean(s.paid);
-    setSalePaid(s.id, next);
-  }
-
-  function showMore() {
-    setVisibleCount((n) => Math.min(filteredSales.length, n + 10));
-  }
+  const sortedCustomers = useMemo(() => {
+    const copy = [...customers];
+    copy.sort((a, b) => (a.name || "").localeCompare(b.name || "", "nb-NO", { sensitivity: "base" }));
+    return copy;
+  }, [customers]);
 
   return (
     <div className="card">
       <div className="cardTitle">Salg</div>
       <div className="cardSub">
-        <b>Utestående salg totalt:</b> <b>{fmtKr(outstandingTotal)}</b>
+        Utestående salg totalt: <b>{fmtKr(outstandingTotal)}</b>
       </div>
 
-      {/* Top controls */}
       <div className="btnRow" style={{ justifyContent: "space-between" }}>
         <button className="btn btnPrimary" type="button" onClick={openNewSale}>
           + Nytt salg
@@ -319,9 +312,8 @@ export function Salg() {
         </button>
       </div>
 
-      {/* List */}
       <div className="card" style={{ marginTop: 14 }}>
-        <div className="cardTitle">Salg</div>
+        <div className="cardTitle">Liste</div>
         <div className="cardSub">
           Viser <b>{Math.min(visibleCount, filteredSales.length)}</b> av <b>{filteredSales.length}</b>
         </div>
@@ -330,19 +322,29 @@ export function Salg() {
           {visibleSales.map((s) => {
             const paidSum = salePaidSum(s);
             const rem = Math.max(0, saleRemaining(s));
+            const paid = isPaid(s);
+
             const lines = Array.isArray(s.lines) ? s.lines : [];
             const preview = lines.slice(0, 3).map(fmtLineCompact);
 
             return (
               <div key={s.id} className={rem > 0 ? "item low" : "item"}>
                 <div className="itemTop">
-                  <div>
-                    <p className="itemTitle">{s.customerName ? s.customerName : "Anonym"}</p>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                      <p className="itemTitle" style={{ marginBottom: 0 }}>
+                        {s.customerName ? s.customerName : "Anonym"}
+                      </p>
+                      <span className={`chip ${paid ? "chipPaid" : "chipUnpaid"}`}>
+                        {paid ? "Betalt" : "Utestående"}
+                      </span>
+                    </div>
 
-                    <div className="itemMeta" style={{ marginTop: 2 }}>
-                      Total: <b>{fmtKr(s.total)}</b>
-                      {" • "}
-                      Status: <b>{rem <= 0 || s.paid ? "Betalt" : "Utestående"}</b>
+                    <div className="itemMeta" style={{ marginTop: 6 }}>
+                      Total: <b>{fmtKr(s.total)}</b> • Innbetalt: <b>{fmtKr(paidSum)}</b> •{" "}
+                      <span style={{ color: paid ? "var(--good)" : "var(--bad)", fontWeight: 900 }}>
+                        Utestående: {fmtKr(rem)}
+                      </span>
                       {" • "}
                       {new Date(s.createdAt).toLocaleString("nb-NO")}
                     </div>
@@ -354,17 +356,15 @@ export function Salg() {
                           {preview.map((t, i) => (
                             <div key={i}>• {t}</div>
                           ))}
-                          {lines.length > 3 ? <div style={{ marginTop: 2, opacity: 0.9 }}>… +{lines.length - 3} til</div> : null}
+                          {lines.length > 3 ? (
+                            <div style={{ marginTop: 2, opacity: 0.9 }}>… +{lines.length - 3} til</div>
+                          ) : null}
                         </div>
                       </div>
                     ) : null}
 
-                    <div className="itemMeta" style={{ marginTop: 8 }}>
-                      Innbetalt: <b>{fmtKr(paidSum)}</b> • Utestående: <b>{fmtKr(rem)}</b>
-                    </div>
-
                     {s.note ? (
-                      <div className="itemMeta" style={{ marginTop: 6 }}>
+                      <div className="itemMeta" style={{ marginTop: 8 }}>
                         Notat: <b>{s.note}</b>
                       </div>
                     ) : null}
@@ -382,7 +382,7 @@ export function Salg() {
                     {s.paid ? "Marker ubetalt" : "Marker betalt"}
                   </button>
 
-                  <button className="btn btnDanger" type="button" onClick={() => askDelete(s)}>
+                  <button className="btn btnDanger" type="button" onClick={() => setDelSale(s)}>
                     Slett
                   </button>
                 </div>
@@ -403,28 +403,29 @@ export function Salg() {
       </div>
 
       {/* NEW SALE MODAL */}
-      <Modal open={newOpen} title="Nytt salg" onClose={closeNewSale}>
+      <Modal open={newOpen} title="Nytt salg" onClose={() => setNewOpen(false)}>
         <div className="saleModal">
           <div className="fieldGrid" style={{ marginTop: 0 }}>
             <div>
               <label className="label">Kunde (valgfritt)</label>
               <select className="input" value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
                 <option value="">Ingen / anonymt salg…</option>
-                {customers
-                  .slice()
-                  .sort((a, b) => (a.name || "").localeCompare(b.name || "", "nb-NO", { sensitivity: "base" }))
-                  .map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
+                {sortedCustomers.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
               </select>
             </div>
 
             <div className="row3">
               <div>
                 <label className="label">Betalt?</label>
-                <select className="input" value={paidFlag ? "paid" : "unpaid"} onChange={(e) => setPaidFlag(e.target.value === "paid")}>
+                <select
+                  className="input"
+                  value={paidFlag ? "paid" : "unpaid"}
+                  onChange={(e) => setPaidFlag(e.target.value === "paid")}
+                >
                   <option value="paid">Betalt</option>
                   <option value="unpaid">Ubetalt</option>
                 </select>
@@ -442,9 +443,8 @@ export function Salg() {
             </div>
           </div>
 
-          <div style={{ height: 14 }} />
+          <div style={{ height: 12 }} />
 
-          {/* lines */}
           <div className="saleLines">
             {draftLines.map((dl, idx) => {
               const it = items.find((x) => x.id === dl.itemId) ?? null;
@@ -489,7 +489,7 @@ export function Salg() {
                     </div>
 
                     <div className="saleLineCol">
-                      <label className="label">Linjesum</label>
+                      <label className="label">Sum</label>
                       <input className="input" value={fmtKr(lineSum)} readOnly />
                     </div>
                   </div>
@@ -504,14 +504,13 @@ export function Salg() {
             </div>
           </div>
 
-          {/* sticky footer */}
           <div className="saleModalSticky">
             <div className="saleModalTotal">
               Total: <b>{fmtKr(draftTotal)}</b>
             </div>
 
             <div className="btnRow" style={{ marginTop: 0, justifyContent: "flex-end" }}>
-              <button className="btn" type="button" onClick={closeNewSale}>
+              <button className="btn" type="button" onClick={() => setNewOpen(false)}>
                 Avbryt
               </button>
               <button className="btn btnPrimary" type="button" onClick={saveNewSale}>
@@ -528,7 +527,7 @@ export function Salg() {
           <div className="fieldGrid" style={{ marginTop: 0 }}>
             <div className="itemMeta" style={{ marginTop: 0 }}>
               <b>{paySale.customerName ? paySale.customerName : "Anonym"}</b> • Utestående nå:{" "}
-              <b>{fmtKr(Math.max(0, saleRemaining(paySale)))}</b>
+              <b style={{ color: "var(--bad)" }}>{fmtKr(Math.max(0, saleRemaining(paySale)))}</b>
             </div>
 
             <div className="row3">
@@ -558,7 +557,7 @@ export function Salg() {
         ) : null}
       </Modal>
 
-      {/* DELETE CHOICE MODAL */}
+      {/* DELETE MODAL */}
       <ChoiceModal
         open={!!delSale}
         title="Slette salg?"
