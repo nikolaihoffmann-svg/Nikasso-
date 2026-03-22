@@ -1,55 +1,64 @@
 /* =========================================================
-   NIKASSO – Premium / Compact (v2)
-   Goal: calmer colors, less “glass mess”, more hierarchy,
-   compact lists, proper steppers, and clear paid/unpaid.
+   NIKASSO – Premium / Compact (v3)
+   Goal: calm background, consistent hierarchy, compact UI,
+   pro steppers, readable states (paid/unpaid/overdue).
 ========================================================= */
 
 :root{
-  --bg0:#070a10;
-  --bg1:#0b1220;
-  --bg2:#0f1a2b;
+  /* Background */
+  --bg0:#070A12;
+  --bg1:#0A1220;
+  --bg2:#0B1628;
 
+  /* Surfaces */
   --card: rgba(255,255,255,.06);
   --card2: rgba(255,255,255,.045);
   --stroke: rgba(255,255,255,.10);
   --stroke2: rgba(255,255,255,.16);
 
+  /* Text */
   --text: rgba(255,255,255,.92);
   --muted: rgba(255,255,255,.66);
   --muted2: rgba(255,255,255,.50);
 
+  /* Accent */
   --accent:#4F83FF;
   --accent2: rgba(79,131,255,.18);
 
-  --success:#35d07f;
-  --success2: rgba(53,208,127,.18);
+  /* States */
+  --success:#2FD07D;
+  --success2: rgba(47,208,125,.18);
 
-  --danger:#ff5a5f;
+  --danger:#FF5A5F;
   --danger2: rgba(255,90,95,.18);
 
-  --warn:#ffcc66;
+  --warn:#FFCC66;
   --warn2: rgba(255,204,102,.16);
 
+  /* Radius */
   --r10: 10px;
   --r12: 12px;
   --r14: 14px;
   --r16: 16px;
   --r18: 18px;
 
+  /* Shadows */
   --shadow: 0 18px 48px rgba(0,0,0,.52);
   --shadow2: 0 10px 28px rgba(0,0,0,.38);
 
+  /* Spacing */
   --pad: 14px;
   --gap: 10px;
 
+  /* Typography */
   --fz: 15px;
   --lh: 1.35;
 }
 
 :root[data-theme="light"]{
-  --bg0:#f6f7fb;
-  --bg1:#eef2f7;
-  --bg2:#e9eef7;
+  --bg0:#F6F7FB;
+  --bg1:#EEF2F7;
+  --bg2:#E9EEF7;
 
   --card: rgba(0,0,0,.05);
   --card2: rgba(0,0,0,.035);
@@ -72,9 +81,10 @@ body{
   font-size:var(--fz);
   line-height:var(--lh);
   font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
+  /* ✅ Roligere bakgrunn (mindre “rar”) */
   background:
-    radial-gradient(900px 650px at 15% 0%, rgba(79,131,255,.16), transparent 60%),
-    radial-gradient(900px 650px at 85% 10%, rgba(53,208,127,.10), transparent 58%),
+    radial-gradient(1200px 900px at 18% -10%, rgba(79,131,255,.12), transparent 62%),
+    radial-gradient(1000px 800px at 85% 0%, rgba(255,204,102,.07), transparent 60%),
     linear-gradient(180deg, var(--bg0), var(--bg2));
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -89,16 +99,17 @@ a{ color:inherit; }
   padding: 14px 12px 44px;
 }
 
+/* Header */
 .header{
   position: sticky;
   top: 0;
   z-index: 20;
   padding: 10px 0 10px;
-  background: linear-gradient(180deg, rgba(0,0,0,.50), rgba(0,0,0,0));
+  background: linear-gradient(180deg, rgba(0,0,0,.55), rgba(0,0,0,0));
   backdrop-filter: blur(10px);
 }
 :root[data-theme="light"] .header{
-  background: linear-gradient(180deg, rgba(255,255,255,.70), rgba(255,255,255,0));
+  background: linear-gradient(180deg, rgba(255,255,255,.80), rgba(255,255,255,0));
 }
 
 .headerTop{
@@ -111,7 +122,7 @@ a{ color:inherit; }
 .h1{
   font-size: 40px;
   letter-spacing:-0.04em;
-  font-weight: 900;
+  font-weight: 950;
   margin:0;
 }
 
@@ -130,7 +141,7 @@ a{ color:inherit; }
   color: var(--muted);
   padding: 9px 12px;
   border-radius: 999px;
-  font-weight: 800;
+  font-weight: 900;
   letter-spacing: -0.01em;
   cursor:pointer;
   transition: background .18s ease, border-color .18s ease, transform .06s ease, color .18s ease;
@@ -163,7 +174,7 @@ a{ color:inherit; }
   color: var(--text);
   padding: 9px 13px;
   border-radius: 999px;
-  font-weight: 850;
+  font-weight: 950;
   cursor:pointer;
   min-height: 36px;
   transition: background .18s ease, border-color .18s ease, transform .06s ease, box-shadow .18s ease, opacity .18s ease;
@@ -174,13 +185,14 @@ a{ color:inherit; }
   background: rgba(255,255,255,.075);
 }
 
-.btnPrimary{
+/* ✅ støtt både .btnPrimary og .btn.btnPrimary */
+.btnPrimary, .btn.btnPrimary{
   border-color: rgba(79,131,255,.62);
   background: linear-gradient(180deg, rgba(79,131,255,.22), rgba(79,131,255,.12));
   box-shadow: 0 12px 26px rgba(79,131,255,.16);
 }
 
-.btnDanger{
+.btnDanger, .btn.btnDanger{
   border-color: rgba(255,90,95,.62);
   background: linear-gradient(180deg, rgba(255,90,95,.22), rgba(255,90,95,.10));
   box-shadow: 0 12px 26px rgba(255,90,95,.12);
@@ -212,7 +224,7 @@ a{ color:inherit; }
 
 .cardTitle{
   font-size: 22px;
-  font-weight: 900;
+  font-weight: 950;
   letter-spacing: -0.02em;
   margin:0 0 6px;
 }
@@ -247,7 +259,7 @@ a{ color:inherit; }
 .itemTitle{
   margin:0 0 4px;
   font-size: 18px;
-  font-weight: 900;
+  font-weight: 950;
   letter-spacing:-0.02em;
 }
 .itemMeta{
@@ -267,21 +279,21 @@ a{ color:inherit; }
 .dangerText{ color: var(--danger); }
 .warnText{ color: var(--warn); }
 
+/* badges */
 .badge{
   display:inline-flex;
   align-items:center;
   gap:6px;
   padding: 3px 10px;
   border-radius: 999px;
-  font-weight: 850;
+  font-weight: 950;
   font-size: 12px;
   border: 1px solid var(--stroke);
   background: rgba(255,255,255,.04);
 }
-
 .badge.success{
-  border-color: rgba(53,208,127,.45);
-  background: rgba(53,208,127,.10);
+  border-color: rgba(47,208,125,.45);
+  background: rgba(47,208,125,.10);
   color: var(--success);
 }
 .badge.danger{
@@ -306,7 +318,7 @@ a{ color:inherit; }
   display:block;
   color: var(--muted);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 900;
   margin:0 0 6px;
 }
 
@@ -321,13 +333,11 @@ a{ color:inherit; }
   outline:none;
   transition: border-color .18s ease, background .18s ease, box-shadow .18s ease;
 }
-
 .input:focus{
   border-color: rgba(79,131,255,.66);
   box-shadow: 0 0 0 4px rgba(79,131,255,.14);
   background: rgba(255,255,255,.06);
 }
-
 select.input{ appearance:none; }
 
 .row3{
@@ -341,7 +351,7 @@ select.input{ appearance:none; }
   .row3{ grid-template-columns: 1fr; }
 }
 
-/* Modal – scroll inni (fix “kan ikke scrolle salg i kundemodal”) */
+/* Modal – scroll inni */
 .modalBackdrop{
   position:fixed;
   inset:0;
@@ -352,7 +362,6 @@ select.input{ appearance:none; }
   z-index: 60;
   padding: 14px;
 }
-
 .modal{
   width: min(720px, 100%);
   background: linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.05));
@@ -361,7 +370,6 @@ select.input{ appearance:none; }
   box-shadow: var(--shadow);
   overflow:hidden;
 }
-
 .modalHeader{
   display:flex;
   align-items:center;
@@ -369,21 +377,18 @@ select.input{ appearance:none; }
   padding: 12px 14px;
   border-bottom: 1px solid var(--stroke);
 }
-
 .modalTitle{
   margin:0;
   font-size: 15px;
-  font-weight: 900;
+  font-weight: 950;
   letter-spacing:-0.01em;
 }
-
 .modalBody{
   padding: 14px;
   max-height: min(78vh, 720px);
   overflow: auto;
   -webkit-overflow-scrolling: touch;
 }
-
 .iconBtn{
   width: 40px;
   height: 36px;
@@ -395,7 +400,7 @@ select.input{ appearance:none; }
 /* “big money” */
 .moneyBig{
   font-size: 40px;
-  font-weight: 950;
+  font-weight: 980;
   letter-spacing:-0.03em;
 }
 
@@ -406,26 +411,22 @@ select.input{ appearance:none; }
   margin-top: 10px;
 }
 
-/* ---------------------------
-   Steppers (Varer +/-) – FIX
---------------------------- */
+/* Steppers – pro look */
 .stockBtns{
   display:flex;
   flex-direction:column;
   align-items:flex-end;
   gap:8px;
-  min-width: 72px;
+  min-width: 80px;
 }
-
 .stockValue{
   font-size: 14px;
-  font-weight: 900;
+  font-weight: 980;
   color: var(--text);
-  opacity: .9;
+  opacity: .92;
   text-align:center;
-  width: 48px;
+  width: 56px;
 }
-
 .stockBtn{
   width: 44px;
   height: 34px;
@@ -434,32 +435,22 @@ select.input{ appearance:none; }
   border: 1px solid var(--stroke);
   background: rgba(255,255,255,.06);
   color: var(--text);
-  font-weight: 950;
+  font-weight: 980;
   cursor:pointer;
   transition: transform .06s ease, background .18s ease, border-color .18s ease;
 }
 .stockBtn:active{ transform: scale(.99); }
 .stockBtn:hover{ border-color: var(--stroke2); background: rgba(255,255,255,.08); }
-
 .stockBtn.minus{
-  border-color: rgba(255,90,95,.40);
+  border-color: rgba(255,90,95,.42);
   background: rgba(255,90,95,.08);
 }
 .stockBtn.plus{
-  border-color: rgba(53,208,127,.40);
-  background: rgba(53,208,127,.08);
+  border-color: rgba(47,208,125,.42);
+  background: rgba(47,208,125,.08);
 }
 
-/* small “details” text row */
-.miniRow{
-  display:flex;
-  flex-wrap:wrap;
-  gap:10px;
-  color: var(--muted);
-  font-size: 13px;
-}
-
-/* clickable list rows (for Kunder compact list) */
+/* clickable list rows */
 .rowItem{
   display:flex;
   align-items:center;
@@ -477,7 +468,7 @@ select.input{ appearance:none; }
   background: rgba(255,255,255,.06);
 }
 .rowItemTitle{
-  font-weight: 900;
+  font-weight: 950;
   font-size: 16px;
   letter-spacing:-0.01em;
   margin:0;
@@ -488,7 +479,7 @@ select.input{ appearance:none; }
   margin-top: 3px;
 }
 
-/* compact sections on Oversikt */
+/* Compact metrics (Oversikt) */
 .metricGrid{
   display:grid;
   grid-template-columns: repeat(3, minmax(0,1fr));
@@ -506,15 +497,15 @@ select.input{ appearance:none; }
 .metricTitle{
   color: var(--muted);
   font-size: 12.8px;
-  font-weight: 850;
+  font-weight: 950;
   margin:0 0 6px;
 }
 .metricValue{
-  font-weight: 950;
+  font-weight: 980;
   font-size: 18px;
   letter-spacing:-0.02em;
   margin:0;
 }
 
-/* reduce too-tall empty spacers */
+/* Small helper */
 .spacer14{ height: 10px; }
