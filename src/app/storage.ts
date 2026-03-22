@@ -222,7 +222,7 @@ function saleLinesFromLegacy(x: any): SaleLine[] {
 }
 
 function enrichLegacyFieldsFromLines(s: Sale): Sale {
-  if (s.lines.length > 0) {
+  if (Array.isArray(s.lines) && s.lines.length > 0) {
     const first = s.lines[0];
     return {
       ...s,
@@ -441,7 +441,6 @@ export function salePaidSum(s: Sale): number {
   if (Array.isArray(s.payments) && s.payments.length > 0) {
     return round2(s.payments.reduce((a, p) => a + num(p.amount, 0), 0));
   }
-  // fallback: “paid” uten payments
   return s.paid ? round2(num(s.total, 0)) : 0;
 }
 
@@ -486,7 +485,6 @@ export function getSales(): Sale[] {
       createdAt: str(x.createdAt, nowIso()),
     };
 
-    // hold gamle felter “levende” for eldre sider
     return enrichLegacyFieldsFromLines({
       ...sale,
       itemId: x.itemId ? String(x.itemId) : undefined,
@@ -528,7 +526,7 @@ export function addSale(input: AddSaleInput): void {
   const total = sumLineTotal(lines);
 
   const payments = normalizePayments(input.payments);
-  const paid = input.paid === undefined ? true : Boolean(input.paid);
+  const paidFlag = input.paid === undefined ? true : Boolean(input.paid);
 
   const next: Sale = enrichLegacyFieldsFromLines({
     id: uid("sale"),
@@ -540,7 +538,7 @@ export function addSale(input: AddSaleInput): void {
     customerName: input.customerName,
 
     payments: payments.length ? payments : [],
-    paid: payments.length ? round2(payments.reduce((a, p) => a + num(p.amount, 0), 0)) >= total : paid,
+    paid: payments.length ? round2(payments.reduce((a, p) => a + num(p.amount, 0), 0)) >= total : paidFlag,
 
     dueDate: input.dueDate,
     note: input.note,
@@ -556,15 +554,7 @@ function setSalePaidCore(saleId: string, paid: boolean): void {
   if (i < 0) return;
 
   const s = sales[i];
-
-  if (paid) {
-    // behold payments (om de finnes). Hvis ingen payments og "paid": true, lar vi den være paid=true uten payments.
-    sales[i] = { ...s, paid: true };
-  } else {
-    // markér ubetalt uten å slette historikk – men hvis du vil “hard reset”, kan du tømme payments her.
-    sales[i] = { ...s, paid: false };
-  }
-
+  sales[i] = { ...s, paid };
   setSales(sales);
 }
 
@@ -583,7 +573,7 @@ function addSalePaymentCore(saleId: string, amount: number, note?: string, dateI
   });
 
   const paidNow = saleRemaining({ ...s, payments, paid: s.paid }) <= 0;
-  sales[i] = { ...s, payments, paid: paidNow || s.paid }; // hvis du har markert den “betalt”, behold true
+  sales[i] = { ...s, payments, paid: paidNow || s.paid };
   setSales(sales);
 }
 
@@ -599,13 +589,51 @@ function removeSaleCore(saleId: string, restoreStock: boolean): void {
     for (const line of s.lines || []) {
       const idx = items.findIndex((it) => it.id === line.itemId);
       if (idx >= 0) {
-        items[idx] = { ...items[idx], stock: Math.trunc(num(items[idx].stock, 0)) + Math.trunc(num(line.qty, 0)), updatedAt: nowIso() };
+        items[idx] = {
+          ...items[idx],
+          stock: Math.trunc(num(items[idx].stock, 0)) + Math.trunc(num(line.qty, 0)),
+          updatedAt: nowIso(),
+        };
       }
     }
     setItems(items);
   }
 
   sales.splice(i, 1);
+  setSales(sales);
+}
+
+/** ✅ Brukes av Salg-redigering (patch) */
+export function updateSale(saleId: string, patch: Partial<Sale>): void {
+  const sales = getSales();
+  const i = sales.findIndex((x) => x.id === saleId);
+  if (i < 0) return;
+
+  const current = sales[i];
+
+  const next: Sale = enrichLegacyFieldsFromLines({
+    ...(current as any),
+    ...(patch as any),
+    id: current.id,
+    createdAt: current.createdAt,
+    lines: Array.isArray((patch as any).lines) ? normalizeLines((patch as any).lines) : current.lines,
+    payments: Array.isArray((patch as any).payments) ? normalizePayments((patch as any).payments) : current.payments,
+    total:
+      typeof (patch as any).total === "number"
+        ? round2(num((patch as any).total, current.total))
+        : Array.isArray((patch as any).lines)
+        ? sumLineTotal(normalizeLines((patch as any).lines))
+        : current.total,
+    paid: typeof (patch as any).paid === "boolean" ? Boolean((patch as any).paid) : current.paid,
+  });
+
+  // hvis payments finnes, la payments styre "paid" automatisk
+  if (Array.isArray(next.payments) && next.payments.length > 0) {
+    const paidSum = round2(next.payments.reduce((a, p) => a + num(p.amount, 0), 0));
+    next.paid = paidSum >= round2(num(next.total, 0));
+  }
+
+  sales[i] = next;
   setSales(sales);
 }
 
@@ -627,6 +655,8 @@ export function useSales() {
       sales,
       setPaid: (saleId: string, paid: boolean) => setSalePaidCore(saleId, paid),
       removeSale: (saleId: string, restoreStock: boolean) => removeSaleCore(saleId, restoreStock),
+      addPayment: (saleId: string, amount: number, note?: string, dateIso?: string) => addSalePaymentCore(saleId, amount, note, dateIso),
+      setAll: (all: Sale[]) => setSales(all), // ✅ nå finnes setAll igjen
     }),
     [sales]
   );
@@ -931,7 +961,6 @@ export async function importAllFromFile(file: File, mode: "replace" | "merge" = 
     setReceivables(nextReceivables);
   }
 
-  // saldo + theme
   setSaldo(round2(num((payload as any).saldo, 0)));
 
   if (payload.theme === "light" || payload.theme === "dark") {
@@ -956,8 +985,7 @@ export function clearAllData(): void {
    Backup helper: pick file (for onClick)
 ========================= */
 
-/** Åpner filvelger og importerer (replace som standard). */
-export function pickImportAllFile(mode: "replace" | "merge" = "replace"): void {
+function pickImportAllFileInternal(mode: "replace" | "merge" = "replace"): void {
   const input = document.createElement("input");
   input.type = "file";
   input.accept = "application/json";
@@ -969,8 +997,23 @@ export function pickImportAllFile(mode: "replace" | "merge" = "replace"): void {
   input.click();
 }
 
+/** ✅ onClick-vennlig (ingen args) */
+export function pickImportAllFileReplace(): void {
+  pickImportAllFileInternal("replace");
+}
+
+/** ✅ onClick-vennlig (ingen args) */
+export function pickImportAllFileMerge(): void {
+  pickImportAllFileInternal("merge");
+}
+
+/** Bakoverkompatibel: hvis noe importerer pickImportAllFile (uten args) */
+export function pickImportAllFile(): void {
+  pickImportAllFileInternal("replace");
+}
+
 /* =========================
-   Summary (valgfritt – men nyttig i Backup.tsx)
+   Summary (nyttig i Backup.tsx)
 ========================= */
 
 export type StorageSummary = {
@@ -993,7 +1036,6 @@ export function getStorageSummary(): StorageSummary {
   const unpaidSales = round2(sales.reduce((a, s) => a + Math.max(0, saleRemaining(s)), 0));
   const unpaidReceivables = round2(receivables.reduce((a, r) => a + Math.max(0, receivableRemaining(r)), 0));
 
-  // grov “size”
   const approxBytes =
     (localStorage.getItem(LS_KEYS.items)?.length || 0) +
     (localStorage.getItem(LS_KEYS.customers)?.length || 0) +
