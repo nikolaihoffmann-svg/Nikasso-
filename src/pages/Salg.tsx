@@ -109,14 +109,37 @@ function sumDraft(lines: DraftLine[]) {
   );
 }
 
-function fmtLineCompact(l: SaleLine) {
-  const lineSum = round2((l.qty || 0) * (l.unitPrice || 0));
-  return `${l.qty}× ${l.itemName} (${fmtKr(lineSum)})`;
+function saleLinesSafe(s: Sale): SaleLine[] {
+  const lines = Array.isArray((s as any).lines) ? ((s as any).lines as SaleLine[]) : [];
+  if (lines.length > 0) return lines;
+
+  const itemName = (s as any).itemName;
+  const itemId = (s as any).itemId;
+  const qty = (s as any).qty;
+  const unitPrice = (s as any).unitPrice;
+
+  if (itemName && itemId && Number(qty)) {
+    return [
+      {
+        id: "legacy",
+        itemId: String(itemId),
+        itemName: String(itemName),
+        qty: Number(qty) || 0,
+        unitPrice: Number(unitPrice) || 0,
+        unitCostAtSale: (s as any).unitCostAtSale,
+      } as any,
+    ];
+  }
+  return [];
 }
 
-function isPaid(s: Sale) {
-  const rem = Math.max(0, saleRemaining(s));
-  return rem <= 0 || Boolean(s.paid);
+function fmtLineShort(l: SaleLine) {
+  return `${l.qty}× ${l.itemName}`;
+}
+
+function fmtLineWithSum(l: SaleLine) {
+  const lineSum = round2((l.qty || 0) * (l.unitPrice || 0));
+  return `${l.qty}× ${l.itemName} (${fmtKr(lineSum)})`;
 }
 
 export function Salg() {
@@ -124,30 +147,34 @@ export function Salg() {
   const { customers } = useCustomers();
   const { sales, removeSale } = useSales();
 
+  // filters / paging
   const [onlyUnpaid, setOnlyUnpaid] = useState(false);
   const [visibleCount, setVisibleCount] = useState(5);
+  const [openId, setOpenId] = useState<string | null>(null);
 
-  // New sale modal
+  // new sale modal
   const [newOpen, setNewOpen] = useState(false);
   const [customerId, setCustomerId] = useState<string>("");
   const [paidFlag, setPaidFlag] = useState<boolean>(true);
   const [dueDate, setDueDate] = useState<string>("");
   const [note, setNote] = useState<string>("");
 
-  const [draftLines, setDraftLines] = useState<DraftLine[]>(() => [{ id: uid("dl"), itemId: "", qty: "1", unitPrice: "" }]);
+  const [draftLines, setDraftLines] = useState<DraftLine[]>(() => [
+    { id: uid("dl"), itemId: "", qty: "1", unitPrice: "" },
+  ]);
 
-  // Payment modal
+  // payment modal
   const [paySale, setPaySale] = useState<Sale | null>(null);
   const [payAmount, setPayAmount] = useState("0");
   const [payDate, setPayDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [payNote, setPayNote] = useState("");
 
-  // Delete modal
+  // delete choice modal
   const [delSale, setDelSale] = useState<Sale | null>(null);
 
   const selectedCustomer = useMemo(() => customers.find((c) => c.id === customerId) ?? null, [customers, customerId]);
 
-  // Preselect customer from Kunder-tab
+  // preselect customer from Kunder
   useEffect(() => {
     const draft = getSaleDraftCustomer();
     if (draft) {
@@ -156,12 +183,15 @@ export function Salg() {
     }
   }, []);
 
-  // Keep list compact: reset "show more" when filter changes
+  // if filter changes, reset paging
   useEffect(() => {
     setVisibleCount(5);
+    setOpenId(null);
   }, [onlyUnpaid]);
 
-  const outstandingTotal = useMemo(() => round2(sales.reduce((a, s) => a + Math.max(0, saleRemaining(s)), 0)), [sales]);
+  const outstandingTotal = useMemo(() => {
+    return round2(sales.reduce((a, s) => a + Math.max(0, saleRemaining(s)), 0));
+  }, [sales]);
 
   const filteredSales = useMemo(() => {
     const base = onlyUnpaid ? sales.filter((s) => Math.max(0, saleRemaining(s)) > 0) : sales;
@@ -180,9 +210,14 @@ export function Salg() {
     setNewOpen(true);
   }
 
+  function closeNewSale() {
+    setNewOpen(false);
+  }
+
   function addDraftLine() {
     setDraftLines((prev) => [...prev, { id: uid("dl"), itemId: "", qty: "1", unitPrice: "" }]);
   }
+
   function removeDraftLine(id: string) {
     setDraftLines((prev) => (prev.length <= 1 ? prev : prev.filter((x) => x.id !== id)));
   }
@@ -193,7 +228,7 @@ export function Salg() {
         if (l.id !== id) return l;
         const next = { ...l, ...patch };
 
-        // Auto price from item if empty
+        // autopopulate price when selecting item (only if empty)
         if (patch.itemId) {
           const it = items.find((x) => x.id === patch.itemId);
           if (it && String(next.unitPrice).trim() === "") next.unitPrice = String(it.price ?? 0);
@@ -214,7 +249,6 @@ export function Salg() {
       if (q <= 0) continue;
 
       const p = round2(toNum(dl.unitPrice || String(it.price ?? 0)));
-
       clean.push({
         id: uid("line"),
         itemId: it.id,
@@ -227,7 +261,7 @@ export function Salg() {
 
     if (clean.length === 0) return alert("Legg til minst én varelinje med vare + antall.");
 
-    // Update stock locally
+    // reduce stock
     const itemsNow = getItems();
     for (const line of clean) {
       const idx = itemsNow.findIndex((x) => x.id === line.itemId);
@@ -246,7 +280,7 @@ export function Salg() {
       note: note.trim() ? note.trim() : undefined,
     });
 
-    // Low stock warning
+    // low stock alert
     const low: string[] = [];
     for (const line of clean) {
       const it = itemsNow.find((x) => x.id === line.itemId);
@@ -257,6 +291,10 @@ export function Salg() {
     if (low.length) alert(`⚠️ Lav lagerbeholdning:\n\n${low.join("\n")}`);
 
     setNewOpen(false);
+  }
+
+  function toggleOpen(id: string) {
+    setOpenId((cur) => (cur === id ? null : id));
   }
 
   function openPayment(s: Sale) {
@@ -275,31 +313,31 @@ export function Salg() {
     setPaySale(null);
   }
 
-  function togglePaid(s: Sale) {
-    setSalePaid(s.id, !Boolean(s.paid));
-  }
-
-  function showMore() {
-    setVisibleCount((n) => Math.min(filteredSales.length, n + 10));
+  function askDelete(s: Sale) {
+    setDelSale(s);
   }
 
   function doDelete(restoreStock: boolean) {
     if (!delSale) return;
     removeSale(delSale.id, restoreStock);
     setDelSale(null);
+    setOpenId(null);
   }
 
-  const sortedCustomers = useMemo(() => {
-    const copy = [...customers];
-    copy.sort((a, b) => (a.name || "").localeCompare(b.name || "", "nb-NO", { sensitivity: "base" }));
-    return copy;
-  }, [customers]);
+  function togglePaid(s: Sale) {
+    const next = !Boolean(s.paid);
+    setSalePaid(s.id, next);
+  }
+
+  function showMore() {
+    setVisibleCount((n) => Math.min(filteredSales.length, n + 10));
+  }
 
   return (
     <div className="card">
       <div className="cardTitle">Salg</div>
       <div className="cardSub">
-        Utestående salg totalt: <b>{fmtKr(outstandingTotal)}</b>
+        Utestående totalt: <b className="dangerText">{fmtKr(outstandingTotal)}</b>
       </div>
 
       <div className="btnRow" style={{ justifyContent: "space-between" }}>
@@ -312,7 +350,7 @@ export function Salg() {
         </button>
       </div>
 
-      <div className="card" style={{ marginTop: 14 }}>
+      <div className="card" style={{ marginTop: 12 }}>
         <div className="cardTitle">Liste</div>
         <div className="cardSub">
           Viser <b>{Math.min(visibleCount, filteredSales.length)}</b> av <b>{filteredSales.length}</b>
@@ -320,72 +358,119 @@ export function Salg() {
 
         <div className="list">
           {visibleSales.map((s) => {
-            const paidSum = salePaidSum(s);
             const rem = Math.max(0, saleRemaining(s));
-            const paid = isPaid(s);
+            const paidOk = rem <= 0 || s.paid;
 
-            const lines = Array.isArray(s.lines) ? s.lines : [];
-            const preview = lines.slice(0, 3).map(fmtLineCompact);
+            const lines = saleLinesSafe(s);
+            const shortLines = lines.slice(0, 2).map(fmtLineShort).join(", ");
+            const more = lines.length > 2 ? ` +${lines.length - 2}` : "";
+            const bought = (shortLines ? `${shortLines}${more}` : "Salg");
+
+            const isOpen = openId === s.id;
 
             return (
-              <div key={s.id} className={rem > 0 ? "item low" : "item"}>
-                <div className="itemTop">
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                      <p className="itemTitle" style={{ marginBottom: 0 }}>
-                        {s.customerName ? s.customerName : "Anonym"}
-                      </p>
-                      <span className={`chip ${paid ? "chipPaid" : "chipUnpaid"}`}>
-                        {paid ? "Betalt" : "Utestående"}
-                      </span>
+              <div key={s.id} className="item">
+                {/* Compact row */}
+                <div
+                  className="rowItem"
+                  onClick={() => toggleOpen(s.id)}
+                  role="button"
+                  tabIndex={0}
+                  style={{ cursor: "pointer" }}
+                >
+                  <div>
+                    <p className="rowItemTitle">{s.customerName ? s.customerName : "Anonym"}</p>
+                    <div className="rowItemSub">
+                      <b>{fmtKr(s.total)}</b>{" "}
+                      • <span className={paidOk ? "successText" : "dangerText"}>{paidOk ? "Betalt" : "Ubetalt"}</span>{" "}
+                      • {bought}
+                    </div>
+                  </div>
+
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    {paidOk ? <span className="badge success">Betalt</span> : <span className="badge danger">Ubetalt</span>}
+                    <span className="badge">{isOpen ? "−" : "+"}</span>
+                  </div>
+                </div>
+
+                {/* Expanded details */}
+                {isOpen ? (
+                  <div style={{ marginTop: 10 }}>
+                    <div className="itemMeta">
+                      Dato: <b>{new Date(s.createdAt).toLocaleString("nb-NO")}</b>
+                      {s.dueDate ? (
+                        <>
+                          {" "}
+                          • Forfall: <b>{s.dueDate}</b>
+                        </>
+                      ) : null}
                     </div>
 
-                    <div className="itemMeta" style={{ marginTop: 6 }}>
-                      Total: <b>{fmtKr(s.total)}</b> • Innbetalt: <b>{fmtKr(paidSum)}</b> •{" "}
-                      <span style={{ color: paid ? "var(--good)" : "var(--bad)", fontWeight: 900 }}>
-                        Utestående: {fmtKr(rem)}
-                      </span>
-                      {" • "}
-                      {new Date(s.createdAt).toLocaleString("nb-NO")}
-                    </div>
-
-                    {preview.length > 0 ? (
+                    {lines.length > 0 ? (
                       <div className="itemMeta" style={{ marginTop: 8 }}>
-                        <b>Kjøpt:</b>
-                        <div style={{ marginTop: 4, opacity: 0.95 }}>
-                          {preview.map((t, i) => (
-                            <div key={i}>• {t}</div>
+                        <b>Varer:</b>
+                        <div style={{ marginTop: 6 }}>
+                          {lines.slice(0, 8).map((l) => (
+                            <div key={l.id}>• {fmtLineWithSum(l)}</div>
                           ))}
-                          {lines.length > 3 ? (
-                            <div style={{ marginTop: 2, opacity: 0.9 }}>… +{lines.length - 3} til</div>
-                          ) : null}
+                          {lines.length > 8 ? <div style={{ opacity: 0.85, marginTop: 4 }}>… +{lines.length - 8} til</div> : null}
                         </div>
                       </div>
                     ) : null}
+
+                    <div className="itemMeta" style={{ marginTop: 10 }}>
+                      Innbetalt:{" "}
+                      <b className={paidOk ? "successText" : ""}>{fmtKr(salePaidSum(s))}</b>{" "}
+                      • Utestående:{" "}
+                      <b className={rem > 0 ? "dangerText" : "successText"}>{fmtKr(rem)}</b>
+                    </div>
 
                     {s.note ? (
                       <div className="itemMeta" style={{ marginTop: 8 }}>
                         Notat: <b>{s.note}</b>
                       </div>
                     ) : null}
+
+                    {Array.isArray(s.payments) && s.payments.length > 0 ? (
+                      <div className="itemMeta" style={{ marginTop: 10 }}>
+                        <b>Innbetalinger:</b>
+                        <div style={{ marginTop: 6 }}>
+                          {s.payments
+                            .slice()
+                            .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""))
+                            .slice(0, 6)
+                            .map((p) => (
+                              <div key={p.id}>
+                                • {new Date(p.createdAt).toLocaleDateString("nb-NO")} – <b>{fmtKr(p.amount)}</b>
+                                {p.note ? <> ({p.note})</> : null}
+                              </div>
+                            ))}
+                          {s.payments.length > 6 ? <div style={{ opacity: 0.85, marginTop: 4 }}>… +{s.payments.length - 6} til</div> : null}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    <div className="btnRow" style={{ marginTop: 12 }}>
+                      {rem > 0 ? (
+                        <button className="btn btnPrimary" type="button" onClick={() => openPayment(s)}>
+                          Registrer innbetaling
+                        </button>
+                      ) : (
+                        <button className="btn" type="button" disabled>
+                          Betalt
+                        </button>
+                      )}
+
+                      <button className="btn" type="button" onClick={() => togglePaid(s)}>
+                        {s.paid ? "Marker ubetalt" : "Marker betalt"}
+                      </button>
+
+                      <button className="btn btnDanger" type="button" onClick={() => askDelete(s)}>
+                        Slett
+                      </button>
+                    </div>
                   </div>
-                </div>
-
-                <div className="itemActions">
-                  {rem > 0 ? (
-                    <button className="btn btnPrimary" type="button" onClick={() => openPayment(s)}>
-                      Registrer innbetaling
-                    </button>
-                  ) : null}
-
-                  <button className="btn" type="button" onClick={() => togglePaid(s)}>
-                    {s.paid ? "Marker ubetalt" : "Marker betalt"}
-                  </button>
-
-                  <button className="btn btnDanger" type="button" onClick={() => setDelSale(s)}>
-                    Slett
-                  </button>
-                </div>
+                ) : null}
               </div>
             );
           })}
@@ -403,99 +488,103 @@ export function Salg() {
       </div>
 
       {/* NEW SALE MODAL */}
-      <Modal open={newOpen} title="Nytt salg" onClose={() => setNewOpen(false)}>
-        <div className="saleModal">
-          <div className="fieldGrid" style={{ marginTop: 0 }}>
-            <div>
-              <label className="label">Kunde (valgfritt)</label>
-              <select className="input" value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
-                <option value="">Ingen / anonymt salg…</option>
-                {sortedCustomers.map((c) => (
+      <Modal open={newOpen} title="Nytt salg" onClose={closeNewSale}>
+        <div className="fieldGrid" style={{ marginTop: 0 }}>
+          <div>
+            <label className="label">Kunde (valgfritt)</label>
+            <select className="input" value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
+              <option value="">Ingen / anonymt salg…</option>
+              {customers
+                .slice()
+                .sort((a, b) => (a.name || "").localeCompare(b.name || "", "nb-NO", { sensitivity: "base" }))
+                .map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name}
                   </option>
                 ))}
+            </select>
+          </div>
+
+          <div className="row3">
+            <div>
+              <label className="label">Status</label>
+              <select className="input" value={paidFlag ? "paid" : "unpaid"} onChange={(e) => setPaidFlag(e.target.value === "paid")}>
+                <option value="paid">Betalt</option>
+                <option value="unpaid">Ubetalt</option>
               </select>
             </div>
 
-            <div className="row3">
-              <div>
-                <label className="label">Betalt?</label>
-                <select
-                  className="input"
-                  value={paidFlag ? "paid" : "unpaid"}
-                  onChange={(e) => setPaidFlag(e.target.value === "paid")}
-                >
-                  <option value="paid">Betalt</option>
-                  <option value="unpaid">Ubetalt</option>
-                </select>
-              </div>
+            <div>
+              <label className="label">Forfall</label>
+              <input className="input" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+            </div>
 
-              <div>
-                <label className="label">Forfall (valgfritt)</label>
-                <input className="input" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
-              </div>
-
-              <div>
-                <label className="label">Notat (valgfritt)</label>
-                <input className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Fritekst" />
-              </div>
+            <div>
+              <label className="label">Notat</label>
+              <input className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Valgfritt" />
             </div>
           </div>
 
-          <div style={{ height: 12 }} />
+          <div className="card" style={{ marginTop: 10 }}>
+            <div className="cardTitle">Varelinjer</div>
+            <div className="cardSub">Legg til én eller flere varer før du lagrer.</div>
 
-          <div className="saleLines">
-            {draftLines.map((dl, idx) => {
-              const it = items.find((x) => x.id === dl.itemId) ?? null;
-              const lineSum = round2(toInt(dl.qty) * toNum(dl.unitPrice || (it ? String(it.price ?? 0) : "0")));
+            <div className="list" style={{ marginTop: 0 }}>
+              {draftLines.map((dl, idx) => {
+                const it = items.find((x) => x.id === dl.itemId) ?? null;
+                const lineSum = round2(toInt(dl.qty) * toNum(dl.unitPrice || (it ? String(it.price ?? 0) : "0")));
 
-              return (
-                <div key={dl.id} className="saleLineCard">
-                  <div className="saleLineHeader">
-                    <div className="saleLineTitle">Varelinje {idx + 1}</div>
-                    <button className="btn" type="button" onClick={() => removeDraftLine(dl.id)} disabled={draftLines.length <= 1}>
-                      Fjern
-                    </button>
+                return (
+                  <div key={dl.id} className="item">
+                    <div className="itemTop">
+                      <div>
+                        <p className="itemTitle" style={{ fontSize: 16, marginBottom: 2 }}>Linje {idx + 1}</p>
+                        <div className="itemMeta">{it ? it.name : "Velg vare"}</div>
+                      </div>
+
+                      <button className="btn" type="button" onClick={() => removeDraftLine(dl.id)} disabled={draftLines.length <= 1}>
+                        Fjern
+                      </button>
+                    </div>
+
+                    <div className="row3" style={{ marginTop: 10 }}>
+                      <div style={{ gridColumn: "1 / -1" }}>
+                        <label className="label">Vare</label>
+                        <select className="input" value={dl.itemId} onChange={(e) => updateLine(dl.id, { itemId: e.target.value })}>
+                          <option value="">Velg vare…</option>
+                          {items.map((i) => (
+                            <option key={i.id} value={i.id}>
+                              {i.name} (lager: {i.stock})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="label">Antall</label>
+                        <input className="input" inputMode="numeric" value={dl.qty} onChange={(e) => updateLine(dl.id, { qty: e.target.value })} />
+                      </div>
+
+                      <div>
+                        <label className="label">Pris</label>
+                        <input
+                          className="input"
+                          inputMode="decimal"
+                          value={dl.unitPrice}
+                          onChange={(e) => updateLine(dl.id, { unitPrice: e.target.value })}
+                          placeholder={it ? String(it.price ?? 0) : "0"}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="label">Linjesum</label>
+                        <input className="input" value={fmtKr(lineSum)} readOnly />
+                      </div>
+                    </div>
                   </div>
-
-                  <div className="saleLineGrid">
-                    <div className="saleLineColWide">
-                      <label className="label">Vare</label>
-                      <select className="input" value={dl.itemId} onChange={(e) => updateLine(dl.id, { itemId: e.target.value })}>
-                        <option value="">Velg vare…</option>
-                        {items.map((i) => (
-                          <option key={i.id} value={i.id}>
-                            {i.name} (lager: {i.stock})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div className="saleLineCol">
-                      <label className="label">Antall</label>
-                      <input className="input" inputMode="numeric" value={dl.qty} onChange={(e) => updateLine(dl.id, { qty: e.target.value })} />
-                    </div>
-
-                    <div className="saleLineCol">
-                      <label className="label">Pris</label>
-                      <input
-                        className="input"
-                        inputMode="decimal"
-                        value={dl.unitPrice}
-                        onChange={(e) => updateLine(dl.id, { unitPrice: e.target.value })}
-                        placeholder={it ? String(it.price ?? 0) : "0"}
-                      />
-                    </div>
-
-                    <div className="saleLineCol">
-                      <label className="label">Sum</label>
-                      <input className="input" value={fmtKr(lineSum)} readOnly />
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
 
             <div className="btnRow" style={{ marginTop: 10 }}>
               <button className="btn" type="button" onClick={addDraftLine}>
@@ -504,19 +593,17 @@ export function Salg() {
             </div>
           </div>
 
-          <div className="saleModalSticky">
-            <div className="saleModalTotal">
-              Total: <b>{fmtKr(draftTotal)}</b>
-            </div>
+          <div className="itemMeta" style={{ marginTop: 6 }}>
+            Total: <b>{fmtKr(draftTotal)}</b>
+          </div>
 
-            <div className="btnRow" style={{ marginTop: 0, justifyContent: "flex-end" }}>
-              <button className="btn" type="button" onClick={() => setNewOpen(false)}>
-                Avbryt
-              </button>
-              <button className="btn btnPrimary" type="button" onClick={saveNewSale}>
-                Lagre salg
-              </button>
-            </div>
+          <div className="btnRow" style={{ justifyContent: "flex-end" }}>
+            <button className="btn" type="button" onClick={closeNewSale}>
+              Avbryt
+            </button>
+            <button className="btn btnPrimary" type="button" onClick={saveNewSale}>
+              Lagre salg
+            </button>
           </div>
         </div>
       </Modal>
@@ -527,7 +614,7 @@ export function Salg() {
           <div className="fieldGrid" style={{ marginTop: 0 }}>
             <div className="itemMeta" style={{ marginTop: 0 }}>
               <b>{paySale.customerName ? paySale.customerName : "Anonym"}</b> • Utestående nå:{" "}
-              <b style={{ color: "var(--bad)" }}>{fmtKr(Math.max(0, saleRemaining(paySale)))}</b>
+              <b className="dangerText">{fmtKr(Math.max(0, saleRemaining(paySale)))}</b>
             </div>
 
             <div className="row3">
@@ -536,7 +623,7 @@ export function Salg() {
                 <input className="input" type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} />
               </div>
               <div>
-                <label className="label">Beløp (kr)</label>
+                <label className="label">Beløp</label>
                 <input className="input" inputMode="decimal" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} />
               </div>
               <div>
@@ -557,7 +644,7 @@ export function Salg() {
         ) : null}
       </Modal>
 
-      {/* DELETE MODAL */}
+      {/* DELETE CHOICE MODAL */}
       <ChoiceModal
         open={!!delSale}
         title="Slette salg?"
