@@ -77,6 +77,9 @@ export function Oversikt() {
   const [saldoOpen, setSaldoOpen] = useState(false);
   const [saldoInput, setSaldoInput] = useState(String(saldo));
 
+  // “Vis mer” toggle
+  const [showMore, setShowMore] = useState(false);
+
   const byItemId = useMemo(() => {
     const items = getItems();
     const m = new Map<string, { cost: number; name: string }>();
@@ -89,7 +92,6 @@ export function Oversikt() {
   const fromMonth = useMemo(() => startOfMonth(new Date()), []);
 
   function calcProfitForSale(s: any) {
-    // summer profitt per linje hvis mulig
     const lines = saleLinesSafe(s as Sale);
     if (lines.length > 0) {
       return lines.reduce((acc, l) => {
@@ -102,7 +104,6 @@ export function Oversikt() {
       }, 0);
     }
 
-    // fallback (eldre)
     const unitCost =
       Number.isFinite(Number(s.unitCostAtSale)) ? Number(s.unitCostAtSale) : byItemId.get(s.itemId)?.cost ?? 0;
     const qty = Number(s.qty ?? 0);
@@ -141,30 +142,6 @@ export function Oversikt() {
     };
   }, [sales, receivables, saldo, from7, from30, fromMonth, byItemId]);
 
-  const perCustomer30 = useMemo(() => {
-    const map = new Map<string, { name: string; revenue: number; profit: number; unpaid: number; count: number }>();
-    const list = sales.filter((s) => isAfter(s.createdAt, from30));
-
-    for (const s of list) {
-      const key = s.customerId ? `c:${s.customerId}` : "anon";
-      const name =
-        s.customerName ||
-        (s.customerId ? customers.find((c) => c.id === s.customerId)?.name : null) ||
-        "Anonym";
-
-      const prev = map.get(key) || { name, revenue: 0, profit: 0, unpaid: 0, count: 0 };
-      prev.revenue += Number(s.total) || 0;
-      prev.profit += calcProfitForSale(s);
-      prev.count += 1;
-      prev.unpaid += Math.max(0, saleRemaining(s));
-      map.set(key, prev);
-    }
-
-    const arr = Array.from(map.values());
-    arr.sort((a, b) => b.revenue - a.revenue);
-    return arr;
-  }, [sales, customers, from30, byItemId]);
-
   const mostSold30 = useMemo(() => {
     const map = new Map<string, { itemId: string; name: string; qty: number; revenue: number; profit: number }>();
     const list = sales.filter((s) => isAfter(s.createdAt, from30));
@@ -173,6 +150,7 @@ export function Oversikt() {
       const lines = saleLinesSafe(s);
       for (const l of lines) {
         const key = l.itemId || l.itemName;
+
         const unitCost = Number.isFinite(Number(l.unitCostAtSale))
           ? Number(l.unitCostAtSale)
           : byItemId.get(l.itemId)?.cost ?? 0;
@@ -195,6 +173,30 @@ export function Oversikt() {
     return arr.slice(0, 5);
   }, [sales, from30, byItemId]);
 
+  const perCustomer30 = useMemo(() => {
+    const map = new Map<string, { name: string; revenue: number; profit: number; unpaid: number; count: number }>();
+    const list = sales.filter((s) => isAfter(s.createdAt, from30));
+
+    for (const s of list) {
+      const key = s.customerId ? `c:${s.customerId}` : "anon";
+      const name =
+        s.customerName ||
+        (s.customerId ? customers.find((c) => c.id === s.customerId)?.name : null) ||
+        "Anonym";
+
+      const prev = map.get(key) || { name, revenue: 0, profit: 0, unpaid: 0, count: 0 };
+      prev.revenue += Number(s.total) || 0;
+      prev.profit += calcProfitForSale(s);
+      prev.count += 1;
+      prev.unpaid += Math.max(0, saleRemaining(s));
+      map.set(key, prev);
+    }
+
+    const arr = Array.from(map.values());
+    arr.sort((a, b) => b.revenue - a.revenue);
+    return arr.slice(0, 10); // ✅ kun topp 10 for å spare scroll
+  }, [sales, customers, from30, byItemId]);
+
   function openSaldoModal() {
     setSaldoInput(String(saldo));
     setSaldoOpen(true);
@@ -209,105 +211,111 @@ export function Oversikt() {
   return (
     <div className="card">
       <div className="cardTitle">Oversikt</div>
-      <div className="cardSub">Saldo + utestående (automatisk).</div>
+      <div className="cardSub">Kort dashboard. Detaljer ligger under “Vis mer”.</div>
 
-      {/* Penger */}
-      <div className="card" style={{ marginTop: 0 }}>
-        <div className="cardTitle" style={{ fontSize: 18, marginBottom: 8 }}>
-          Penger
-        </div>
+      {/* Penger (kompakt) */}
+      <div className="item">
+        <div className="itemTitle">Penger</div>
+        <div className="moneyBig">{fmtKr(saldo)}</div>
 
-        <div style={{ fontSize: 44, fontWeight: 850, letterSpacing: "-0.02em" }}>{fmtKr(saldo)}</div>
-
-        <div className="itemMeta" style={{ marginTop: 10 }}>
-          Utestående salg: <b>{fmtKr(totals.unpaidSalesTotal)}</b>
-          <br />
+        <div className="itemMeta" style={{ marginTop: 6 }}>
+          Utestående salg: <b>{fmtKr(totals.unpaidSalesTotal)}</b>{" "}
+          <span style={{ opacity: 0.7 }}>•</span>{" "}
           Gjeld til deg: <b>{fmtKr(totals.unpaidReceivablesTotal)}</b>
-        </div>
-
-        <div className="itemMeta" style={{ marginTop: 10, opacity: 0.95 }}>
+          <br />
           Total når alt er betalt: <b>{fmtKr(totals.grand)}</b>
         </div>
 
-        <div className="btnRow" style={{ marginTop: 12 }}>
+        <div className="btnRow" style={{ marginTop: 10 }}>
           <button className="btn btnPrimary" type="button" onClick={openSaldoModal}>
             Oppdater saldo
+          </button>
+          <button className="btn" type="button" onClick={() => setShowMore((v) => !v)}>
+            {showMore ? "Skjul detaljer" : "Vis mer"}
           </button>
         </div>
       </div>
 
-      {/* Perioder */}
+      {/* Perioder som mini-rows (ikke store kort) */}
       <div className="list">
         <div className="item">
-          <p className="itemTitle">Siste 7 dager</p>
+          <div className="itemTitle">Siste 7 dager</div>
           <div className="itemMeta">
-            Solgt: <b>{fmtKr(totals.revenue7)}</b> • Profitt: <b>{fmtKr(totals.profit7)}</b> • Salg: <b>{totals.count7}</b>
+            Solgt <b>{fmtKr(totals.revenue7)}</b> • Profitt <b>{fmtKr(totals.profit7)}</b> • Salg <b>{totals.count7}</b>
           </div>
         </div>
 
         <div className="item">
-          <p className="itemTitle">Siste 30 dager</p>
+          <div className="itemTitle">Siste 30 dager</div>
           <div className="itemMeta">
-            Solgt: <b>{fmtKr(totals.revenue30)}</b> • Profitt: <b>{fmtKr(totals.profit30)}</b> • Salg: <b>{totals.count30}</b>
+            Solgt <b>{fmtKr(totals.revenue30)}</b> • Profitt <b>{fmtKr(totals.profit30)}</b> • Salg <b>{totals.count30}</b>
           </div>
         </div>
 
         <div className="item">
-          <p className="itemTitle">Denne måneden</p>
+          <div className="itemTitle">Denne måneden</div>
           <div className="itemMeta">
-            Solgt: <b>{fmtKr(totals.revenueM)}</b> • Profitt: <b>{fmtKr(totals.profitM)}</b> • Salg: <b>{totals.countM}</b>
+            Solgt <b>{fmtKr(totals.revenueM)}</b> • Profitt <b>{fmtKr(totals.profitM)}</b> • Salg <b>{totals.countM}</b>
           </div>
         </div>
       </div>
 
-      {/* Mest solgt */}
-      <div className="card">
-        <div className="cardTitle">Mest solgt (30 dager)</div>
-        <div className="cardSub">Topp 5 basert på antall solgte enheter (med omsetning/profitt).</div>
+      {/* Detaljer skjult bak “Vis mer” */}
+      {showMore ? (
+        <>
+          <div className="card">
+            <div className="cardTitle">Mest solgt (30 dager)</div>
+            <div className="cardSub">Topp 5 basert på antall (med omsetning/profitt).</div>
 
-        <div className="list">
-          {mostSold30.length === 0 ? (
-            <div className="item">Ingen salg siste 30 dager.</div>
-          ) : (
-            mostSold30.map((x) => (
-              <div key={x.itemId || x.name} className="item">
-                <p className="itemTitle">{x.name}</p>
-                <div className="itemMeta">
-                  Antall: <b>{x.qty}</b> • Solgt: <b>{fmtKr(x.revenue)}</b> • Profitt: <b>{fmtKr(x.profit)}</b>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
+            <div className="list">
+              {mostSold30.length === 0 ? (
+                <div className="item">Ingen salg siste 30 dager.</div>
+              ) : (
+                mostSold30.map((x) => (
+                  <div key={x.itemId || x.name} className="item">
+                    <div className="itemTitle">{x.name}</div>
+                    <div className="itemMeta">
+                      Antall <b>{x.qty}</b> • Solgt <b>{fmtKr(x.revenue)}</b> • Profitt <b>{fmtKr(x.profit)}</b>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
 
-      {/* Salg pr kunde */}
-      <div className="card">
-        <div className="cardTitle">Salg pr kunde (30 dager)</div>
-        <div className="cardSub">Solgt, profitt og utestående pr kunde.</div>
+          <div className="card">
+            <div className="cardTitle">Salg pr kunde (30 dager)</div>
+            <div className="cardSub">Topp 10 (for å unngå scroll).</div>
 
-        <div className="list">
-          {perCustomer30.length === 0 ? (
-            <div className="item">Ingen salg siste 30 dager.</div>
-          ) : (
-            perCustomer30.slice(0, 20).map((c) => (
-              <div key={c.name} className="item">
-                <p className="itemTitle">{c.name}</p>
-                <div className="itemMeta">
-                  Solgt: <b>{fmtKr(c.revenue)}</b> • Profitt: <b>{fmtKr(c.profit)}</b> • Salg: <b>{c.count}</b> • Utestående:{" "}
-                  <b>{fmtKr(c.unpaid)}</b>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
+            <div className="list">
+              {perCustomer30.length === 0 ? (
+                <div className="item">Ingen salg siste 30 dager.</div>
+              ) : (
+                perCustomer30.map((c) => (
+                  <div key={c.name} className="item">
+                    <div className="itemTitle">{c.name}</div>
+                    <div className="itemMeta">
+                      Solgt <b>{fmtKr(c.revenue)}</b> • Profitt <b>{fmtKr(c.profit)}</b> • Salg <b>{c.count}</b> • Utestående{" "}
+                      <b>{fmtKr(c.unpaid)}</b>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </>
+      ) : null}
 
       <Modal open={saldoOpen} title="Oppdater saldo" onClose={() => setSaldoOpen(false)}>
         <div className="fieldGrid" style={{ marginTop: 0 }}>
           <div>
             <label className="label">Saldo (kr)</label>
-            <input className="input" inputMode="decimal" value={saldoInput} onChange={(e) => setSaldoInput(e.target.value)} />
+            <input
+              className="input"
+              inputMode="decimal"
+              value={saldoInput}
+              onChange={(e) => setSaldoInput(e.target.value)}
+            />
           </div>
 
           <div className="btnRow">
@@ -320,7 +328,7 @@ export function Oversikt() {
           </div>
 
           <div className="itemMeta" style={{ marginTop: 6 }}>
-            Tips: Saldo endres bare manuelt. Utestående oppdateres automatisk av salg/gjeld og innbetalinger.
+            Saldo endres manuelt. Utestående oppdateres automatisk.
           </div>
         </div>
       </Modal>
