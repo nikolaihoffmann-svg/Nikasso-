@@ -26,6 +26,30 @@ function isAfter(dateIso: string, from: Date) {
   return Number.isFinite(d.getTime()) && d.getTime() >= from.getTime();
 }
 
+function parseDateOnly(dateStr?: string) {
+  // yyyy-mm-dd => lokal midt på dagen for stabil visning
+  if (!dateStr) return null;
+  const d = new Date(`${dateStr}T12:00:00`);
+  return Number.isFinite(d.getTime()) ? d : null;
+}
+
+function daysUntil(dueDate?: string) {
+  const d = parseDateOnly(dueDate);
+  if (!d) return null;
+  const now = new Date();
+  const diff = d.getTime() - now.getTime();
+  return Math.ceil(diff / (1000 * 60 * 60 * 24));
+}
+
+function dueLabel(dueDate?: string) {
+  const n = daysUntil(dueDate);
+  if (n === null) return null;
+  if (n < 0) return { kind: "overdue" as const, text: `Forfalt (${Math.abs(n)}d)` };
+  if (n === 0) return { kind: "soon" as const, text: "Forfaller i dag" };
+  if (n <= 7) return { kind: "soon" as const, text: `Forfaller om ${n}d` };
+  return { kind: "ok" as const, text: `Forfaller om ${n}d` };
+}
+
 function Modal(props: { open: boolean; title: string; children: React.ReactNode; onClose: () => void }) {
   if (!props.open) return null;
   return (
@@ -62,18 +86,18 @@ export function Innkjop() {
   const { purchases } = usePurchases();
   const { payables, addPayment } = usePayables();
 
+  // NEW purchase modal
   const [open, setOpen] = useState(false);
   const [supplierName, setSupplierName] = useState("");
   const [paid, setPaid] = useState(true);
   const [dueDate, setDueDate] = useState("");
   const [note, setNote] = useState("");
   const [costMode, setCostMode] = useState<"weighted" | "set_latest" | "keep">("weighted");
-
   const [lines, setLines] = useState<DraftLine[]>([{ id: uid("dl"), itemId: "", qty: "1", unitCost: "" }]);
 
   const [showCount, setShowCount] = useState(5);
 
-  // Pay modal
+  // Pay payable modal
   const [payId, setPayId] = useState<string | null>(null);
   const [payAmount, setPayAmount] = useState("0");
   const [payDate, setPayDate] = useState<string>(new Date().toISOString().slice(0, 10));
@@ -87,11 +111,33 @@ export function Innkjop() {
     [purchases, from30]
   );
 
-  const unpaidPayables = useMemo(() => {
-    return round2(payables.reduce((a, p) => a + Math.max(0, payableRemaining(p)), 0));
+  const unpaidPayables = useMemo(
+    () => round2(payables.reduce((a, p) => a + Math.max(0, payableRemaining(p)), 0)),
+    [payables]
+  );
+
+  const dueSoon = useMemo(() => {
+    const list = payables
+      .map((p) => ({ p, remain: Math.max(0, payableRemaining(p)), label: dueLabel(p.dueDate) }))
+      .filter((x) => x.remain > 0)
+      .sort((a, b) => {
+        const ad = parseDateOnly(a.p.dueDate)?.getTime() ?? Number.POSITIVE_INFINITY;
+        const bd = parseDateOnly(b.p.dueDate)?.getTime() ?? Number.POSITIVE_INFINITY;
+        return ad - bd;
+      });
+
+    const overdue = list.filter((x) => x.label?.kind === "overdue");
+    const soon = list.filter((x) => x.label?.kind === "soon");
+
+    return {
+      overdue: overdue.slice(0, 5),
+      soon: soon.slice(0, 5),
+      allUnpaid: list.slice(0, 12),
+    };
   }, [payables]);
 
   const draftTotal = useMemo(() => sumDraft(lines, items), [lines, items]);
+  const visiblePurchases = useMemo(() => purchases.slice(0, showCount), [purchases, showCount]);
 
   function addLine() {
     setLines((prev) => [...prev, { id: uid("dl"), itemId: "", qty: "1", unitCost: "" }]);
@@ -149,8 +195,6 @@ export function Innkjop() {
     setOpen(false);
   }
 
-  const visible = useMemo(() => purchases.slice(0, showCount), [purchases, showCount]);
-
   function openPay(payableId: string) {
     const p = payables.find((x) => x.id === payableId);
     if (!p) return;
@@ -173,7 +217,7 @@ export function Innkjop() {
     <div className="card">
       <div className="cardTitle">Innkjøp</div>
       <div className="cardSub">
-        Her registrerer du penger brukt + (valgfritt) utestående å betale hvis du ikke betaler med en gang.
+        Registrer penger brukt + (valgfritt) utestående å betale hvis du ikke betaler med en gang.
       </div>
 
       <div className="metricGrid">
@@ -191,12 +235,71 @@ export function Innkjop() {
         </div>
       </div>
 
+      {/* Varsler */}
+      <div className="card">
+        <div className="cardTitle">Varsler</div>
+        <div className="cardSub">Forfalt og forfaller snart (leverandørgjeld).</div>
+
+        <div className="list">
+          {dueSoon.overdue.length === 0 && dueSoon.soon.length === 0 ? (
+            <div className="item">
+              <div className="itemMeta">Ingen forfalte / kommende betalinger 🎉</div>
+            </div>
+          ) : null}
+
+          {dueSoon.overdue.map(({ p, remain, label }) => (
+            <div key={p.id} className="item low">
+              <div className="itemTop">
+                <div>
+                  <p className="itemTitle">{p.supplierName}</p>
+                  <div className="itemMeta">
+                    <span className="badge danger">{label?.text ?? "Forfalt"}</span>{" "}
+                    <span className="badge warn">Gjenstår: {fmtKr(remain)}</span>
+                  </div>
+                  <div className="itemMeta" style={{ marginTop: 6 }}>
+                    {p.title ? <b>{p.title}</b> : null} {p.dueDate ? <>• Forfall: <b>{p.dueDate}</b></> : null}
+                  </div>
+                </div>
+              </div>
+              <div className="itemActions">
+                <button className="btn btnPrimary" type="button" onClick={() => openPay(p.id)}>
+                  Registrer betaling
+                </button>
+              </div>
+            </div>
+          ))}
+
+          {dueSoon.soon.map(({ p, remain, label }) => (
+            <div key={p.id} className="item">
+              <div className="itemTop">
+                <div>
+                  <p className="itemTitle">{p.supplierName}</p>
+                  <div className="itemMeta">
+                    <span className="badge warn">{label?.text ?? "Forfaller snart"}</span>{" "}
+                    <span className="badge warn">Gjenstår: {fmtKr(remain)}</span>
+                  </div>
+                  <div className="itemMeta" style={{ marginTop: 6 }}>
+                    {p.title ? <b>{p.title}</b> : null} {p.dueDate ? <>• Forfall: <b>{p.dueDate}</b></> : null}
+                  </div>
+                </div>
+              </div>
+              <div className="itemActions">
+                <button className="btn btnPrimary" type="button" onClick={() => openPay(p.id)}>
+                  Registrer betaling
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
       <div className="btnRow" style={{ justifyContent: "space-between" }}>
         <button className="btn btnPrimary" type="button" onClick={openNew}>
           + Registrer innkjøp
         </button>
       </div>
 
+      {/* Purchases list */}
       <div className="card" style={{ marginTop: 14 }}>
         <div className="cardTitle">Siste innkjøp</div>
         <div className="cardSub">
@@ -204,10 +307,11 @@ export function Innkjop() {
         </div>
 
         <div className="list">
-          {visible.map((p) => {
-            const preview = p.lines.slice(0, 3).map((l) => `• ${l.qty}× ${l.itemName} (${fmtKr(round2(l.qty * l.unitCost))})`);
-            const unpaid = p.payableId ? payables.find((x) => x.id === p.payableId) : null;
-            const remain = unpaid ? Math.max(0, payableRemaining(unpaid)) : 0;
+          {visiblePurchases.map((p) => {
+            const preview = p.lines
+              .slice(0, 3)
+              .map((l) => `• ${l.qty}× ${l.itemName} (${fmtKr(round2(l.qty * l.unitCost))})`);
+            const due = dueLabel(p.dueDate);
 
             return (
               <div key={p.id} className="item">
@@ -215,15 +319,18 @@ export function Innkjop() {
                   <div>
                     <p className="itemTitle">{p.supplierName ? p.supplierName : "Innkjøp"}</p>
                     <div className="itemMeta">
-                      Total: <b>{fmtKr(p.total)}</b>
-                      {" • "}
-                      {new Date(p.createdAt).toLocaleString("nb-NO")}
-                      {" • "}
+                      Total: <b>{fmtKr(p.total)}</b> • {new Date(p.createdAt).toLocaleString("nb-NO")} •{" "}
                       {p.paid ? <span className="badge success">Betalt</span> : <span className="badge danger">Ikke betalt</span>}
-                      {!p.paid && remain > 0 ? (
+                      {!p.paid && due ? (
                         <>
                           {" "}
-                          <span className="badge warn">Gjenstår: {fmtKr(remain)}</span>
+                          {due.kind === "overdue" ? (
+                            <span className="badge danger">{due.text}</span>
+                          ) : due.kind === "soon" ? (
+                            <span className="badge warn">{due.text}</span>
+                          ) : (
+                            <span className="badge">{due.text}</span>
+                          )}
                         </>
                       ) : null}
                     </div>
@@ -271,6 +378,7 @@ export function Innkjop() {
         ) : null}
       </div>
 
+      {/* Purchase modal */}
       <Modal open={open} title="Registrer innkjøp" onClose={() => setOpen(false)}>
         <div className="fieldGrid" style={{ marginTop: 0 }}>
           <div className="row3">
@@ -370,6 +478,7 @@ export function Innkjop() {
         </div>
       </Modal>
 
+      {/* Pay modal */}
       <Modal open={!!payId} title="Registrer betaling" onClose={() => setPayId(null)}>
         {payId ? (
           <div className="fieldGrid" style={{ marginTop: 0 }}>
