@@ -7,6 +7,8 @@ import { useEffect, useMemo, useState } from "react";
 
 export type Theme = "dark" | "light";
 
+export type PurchaseKind = "varer" | "forbruk" | "utstyr";
+
 export type Vare = {
   id: string;
   name: string;
@@ -41,16 +43,16 @@ export type SaleLine = {
   itemName: string;
   qty: number;
   unitPrice: number;
-  unitCostAtSale?: number;
+  unitCostAtSale?: number; // historikk
 };
 
 export type Sale = {
   id: string;
 
-  // Ny modell
+  // Ny modell (flere varer pr salg)
   lines: SaleLine[];
 
-  // Legacy (for gamle visninger)
+  // Legacy (for eldre visninger)
   itemId?: string;
   itemName?: string;
   qty?: number;
@@ -73,7 +75,7 @@ export type Sale = {
 
 export type Receivable = {
   id: string;
-  title: string; // "Gjeld"
+  title: string; // f.eks "Gjeld", "Lån", "Faktura"
   debtorName: string; // hvem skylder DEG
   amount: number;
   dueDate?: string;
@@ -88,7 +90,8 @@ export type Receivable = {
 export type Payable = {
   id: string;
   supplierName: string;
-  title: string; // f.eks "Faktura", "Innkjøp", "Deler"
+  title: string; // f.eks "Innkjøp", "Faktura"
+  kind: PurchaseKind; // varer/forbruk/utstyr
   amount: number;
   dueDate?: string;
   note?: string;
@@ -98,14 +101,10 @@ export type Payable = {
   updatedAt: string;
 };
 
-/** Innkjøp-linje: kan være vare / forbruk / utstyr */
-export type PurchaseLineKind = "item" | "consumable" | "equipment";
-
 export type PurchaseLine = {
   id: string;
-  kind: PurchaseLineKind; // NEW
-  itemId?: string; // kun for kind=item
-  name: string; // alltid: hva vi viser i UI
+  itemId: string;
+  itemName: string;
   qty: number;
   unitCost: number;
 };
@@ -113,14 +112,14 @@ export type PurchaseLine = {
 export type Purchase = {
   id: string;
   supplierName?: string;
-
+  kind: PurchaseKind; // varer/forbruk/utstyr
   lines: PurchaseLine[];
   total: number;
 
   /** hvis ikke betalt: peker til Payable */
   payableId?: string;
 
-  /** cost-oppdatering som ble brukt da innkjøpet ble registrert */
+  /** cost-oppdatering */
   costMode: "weighted" | "set_latest" | "keep";
 
   paid: boolean;
@@ -135,7 +134,7 @@ export type AddSaleInput = {
   customerName?: string;
   lines?: SaleLine[];
 
-  // legacy
+  // legacy (1 vare)
   itemId?: string;
   itemName?: string;
   qty?: number;
@@ -150,10 +149,10 @@ export type AddSaleInput = {
 
 export type AddPurchaseInput = {
   supplierName?: string;
+  kind?: PurchaseKind; // default "varer"
   lines: Array<{
-    kind: "item" | "consumable" | "equipment";
-    itemId?: string; // kun item
-    itemName: string; // name for alle linjer
+    itemId: string;
+    itemName: string;
     qty: number;
     unitCost: number;
   }>;
@@ -165,7 +164,7 @@ export type AddPurchaseInput = {
 };
 
 /* =========================
-   Helpers
+   Keys + Events
 ========================= */
 
 const LS_KEYS = {
@@ -234,7 +233,7 @@ function normalizePayments(raw: any): Payment[] {
     .filter((p) => p.amount !== 0);
 }
 
-function normalizeLines(raw: any): SaleLine[] {
+function normalizeSaleLines(raw: any): SaleLine[] {
   const arr: any[] = Array.isArray(raw) ? raw : [];
   return arr
     .map((l) => ({
@@ -251,21 +250,14 @@ function normalizeLines(raw: any): SaleLine[] {
 function normalizePurchaseLines(raw: any): PurchaseLine[] {
   const arr: any[] = Array.isArray(raw) ? raw : [];
   return arr
-    .map((l) => {
-      const kind: PurchaseLineKind = l.kind === "consumable" || l.kind === "equipment" ? l.kind : "item";
-      const name = str(l.name ?? l.itemName ?? "");
-      const itemId = l.itemId ? str(l.itemId) : undefined;
-
-      return {
-        id: str(l.id, uid("pl")),
-        kind,
-        itemId,
-        name,
-        qty: Math.trunc(num(l.qty, 0)),
-        unitCost: round2(num(l.unitCost, 0)),
-      };
-    })
-    .filter((l) => l.name && l.qty !== 0);
+    .map((l) => ({
+      id: str(l.id, uid("pl")),
+      itemId: str(l.itemId),
+      itemName: str(l.itemName),
+      qty: Math.trunc(num(l.qty, 0)),
+      unitCost: round2(num(l.unitCost, 0)),
+    }))
+    .filter((l) => l.itemId && l.itemName && l.qty !== 0);
 }
 
 function sumSaleLinesTotal(lines: SaleLine[]): number {
@@ -295,7 +287,7 @@ function saleLinesFromLegacy(x: any): SaleLine[] {
 }
 
 function enrichLegacyFieldsFromLines(s: Sale): Sale {
-  if (s.lines.length > 0) {
+  if (Array.isArray(s.lines) && s.lines.length > 0) {
     const first = s.lines[0];
     return {
       ...s,
@@ -307,6 +299,10 @@ function enrichLegacyFieldsFromLines(s: Sale): Sale {
     };
   }
   return s;
+}
+
+function normalizeKind(k: any): PurchaseKind {
+  return k === "forbruk" || k === "utstyr" ? k : "varer";
 }
 
 /* =========================
@@ -346,7 +342,7 @@ export function useTheme(): [Theme, (t: Theme) => void] {
 }
 
 /* =========================
-   Saldo (manuell)
+   Saldo
 ========================= */
 
 export function getSaldo(): number {
@@ -416,7 +412,7 @@ function adjustItemStockCore(id: string, delta: number) {
   const items = getItems();
   const i = items.findIndex((x) => x.id === id);
   if (i < 0) return;
-  const nextStock = (items[i].stock ?? 0) + delta;
+  const nextStock = Math.trunc(num(items[i].stock, 0)) + Math.trunc(num(delta, 0));
   items[i] = { ...items[i], stock: nextStock, updatedAt: nowIso() };
   setItems(items);
 }
@@ -530,12 +526,14 @@ export function getSales(): Sale[] {
     const payments = normalizePayments(x.payments);
 
     const lines = (() => {
-      const ln = normalizeLines(x.lines);
+      const ln = normalizeSaleLines(x.lines);
       if (ln.length) return ln;
       return saleLinesFromLegacy(x);
     })();
 
-    const total = round2(num(x.total, lines.length ? sumSaleLinesTotal(lines) : round2(num(x.qty, 0) * num(x.unitPrice, 0))));
+    const total = round2(
+      num(x.total, lines.length ? sumSaleLinesTotal(lines) : round2(num(x.qty, 0) * num(x.unitPrice, 0)))
+    );
 
     const paidSum = payments.length ? payments.reduce((a, p) => a + num(p.amount, 0), 0) : 0;
     const paidLegacy = Boolean(x.paid);
@@ -579,8 +577,8 @@ export function addSale(input: AddSaleInput): void {
 
   const lines =
     input.lines && Array.isArray(input.lines) && input.lines.length > 0
-      ? normalizeLines(input.lines)
-      : normalizeLines(
+      ? normalizeSaleLines(input.lines)
+      : normalizeSaleLines(
           saleLinesFromLegacy({
             itemId: input.itemId,
             itemName: input.itemName,
@@ -849,6 +847,7 @@ export function getPayables(): Payable[] {
       id: str(x.id, uid("payable")),
       supplierName: str(x.supplierName, "Ukjent"),
       title: str(x.title, "Faktura"),
+      kind: normalizeKind(x.kind),
       amount,
       dueDate: x.dueDate ? String(x.dueDate) : undefined,
       note: x.note ? String(x.note) : undefined,
@@ -876,8 +875,18 @@ function upsertPayableCore(p: Omit<Payable, "createdAt" | "updatedAt" | "paid">)
   const amount = round2(num((p as any).amount, 0));
   const paid = payableRemaining({ ...(p as any), payments, amount, paid: false } as Payable) <= 0;
 
-  if (i >= 0) list[i] = { ...list[i], ...p, amount, payments, paid, updatedAt: nowIso() };
-  else list.unshift({ ...(p as any), amount, payments, paid, createdAt: nowIso(), updatedAt: nowIso() });
+  const next: Payable = {
+    ...(p as any),
+    amount,
+    payments,
+    paid,
+    kind: normalizeKind((p as any).kind),
+    createdAt: (p as any).createdAt ?? nowIso(),
+    updatedAt: nowIso(),
+  };
+
+  if (i >= 0) list[i] = { ...list[i], ...next };
+  else list.unshift(next);
 
   setPayables(list);
 }
@@ -931,7 +940,7 @@ export function usePayables() {
 }
 
 /* =========================
-   Purchases (Penger brukt)
+   Purchases (Innkjøp / penger brukt)
 ========================= */
 
 export function getPurchases(): Purchase[] {
@@ -944,6 +953,7 @@ export function getPurchases(): Purchase[] {
     return {
       id: str(x.id, uid("pur")),
       supplierName: x.supplierName ? String(x.supplierName) : undefined,
+      kind: normalizeKind(x.kind),
       lines,
       total,
       payableId: x.payableId ? String(x.payableId) : undefined,
@@ -980,46 +990,37 @@ function applyCostUpdate(item: Vare, qtyBought: number, unitCost: number, mode: 
   const oldStock = Math.max(0, Math.trunc(num(item.stock, 0)));
   const oldCost = round2(num(item.cost, 0));
   const denom = oldStock + q;
-  const nextCost = denom > 0 ? round2(((oldCost * oldStock) + (uc * q)) / denom) : uc;
+  const nextCost = denom > 0 ? round2((oldCost * oldStock + uc * q) / denom) : uc;
   return { ...item, cost: nextCost, updatedAt: nowIso() };
 }
 
-/** Registrer innkjøp + (kun item) øk lager + evt opprett leverandørgjeld (payable) */
+/** Registrer innkjøp + øk lager + evt opprett leverandørgjeld (payable) */
 export function addPurchase(input: AddPurchaseInput): void {
   const purchases = getPurchases();
 
   const lines: PurchaseLine[] = (input.lines || [])
-    .map((l) => {
-      const kind: PurchaseLineKind = l.kind === "consumable" || l.kind === "equipment" ? l.kind : "item";
-      const name = String(l.itemName || "");
-      const itemId = l.itemId ? String(l.itemId) : undefined;
-
-      return {
-        id: uid("pl"),
-        kind,
-        itemId,
-        name,
-        qty: Math.trunc(num(l.qty, 0)),
-        unitCost: round2(num(l.unitCost, 0)),
-      };
-    })
-    .filter((l) => l.name && l.qty > 0 && l.unitCost > 0);
+    .map((l) => ({
+      id: uid("pl"),
+      itemId: String(l.itemId || ""),
+      itemName: String(l.itemName || ""),
+      qty: Math.trunc(num(l.qty, 0)),
+      unitCost: round2(num(l.unitCost, 0)),
+    }))
+    .filter((l) => l.itemId && l.itemName && l.qty > 0 && l.unitCost > 0);
 
   if (lines.length === 0) return;
 
   const total = sumPurchaseLinesTotal(lines);
   const paid = input.paid === undefined ? true : Boolean(input.paid);
   const costMode = input.costMode || "weighted";
+  const kind = normalizeKind(input.kind);
 
-  // 1) Oppdater varer: stock + cost (KUN for kind=item)
+  // 1) Oppdater varer: stock + cost (kun relevant for "varer"/"forbruk"; utstyr vil ofte ikke være lagervare,
+  // men vi lar det være likt – du kan bruke "utstyr" også på varer om du vil.)
   const itemsNow = getItems();
   for (const ln of lines) {
-    if (ln.kind !== "item") continue;
-    if (!ln.itemId) continue;
-
     const idx = itemsNow.findIndex((it) => it.id === ln.itemId);
     if (idx < 0) continue;
-
     const it = itemsNow[idx];
     const nextStock = Math.trunc(num(it.stock, 0)) + Math.trunc(num(ln.qty, 0));
     const updatedCostItem = applyCostUpdate({ ...it, stock: nextStock }, ln.qty, ln.unitCost, costMode);
@@ -1036,6 +1037,7 @@ export function addPurchase(input: AddPurchaseInput): void {
       id: payableId,
       supplierName: input.supplierName?.trim() ? input.supplierName.trim() : "Ukjent",
       title: input.payableTitle?.trim() ? input.payableTitle.trim() : "Innkjøp",
+      kind,
       amount: total,
       dueDate: input.dueDate?.trim() ? input.dueDate.trim() : undefined,
       note: input.note?.trim() ? input.note.trim() : undefined,
@@ -1052,6 +1054,7 @@ export function addPurchase(input: AddPurchaseInput): void {
   const next: Purchase = {
     id: uid("pur"),
     supplierName: input.supplierName?.trim() ? input.supplierName.trim() : undefined,
+    kind,
     lines,
     total,
     payableId,
@@ -1195,7 +1198,7 @@ export async function importAllFromFile(file: File, mode: "replace" | "merge" = 
   const nextSales = (Array.isArray(payload.sales) ? payload.sales : []).map((x: any) => {
     const payments = normalizePayments(x.payments);
     const lines = (() => {
-      const ln = normalizeLines(x.lines);
+      const ln = normalizeSaleLines(x.lines);
       if (ln.length) return ln;
       return saleLinesFromLegacy(x);
     })();
@@ -1245,6 +1248,7 @@ export async function importAllFromFile(file: File, mode: "replace" | "merge" = 
       id: str(x.id, uid("payable")),
       supplierName: str(x.supplierName, "Ukjent"),
       title: str(x.title, "Faktura"),
+      kind: normalizeKind(x.kind),
       amount,
       dueDate: x.dueDate ? String(x.dueDate) : undefined,
       note: x.note ? String(x.note) : undefined,
@@ -1260,6 +1264,7 @@ export async function importAllFromFile(file: File, mode: "replace" | "merge" = 
     return {
       id: str(x.id, uid("pur")),
       supplierName: x.supplierName ? String(x.supplierName) : undefined,
+      kind: normalizeKind(x.kind),
       lines,
       total: round2(num(x.total, lines.length ? sumPurchaseLinesTotal(lines) : 0)),
       payableId: x.payableId ? String(x.payableId) : undefined,
@@ -1329,18 +1334,6 @@ export function pickImportAllFile(mode: "replace" | "merge" = "replace"): void {
   input.click();
 }
 
-/** Alias-funksjoner (fikser build-feil i Backup.tsx hvis den forventer disse) */
-export function pickImportAllFileReplace(): void {
-  pickImportAllFile("replace");
-}
-export function pickImportAllFileMerge(): void {
-  pickImportAllFile("merge");
-}
-
-/* =========================
-   Storage summary + totals
-========================= */
-
 export type StorageSummary = {
   itemsCount: number;
   customersCount: number;
@@ -1348,10 +1341,16 @@ export type StorageSummary = {
   receivablesCount: number;
   payablesCount: number;
   purchasesCount: number;
+
   unpaidSales: number;
   unpaidReceivables: number;
   unpaidPayables: number;
+
   spentTotal: number;
+  spentVarer: number;
+  spentForbruk: number;
+  spentUtstyr: number;
+
   saldo: number;
   approxBytes: number;
 };
@@ -1367,7 +1366,11 @@ export function getStorageSummary(): StorageSummary {
   const unpaidSales = round2(sales.reduce((a, s) => a + Math.max(0, saleRemaining(s)), 0));
   const unpaidReceivables = round2(receivables.reduce((a, r) => a + Math.max(0, receivableRemaining(r)), 0));
   const unpaidPayables = round2(payables.reduce((a, p) => a + Math.max(0, payableRemaining(p)), 0));
+
   const spentTotal = round2(purchases.reduce((a, p) => a + (Number(p.total) || 0), 0));
+  const spentVarer = round2(purchases.filter((p) => normalizeKind(p.kind) === "varer").reduce((a, p) => a + (Number(p.total) || 0), 0));
+  const spentForbruk = round2(purchases.filter((p) => normalizeKind(p.kind) === "forbruk").reduce((a, p) => a + (Number(p.total) || 0), 0));
+  const spentUtstyr = round2(purchases.filter((p) => normalizeKind(p.kind) === "utstyr").reduce((a, p) => a + (Number(p.total) || 0), 0));
 
   const approxBytes =
     (localStorage.getItem(LS_KEYS.items)?.length || 0) +
@@ -1389,40 +1392,10 @@ export function getStorageSummary(): StorageSummary {
     unpaidReceivables,
     unpaidPayables,
     spentTotal,
+    spentVarer,
+    spentForbruk,
+    spentUtstyr,
     saldo: getSaldo(),
     approxBytes,
-  };
-}
-
-/**
- * Totals for Oversikt:
- * - itemsTotal: varekjøp (oppdaterer lager)
- * - consumablesTotal: forbruk
- * - equipmentTotal: utstyr
- */
-export function getPurchaseTotalsByKind(purchases?: Purchase[]) {
-  const list = purchases || getPurchases();
-  let itemsTotal = 0;
-  let consumablesTotal = 0;
-  let equipmentTotal = 0;
-
-  for (const p of list) {
-    for (const l of p.lines || []) {
-      const lineSum = round2(num(l.qty, 0) * num(l.unitCost, 0));
-      if (l.kind === "consumable") consumablesTotal += lineSum;
-      else if (l.kind === "equipment") equipmentTotal += lineSum;
-      else itemsTotal += lineSum;
-    }
-  }
-
-  itemsTotal = round2(itemsTotal);
-  consumablesTotal = round2(consumablesTotal);
-  equipmentTotal = round2(equipmentTotal);
-
-  return {
-    itemsTotal,
-    consumablesTotal,
-    equipmentTotal,
-    grandTotal: round2(itemsTotal + consumablesTotal + equipmentTotal),
   };
 }
