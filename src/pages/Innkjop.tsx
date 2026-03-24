@@ -27,7 +27,6 @@ function isAfter(dateIso: string, from: Date) {
 }
 
 function parseDateOnly(dateStr?: string) {
-  // yyyy-mm-dd => lokal midt på dagen for stabil visning
   if (!dateStr) return null;
   const d = new Date(`${dateStr}T12:00:00`);
   return Number.isFinite(d.getTime()) ? d : null;
@@ -67,15 +66,32 @@ function Modal(props: { open: boolean; title: string; children: React.ReactNode;
   );
 }
 
-type DraftLine = { id: string; itemId: string; qty: string; unitCost: string };
+type LineKind = "item" | "consumable" | "equipment";
+
+type DraftLine = {
+  id: string;
+  kind: LineKind;
+  itemId: string;     // brukes kun hvis kind=item
+  name: string;       // brukes kun hvis kind!=item
+  qty: string;
+  unitCost: string;
+};
+
+function displayKind(k: LineKind) {
+  if (k === "item") return "Vare til lager";
+  if (k === "consumable") return "Forbruksmateriell";
+  return "Utstyr / investering";
+}
 
 function sumDraft(lines: DraftLine[], items: ReturnType<typeof getItems>) {
   return round2(
     lines.reduce((a, l) => {
-      const it = items.find((x) => x.id === l.itemId);
-      if (!it) return a;
-      const q = toInt(l.qty);
-      const c = round2(toNum(l.unitCost || String(it.cost ?? 0)));
+      const q = Math.max(0, toInt(l.qty));
+      const c = round2(toNum(l.unitCost));
+      if (q <= 0 || c <= 0) return a;
+
+      // item: ok uansett om item finnes – vi bruker bare kostfeltet her
+      // (lageroppdatering skjer i storage.addPurchase)
       return a + round2(q * c);
     }, 0)
   );
@@ -92,8 +108,11 @@ export function Innkjop() {
   const [paid, setPaid] = useState(true);
   const [dueDate, setDueDate] = useState("");
   const [note, setNote] = useState("");
+
   const [costMode, setCostMode] = useState<"weighted" | "set_latest" | "keep">("weighted");
-  const [lines, setLines] = useState<DraftLine[]>([{ id: uid("dl"), itemId: "", qty: "1", unitCost: "" }]);
+  const [lines, setLines] = useState<DraftLine[]>([
+    { id: uid("dl"), kind: "item", itemId: "", name: "", qty: "1", unitCost: "" },
+  ]);
 
   const [showCount, setShowCount] = useState(5);
 
@@ -140,13 +159,37 @@ export function Innkjop() {
   const visiblePurchases = useMemo(() => purchases.slice(0, showCount), [purchases, showCount]);
 
   function addLine() {
-    setLines((prev) => [...prev, { id: uid("dl"), itemId: "", qty: "1", unitCost: "" }]);
+    setLines((prev) => [...prev, { id: uid("dl"), kind: "item", itemId: "", name: "", qty: "1", unitCost: "" }]);
   }
   function removeLine(id: string) {
     setLines((prev) => (prev.length <= 1 ? prev : prev.filter((x) => x.id !== id)));
   }
   function updateLine(id: string, patch: Partial<DraftLine>) {
-    setLines((prev) => prev.map((l) => (l.id === id ? { ...l, ...patch } : l)));
+    setLines((prev) =>
+      prev.map((l) => {
+        if (l.id !== id) return l;
+        const next = { ...l, ...patch };
+
+        // Når man bytter type, resetter vi feltene riktig
+        if (patch.kind && patch.kind !== l.kind) {
+          if (patch.kind === "item") {
+            next.itemId = "";
+            next.name = "";
+          } else {
+            next.itemId = "";
+            next.name = "";
+          }
+        }
+
+        // Hvis vare velges: autopopuler kost (hvis tom)
+        if (patch.itemId) {
+          const it = items.find((x) => x.id === patch.itemId);
+          if (it && String(next.unitCost).trim() === "") next.unitCost = String(it.cost ?? 0);
+        }
+
+        return next;
+      })
+    );
   }
 
   function openNew() {
@@ -155,36 +198,54 @@ export function Innkjop() {
     setDueDate("");
     setNote("");
     setCostMode("weighted");
-    setLines([{ id: uid("dl"), itemId: "", qty: "1", unitCost: "" }]);
+    setLines([{ id: uid("dl"), kind: "item", itemId: "", name: "", qty: "1", unitCost: "" }]);
     setOpen(true);
   }
 
   function save() {
     const clean: PurchaseLine[] = [];
-    const itemsNow = getItems();
 
     for (const dl of lines) {
-      const it = itemsNow.find((x) => x.id === dl.itemId);
-      if (!it) continue;
-      const q = toInt(dl.qty);
-      if (q <= 0) continue;
-      const c = round2(toNum(dl.unitCost || String(it.cost ?? 0)));
-      if (c <= 0) continue;
+      const q = Math.max(0, toInt(dl.qty));
+      const c = round2(toNum(dl.unitCost));
+      if (q <= 0 || c <= 0) continue;
 
-      clean.push({
-        id: uid("pl"),
-        itemId: it.id,
-        itemName: it.name,
-        qty: q,
-        unitCost: c,
-      });
+      if (dl.kind === "item") {
+        const it = getItems().find((x) => x.id === dl.itemId);
+        if (!it) continue;
+        clean.push({
+          id: uid("pl"),
+          kind: "item",
+          itemId: it.id,
+          name: it.name,
+          qty: q,
+          unitCost: c,
+        });
+      } else {
+        const nm = dl.name.trim();
+        if (!nm) continue;
+        clean.push({
+          id: uid("pl"),
+          kind: dl.kind,
+          itemId: undefined,
+          name: nm,
+          qty: q,
+          unitCost: c,
+        });
+      }
     }
 
-    if (clean.length === 0) return alert("Legg til minst én varelinje med vare + antall + kost.");
+    if (clean.length === 0) return alert("Legg til minst én linje med antall + kost.");
 
     addPurchase({
       supplierName: supplierName.trim() ? supplierName.trim() : undefined,
-      lines: clean,
+      lines: clean.map((l) => ({
+        kind: l.kind,
+        itemId: l.itemId || "",
+        itemName: l.name,
+        qty: l.qty,
+        unitCost: l.unitCost,
+      })),
       paid,
       dueDate: dueDate.trim() ? dueDate.trim() : undefined,
       note: note.trim() ? note.trim() : undefined,
@@ -217,7 +278,7 @@ export function Innkjop() {
     <div className="card">
       <div className="cardTitle">Innkjøp</div>
       <div className="cardSub">
-        Registrer penger brukt + (valgfritt) utestående å betale hvis du ikke betaler med en gang.
+        Registrer vare-innkjøp (oppdater lager) + forbruksmateriell + utstyr. Kan også være “ikke betalt” (leverandørgjeld).
       </div>
 
       <div className="metricGrid">
@@ -235,7 +296,6 @@ export function Innkjop() {
         </div>
       </div>
 
-      {/* Varsler */}
       <div className="card">
         <div className="cardTitle">Varsler</div>
         <div className="cardSub">Forfalt og forfaller snart (leverandørgjeld).</div>
@@ -299,7 +359,6 @@ export function Innkjop() {
         </button>
       </div>
 
-      {/* Purchases list */}
       <div className="card" style={{ marginTop: 14 }}>
         <div className="cardTitle">Siste innkjøp</div>
         <div className="cardSub">
@@ -310,7 +369,7 @@ export function Innkjop() {
           {visiblePurchases.map((p) => {
             const preview = p.lines
               .slice(0, 3)
-              .map((l) => `• ${l.qty}× ${l.itemName} (${fmtKr(round2(l.qty * l.unitCost))})`);
+              .map((l) => `• ${l.qty}× ${l.name} (${fmtKr(round2(l.qty * l.unitCost))})`);
             const due = dueLabel(p.dueDate);
 
             return (
@@ -337,7 +396,7 @@ export function Innkjop() {
 
                     {preview.length ? (
                       <div className="itemMeta" style={{ marginTop: 8 }}>
-                        <b>Varer:</b>
+                        <b>Linjer:</b>
                         <div style={{ marginTop: 4 }}>
                           {preview.map((t, i) => (
                             <div key={i}>{t}</div>
@@ -378,7 +437,6 @@ export function Innkjop() {
         ) : null}
       </div>
 
-      {/* Purchase modal */}
       <Modal open={open} title="Registrer innkjøp" onClose={() => setOpen(false)}>
         <div className="fieldGrid" style={{ marginTop: 0 }}>
           <div className="row3">
@@ -415,8 +473,8 @@ export function Innkjop() {
           </div>
 
           <div className="card" style={{ marginTop: 10 }}>
-            <div className="cardTitle">Varelinjer</div>
-            <div className="cardSub">Legg til flere varer i samme innkjøp.</div>
+            <div className="cardTitle">Linjer</div>
+            <div className="cardSub">Bland varer, forbruksmateriell og utstyr i samme innkjøp.</div>
 
             <div className="list">
               {lines.map((l, idx) => (
@@ -427,6 +485,27 @@ export function Innkjop() {
 
                   <div className="row3">
                     <div>
+                      <label className="label">Type</label>
+                      <select className="input" value={l.kind} onChange={(e) => updateLine(l.id, { kind: e.target.value as LineKind })}>
+                        <option value="item">{displayKind("item")}</option>
+                        <option value="consumable">{displayKind("consumable")}</option>
+                        <option value="equipment">{displayKind("equipment")}</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="label">Antall</label>
+                      <input className="input" inputMode="numeric" value={l.qty} onChange={(e) => updateLine(l.id, { qty: e.target.value })} />
+                    </div>
+
+                    <div>
+                      <label className="label">Kost pr stk</label>
+                      <input className="input" inputMode="decimal" value={l.unitCost} onChange={(e) => updateLine(l.id, { unitCost: e.target.value })} />
+                    </div>
+                  </div>
+
+                  {l.kind === "item" ? (
+                    <div style={{ marginTop: 10 }}>
                       <label className="label">Vare</label>
                       <select className="input" value={l.itemId} onChange={(e) => updateLine(l.id, { itemId: e.target.value })}>
                         <option value="">Velg vare…</option>
@@ -437,14 +516,15 @@ export function Innkjop() {
                         ))}
                       </select>
                     </div>
-                    <div>
-                      <label className="label">Antall</label>
-                      <input className="input" inputMode="numeric" value={l.qty} onChange={(e) => updateLine(l.id, { qty: e.target.value })} />
+                  ) : (
+                    <div style={{ marginTop: 10 }}>
+                      <label className="label">{l.kind === "consumable" ? "Forbruk (navn)" : "Utstyr (navn)"}</label>
+                      <input className="input" value={l.name} onChange={(e) => updateLine(l.id, { name: e.target.value })} placeholder="F.eks. Hansker / WD-40 / Kompressor" />
                     </div>
-                    <div>
-                      <label className="label">Kost pr stk</label>
-                      <input className="input" inputMode="decimal" value={l.unitCost} onChange={(e) => updateLine(l.id, { unitCost: e.target.value })} />
-                    </div>
+                  )}
+
+                  <div className="itemMeta" style={{ marginTop: 10 }}>
+                    Linjesum: <b>{fmtKr(round2(Math.max(0, toInt(l.qty)) * Math.max(0, round2(toNum(l.unitCost)))))}</b>
                   </div>
 
                   <div className="btnRow" style={{ marginTop: 10, justifyContent: "flex-end" }}>
@@ -478,7 +558,6 @@ export function Innkjop() {
         </div>
       </Modal>
 
-      {/* Pay modal */}
       <Modal open={!!payId} title="Registrer betaling" onClose={() => setPayId(null)}>
         {payId ? (
           <div className="fieldGrid" style={{ marginTop: 0 }}>
