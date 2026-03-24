@@ -12,10 +12,10 @@ export type PurchaseKind = "varer" | "forbruk" | "utstyr";
 export type Vare = {
   id: string;
   name: string;
-  price: number;
-  cost: number;
-  stock: number;
-  minStock: number;
+  price: number; // salg
+  cost: number; // kost
+  stock: number; // lager
+  minStock: number; // minimum (varsel)
   createdAt: string;
   updatedAt: string;
 };
@@ -33,7 +33,7 @@ export type Customer = {
 export type Payment = {
   id: string;
   amount: number;
-  createdAt: string;
+  createdAt: string; // ISO
   note?: string;
 };
 
@@ -48,9 +48,11 @@ export type SaleLine = {
 
 export type Sale = {
   id: string;
+
+  // Ny modell
   lines: SaleLine[];
 
-  // legacy
+  // Legacy (for gamle visninger)
   itemId?: string;
   itemName?: string;
   qty?: number;
@@ -73,8 +75,8 @@ export type Sale = {
 
 export type Receivable = {
   id: string;
-  title: string;
-  debtorName: string;
+  title: string; // "Gjeld"
+  debtorName: string; // hvem skylder DEG
   amount: number;
   dueDate?: string;
   note?: string;
@@ -84,11 +86,12 @@ export type Receivable = {
   updatedAt: string;
 };
 
+/** Leverandørgjeld: hva DU skylder andre */
 export type Payable = {
   id: string;
   supplierName: string;
-  title: string;
-  kind: PurchaseKind;
+  title: string; // f.eks "Faktura", "Innkjøp", "Deler"
+  kind: PurchaseKind; // varer/forbruk/utstyr
   amount: number;
   dueDate?: string;
   note?: string;
@@ -98,25 +101,31 @@ export type Payable = {
   updatedAt: string;
 };
 
-// ✅ NB: Oversikt.tsx din leser "kind" på linje-nivå.
-// Derfor har vi "kind?: PurchaseKind" her for kompatibilitet.
 export type PurchaseLine = {
   id: string;
   itemId: string;
   itemName: string;
   qty: number;
   unitCost: number;
-  kind?: PurchaseKind; // <= gjør at Oversikt.tsx bygger
+
+  // ✅ kompatibilitet: Oversikt.tsx din bruker line.kind (selv om "riktig" er Purchase.kind)
+  kind?: PurchaseKind;
 };
 
 export type Purchase = {
   id: string;
   supplierName?: string;
-  kind: PurchaseKind; // varer/forbruk/utstyr
+
+  // ✅ hovedkategori for innkjøpet
+  kind: PurchaseKind;
+
   lines: PurchaseLine[];
   total: number;
 
-  payableId?: string; // hvis ikke betalt
+  /** hvis ikke betalt: peker til Payable */
+  payableId?: string;
+
+  /** cost-oppdatering som ble brukt da innkjøpet ble registrert */
   costMode: "weighted" | "set_latest" | "keep";
 
   paid: boolean;
@@ -146,18 +155,18 @@ export type AddSaleInput = {
 
 export type AddPurchaseInput = {
   supplierName?: string;
-  kind?: PurchaseKind;
+  kind?: PurchaseKind; // varer/forbruk/utstyr
   lines: Array<{
     itemId: string;
     itemName: string;
     qty: number;
     unitCost: number;
   }>;
-  paid?: boolean;
+  paid?: boolean; // default true
   dueDate?: string;
   note?: string;
-  costMode?: "weighted" | "set_latest" | "keep";
-  payableTitle?: string;
+  costMode?: "weighted" | "set_latest" | "keep"; // default weighted
+  payableTitle?: string; // default "Innkjøp"
 };
 
 /* =========================
@@ -234,7 +243,7 @@ function normalizePayments(raw: any): Payment[] {
     .filter((p) => p.amount !== 0);
 }
 
-function normalizeSaleLines(raw: any): SaleLine[] {
+function normalizeLines(raw: any): SaleLine[] {
   const arr: any[] = Array.isArray(raw) ? raw : [];
   return arr
     .map((l) => ({
@@ -257,7 +266,7 @@ function normalizePurchaseLines(raw: any): PurchaseLine[] {
       itemName: str(l.itemName),
       qty: Math.trunc(num(l.qty, 0)),
       unitCost: round2(num(l.unitCost, 0)),
-      kind: l.kind ? normalizeKind(l.kind) : undefined, // ✅ beholder hvis finnes
+      kind: l.kind ? normalizeKind(l.kind) : undefined,
     }))
     .filter((l) => l.itemId && l.itemName && l.qty !== 0);
 }
@@ -289,7 +298,7 @@ function saleLinesFromLegacy(x: any): SaleLine[] {
 }
 
 function enrichLegacyFieldsFromLines(s: Sale): Sale {
-  if (Array.isArray(s.lines) && s.lines.length > 0) {
+  if (s.lines.length > 0) {
     const first = s.lines[0];
     return {
       ...s,
@@ -304,18 +313,12 @@ function enrichLegacyFieldsFromLines(s: Sale): Sale {
 }
 
 /* =========================
-   ✅ Purchases totals helper (fix build)
+   ✅ Helper for Oversikt.tsx (fix build)
 ========================= */
 
 export function getPurchaseTotalsByKind(purchases?: Purchase[]) {
   const list = purchases ?? getPurchases();
-
-  const totals = {
-    total: 0,
-    varer: 0,
-    forbruk: 0,
-    utstyr: 0,
-  };
+  const totals = { total: 0, varer: 0, forbruk: 0, utstyr: 0 };
 
   for (const p of list) {
     const k = normalizeKind((p as any).kind);
@@ -324,13 +327,12 @@ export function getPurchaseTotalsByKind(purchases?: Purchase[]) {
     totals[k] += t;
   }
 
-  // round2 for pene tall
-  totals.total = round2(totals.total);
-  totals.varer = round2(totals.varer);
-  totals.forbruk = round2(totals.forbruk);
-  totals.utstyr = round2(totals.utstyr);
-
-  return totals;
+  return {
+    total: round2(totals.total),
+    varer: round2(totals.varer),
+    forbruk: round2(totals.forbruk),
+    utstyr: round2(totals.utstyr),
+  };
 }
 
 /* =========================
@@ -370,7 +372,7 @@ export function useTheme(): [Theme, (t: Theme) => void] {
 }
 
 /* =========================
-   Saldo
+   Saldo (manuell)
 ========================= */
 
 export function getSaldo(): number {
@@ -440,7 +442,7 @@ function adjustItemStockCore(id: string, delta: number) {
   const items = getItems();
   const i = items.findIndex((x) => x.id === id);
   if (i < 0) return;
-  const nextStock = Math.trunc(num(items[i].stock, 0)) + Math.trunc(num(delta, 0));
+  const nextStock = (items[i].stock ?? 0) + delta;
   items[i] = { ...items[i], stock: nextStock, updatedAt: nowIso() };
   setItems(items);
 }
@@ -554,14 +556,12 @@ export function getSales(): Sale[] {
     const payments = normalizePayments(x.payments);
 
     const lines = (() => {
-      const ln = normalizeSaleLines(x.lines);
+      const ln = normalizeLines(x.lines);
       if (ln.length) return ln;
       return saleLinesFromLegacy(x);
     })();
 
-    const total = round2(
-      num(x.total, lines.length ? sumSaleLinesTotal(lines) : round2(num(x.qty, 0) * num(x.unitPrice, 0)))
-    );
+    const total = round2(num(x.total, lines.length ? sumSaleLinesTotal(lines) : round2(num(x.qty, 0) * num(x.unitPrice, 0))));
 
     const paidSum = payments.length ? payments.reduce((a, p) => a + num(p.amount, 0), 0) : 0;
     const paidLegacy = Boolean(x.paid);
@@ -605,8 +605,8 @@ export function addSale(input: AddSaleInput): void {
 
   const lines =
     input.lines && Array.isArray(input.lines) && input.lines.length > 0
-      ? normalizeSaleLines(input.lines)
-      : normalizeSaleLines(
+      ? normalizeLines(input.lines)
+      : normalizeLines(
           saleLinesFromLegacy({
             itemId: input.itemId,
             itemName: input.itemName,
@@ -901,20 +901,11 @@ function upsertPayableCore(p: Omit<Payable, "createdAt" | "updatedAt" | "paid">)
 
   const payments = normalizePayments((p as any).payments);
   const amount = round2(num((p as any).amount, 0));
-  const paid = payableRemaining({ ...(p as any), payments, amount, paid: false } as Payable) <= 0;
+  const kind = normalizeKind((p as any).kind);
+  const paid = payableRemaining({ ...(p as any), payments, amount, kind, paid: false } as Payable) <= 0;
 
-  const next: Payable = {
-    ...(p as any),
-    amount,
-    payments,
-    paid,
-    kind: normalizeKind((p as any).kind),
-    createdAt: (p as any).createdAt ?? nowIso(),
-    updatedAt: nowIso(),
-  };
-
-  if (i >= 0) list[i] = { ...list[i], ...next };
-  else list.unshift(next);
+  if (i >= 0) list[i] = { ...list[i], ...p, amount, payments, kind, paid, updatedAt: nowIso() } as any;
+  else list.unshift({ ...(p as any), amount, payments, kind, paid, createdAt: nowIso(), updatedAt: nowIso() });
 
   setPayables(list);
 }
@@ -974,14 +965,15 @@ export function usePayables() {
 export function getPurchases(): Purchase[] {
   const raw = safeJsonParse<any[]>(localStorage.getItem(LS_KEYS.purchases), []);
   const normalized: Purchase[] = (raw || []).map((x) => {
-    const lines = normalizePurchaseLines(x.lines);
+    const kind = normalizeKind(x.kind);
+    const lines = normalizePurchaseLines(x.lines).map((l) => ({ ...l, kind: l.kind ?? kind })); // ✅ sikre line.kind
     const total = round2(num(x.total, lines.length ? sumPurchaseLinesTotal(lines) : 0));
     const paid = Boolean(x.paid);
 
     return {
       id: str(x.id, uid("pur")),
       supplierName: x.supplierName ? String(x.supplierName) : undefined,
-      kind: normalizeKind(x.kind),
+      kind,
       lines,
       total,
       payableId: x.payableId ? String(x.payableId) : undefined,
@@ -1020,10 +1012,11 @@ function applyCostUpdate(item: Vare, qtyBought: number, unitCost: number, mode: 
   return { ...item, cost: nextCost, updatedAt: nowIso() };
 }
 
+/** Registrer innkjøp + øk lager + evt opprett leverandørgjeld (payable) */
 export function addPurchase(input: AddPurchaseInput): void {
   const purchases = getPurchases();
-
   const kind = normalizeKind(input.kind);
+
   const lines: PurchaseLine[] = (input.lines || [])
     .map((l) => ({
       id: uid("pl"),
@@ -1031,9 +1024,9 @@ export function addPurchase(input: AddPurchaseInput): void {
       itemName: String(l.itemName || ""),
       qty: Math.trunc(num(l.qty, 0)),
       unitCost: round2(num(l.unitCost, 0)),
-      kind, // ✅ legger på line.kind for Oversikt.tsx kompat
+      kind, // ✅ line.kind for Oversikt-kompat
     }))
-    .filter((l) => l.itemId && l.itemName && l.qty > 0 && l.unitCost > 0);
+    .filter((l) => l.itemId && l.itemName && l.qty > 0);
 
   if (lines.length === 0) return;
 
@@ -1041,7 +1034,7 @@ export function addPurchase(input: AddPurchaseInput): void {
   const paid = input.paid === undefined ? true : Boolean(input.paid);
   const costMode = input.costMode || "weighted";
 
-  // Oppdater varer: stock + cost
+  // 1) Oppdater varer: stock + cost
   const itemsNow = getItems();
   for (const ln of lines) {
     const idx = itemsNow.findIndex((it) => it.id === ln.itemId);
@@ -1053,7 +1046,7 @@ export function addPurchase(input: AddPurchaseInput): void {
   }
   setItems(itemsNow);
 
-  // Opprett payable hvis ikke betalt
+  // 2) Opprett payable hvis ikke betalt
   let payableId: string | undefined = undefined;
   if (!paid) {
     const payables = getPayables();
@@ -1075,6 +1068,7 @@ export function addPurchase(input: AddPurchaseInput): void {
     setPayables(payables);
   }
 
+  // 3) Lagre purchase
   const next: Purchase = {
     id: uid("pur"),
     supplierName: input.supplierName?.trim() ? input.supplierName.trim() : undefined,
@@ -1088,7 +1082,6 @@ export function addPurchase(input: AddPurchaseInput): void {
     note: input.note?.trim() ? input.note.trim() : undefined,
     createdAt: nowIso(),
   };
-
   purchases.unshift(next);
   setPurchases(purchases);
 }
@@ -1223,7 +1216,7 @@ export async function importAllFromFile(file: File, mode: "replace" | "merge" = 
   const nextSales = (Array.isArray(payload.sales) ? payload.sales : []).map((x: any) => {
     const payments = normalizePayments(x.payments);
     const lines = (() => {
-      const ln = normalizeSaleLines(x.lines);
+      const ln = normalizeLines(x.lines);
       if (ln.length) return ln;
       return saleLinesFromLegacy(x);
     })();
@@ -1285,16 +1278,13 @@ export async function importAllFromFile(file: File, mode: "replace" | "merge" = 
   });
 
   const nextPurchases = (Array.isArray(payload.purchases) ? payload.purchases : []).map((x: any) => {
-    const lines = normalizePurchaseLines(x.lines);
     const kind = normalizeKind(x.kind);
-    // ✅ sørg for line.kind også ved import
-    const linesWithKind = lines.map((l) => ({ ...l, kind: l.kind ?? kind }));
-
+    const lines = normalizePurchaseLines(x.lines).map((l) => ({ ...l, kind: l.kind ?? kind }));
     return {
       id: str(x.id, uid("pur")),
       supplierName: x.supplierName ? String(x.supplierName) : undefined,
       kind,
-      lines: linesWithKind,
+      lines,
       total: round2(num(x.total, lines.length ? sumPurchaseLinesTotal(lines) : 0)),
       payableId: x.payableId ? String(x.payableId) : undefined,
       costMode: x.costMode === "set_latest" || x.costMode === "keep" ? x.costMode : "weighted",
@@ -1323,7 +1313,7 @@ export async function importAllFromFile(file: File, mode: "replace" | "merge" = 
     setItems(nextItems);
     setCustomers(nextCustomers);
     setSales(nextSales);
-    setReceivables(nextReceivables));
+    setReceivables(nextReceivables); // ✅ FIX (ingen ekstra parentes)
     setPayables(nextPayables);
     setPurchases(nextPurchases);
   }
@@ -1350,7 +1340,7 @@ export function clearAllData(): void {
   emitChange();
 }
 
-/** File picker for import */
+/** File picker for import (for onClick) */
 export function pickImportAllFile(mode: "replace" | "merge" = "replace"): void {
   const input = document.createElement("input");
   input.type = "file";
@@ -1361,4 +1351,57 @@ export function pickImportAllFile(mode: "replace" | "merge" = "replace"): void {
     await importAllFromFile(file, mode);
   };
   input.click();
+}
+
+export type StorageSummary = {
+  itemsCount: number;
+  customersCount: number;
+  salesCount: number;
+  receivablesCount: number;
+  payablesCount: number;
+  purchasesCount: number;
+  unpaidSales: number;
+  unpaidReceivables: number;
+  unpaidPayables: number;
+  spentTotal: number;
+  saldo: number;
+  approxBytes: number;
+};
+
+export function getStorageSummary(): StorageSummary {
+  const items = getItems();
+  const customers = getCustomers();
+  const sales = getSales();
+  const receivables = getReceivables();
+  const payables = getPayables();
+  const purchases = getPurchases();
+
+  const unpaidSales = round2(sales.reduce((a, s) => a + Math.max(0, saleRemaining(s)), 0));
+  const unpaidReceivables = round2(receivables.reduce((a, r) => a + Math.max(0, receivableRemaining(r)), 0));
+  const unpaidPayables = round2(payables.reduce((a, p) => a + Math.max(0, payableRemaining(p)), 0));
+  const spentTotal = round2(purchases.reduce((a, p) => a + (Number(p.total) || 0), 0));
+
+  const approxBytes =
+    (localStorage.getItem(LS_KEYS.items)?.length || 0) +
+    (localStorage.getItem(LS_KEYS.customers)?.length || 0) +
+    (localStorage.getItem(LS_KEYS.sales)?.length || 0) +
+    (localStorage.getItem(LS_KEYS.receivables)?.length || 0) +
+    (localStorage.getItem(LS_KEYS.payables)?.length || 0) +
+    (localStorage.getItem(LS_KEYS.purchases)?.length || 0) +
+    (localStorage.getItem(LS_KEYS.saldo)?.length || 0);
+
+  return {
+    itemsCount: items.length,
+    customersCount: customers.length,
+    salesCount: sales.length,
+    receivablesCount: receivables.length,
+    payablesCount: payables.length,
+    purchasesCount: purchases.length,
+    unpaidSales,
+    unpaidReceivables,
+    unpaidPayables,
+    spentTotal,
+    saldo: getSaldo(),
+    approxBytes,
+  };
 }
