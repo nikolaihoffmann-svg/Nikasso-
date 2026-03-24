@@ -98,10 +98,14 @@ export type Payable = {
   updatedAt: string;
 };
 
+/** Innkjøp-linje: kan være vare / forbruk / utstyr */
+export type PurchaseLineKind = "item" | "consumable" | "equipment";
+
 export type PurchaseLine = {
   id: string;
-  itemId: string;
-  itemName: string;
+  kind: PurchaseLineKind; // NEW
+  itemId?: string; // kun for kind=item
+  name: string; // alltid: hva vi viser i UI
   qty: number;
   unitCost: number;
 };
@@ -109,6 +113,7 @@ export type PurchaseLine = {
 export type Purchase = {
   id: string;
   supplierName?: string;
+
   lines: PurchaseLine[];
   total: number;
 
@@ -146,8 +151,9 @@ export type AddSaleInput = {
 export type AddPurchaseInput = {
   supplierName?: string;
   lines: Array<{
-    itemId: string;
-    itemName: string;
+    kind: "item" | "consumable" | "equipment";
+    itemId?: string; // kun item
+    itemName: string; // name for alle linjer
     qty: number;
     unitCost: number;
   }>;
@@ -245,14 +251,21 @@ function normalizeLines(raw: any): SaleLine[] {
 function normalizePurchaseLines(raw: any): PurchaseLine[] {
   const arr: any[] = Array.isArray(raw) ? raw : [];
   return arr
-    .map((l) => ({
-      id: str(l.id, uid("pl")),
-      itemId: str(l.itemId),
-      itemName: str(l.itemName),
-      qty: Math.trunc(num(l.qty, 0)),
-      unitCost: round2(num(l.unitCost, 0)),
-    }))
-    .filter((l) => l.itemId && l.itemName && l.qty !== 0);
+    .map((l) => {
+      const kind: PurchaseLineKind = l.kind === "consumable" || l.kind === "equipment" ? l.kind : "item";
+      const name = str(l.name ?? l.itemName ?? "");
+      const itemId = l.itemId ? str(l.itemId) : undefined;
+
+      return {
+        id: str(l.id, uid("pl")),
+        kind,
+        itemId,
+        name,
+        qty: Math.trunc(num(l.qty, 0)),
+        unitCost: round2(num(l.unitCost, 0)),
+      };
+    })
+    .filter((l) => l.name && l.qty !== 0);
 }
 
 function sumSaleLinesTotal(lines: SaleLine[]): number {
@@ -971,19 +984,26 @@ function applyCostUpdate(item: Vare, qtyBought: number, unitCost: number, mode: 
   return { ...item, cost: nextCost, updatedAt: nowIso() };
 }
 
-/** Registrer innkjøp + øk lager + evt opprett leverandørgjeld (payable) */
+/** Registrer innkjøp + (kun item) øk lager + evt opprett leverandørgjeld (payable) */
 export function addPurchase(input: AddPurchaseInput): void {
   const purchases = getPurchases();
 
   const lines: PurchaseLine[] = (input.lines || [])
-    .map((l) => ({
-      id: uid("pl"),
-      itemId: String(l.itemId || ""),
-      itemName: String(l.itemName || ""),
-      qty: Math.trunc(num(l.qty, 0)),
-      unitCost: round2(num(l.unitCost, 0)),
-    }))
-    .filter((l) => l.itemId && l.itemName && l.qty > 0);
+    .map((l) => {
+      const kind: PurchaseLineKind = l.kind === "consumable" || l.kind === "equipment" ? l.kind : "item";
+      const name = String(l.itemName || "");
+      const itemId = l.itemId ? String(l.itemId) : undefined;
+
+      return {
+        id: uid("pl"),
+        kind,
+        itemId,
+        name,
+        qty: Math.trunc(num(l.qty, 0)),
+        unitCost: round2(num(l.unitCost, 0)),
+      };
+    })
+    .filter((l) => l.name && l.qty > 0 && l.unitCost > 0);
 
   if (lines.length === 0) return;
 
@@ -991,11 +1011,15 @@ export function addPurchase(input: AddPurchaseInput): void {
   const paid = input.paid === undefined ? true : Boolean(input.paid);
   const costMode = input.costMode || "weighted";
 
-  // 1) Oppdater varer: stock + cost
+  // 1) Oppdater varer: stock + cost (KUN for kind=item)
   const itemsNow = getItems();
   for (const ln of lines) {
+    if (ln.kind !== "item") continue;
+    if (!ln.itemId) continue;
+
     const idx = itemsNow.findIndex((it) => it.id === ln.itemId);
-    if (idx < 0) continue; // hvis vare mangler (bør ikke skje)
+    if (idx < 0) continue;
+
     const it = itemsNow[idx];
     const nextStock = Math.trunc(num(it.stock, 0)) + Math.trunc(num(ln.qty, 0));
     const updatedCostItem = applyCostUpdate({ ...it, stock: nextStock }, ln.qty, ln.unitCost, costMode);
@@ -1305,6 +1329,18 @@ export function pickImportAllFile(mode: "replace" | "merge" = "replace"): void {
   input.click();
 }
 
+/** Alias-funksjoner (fikser build-feil i Backup.tsx hvis den forventer disse) */
+export function pickImportAllFileReplace(): void {
+  pickImportAllFile("replace");
+}
+export function pickImportAllFileMerge(): void {
+  pickImportAllFile("merge");
+}
+
+/* =========================
+   Storage summary + totals
+========================= */
+
 export type StorageSummary = {
   itemsCount: number;
   customersCount: number;
@@ -1355,5 +1391,38 @@ export function getStorageSummary(): StorageSummary {
     spentTotal,
     saldo: getSaldo(),
     approxBytes,
+  };
+}
+
+/**
+ * Totals for Oversikt:
+ * - itemsTotal: varekjøp (oppdaterer lager)
+ * - consumablesTotal: forbruk
+ * - equipmentTotal: utstyr
+ */
+export function getPurchaseTotalsByKind(purchases?: Purchase[]) {
+  const list = purchases || getPurchases();
+  let itemsTotal = 0;
+  let consumablesTotal = 0;
+  let equipmentTotal = 0;
+
+  for (const p of list) {
+    for (const l of p.lines || []) {
+      const lineSum = round2(num(l.qty, 0) * num(l.unitCost, 0));
+      if (l.kind === "consumable") consumablesTotal += lineSum;
+      else if (l.kind === "equipment") equipmentTotal += lineSum;
+      else itemsTotal += lineSum;
+    }
+  }
+
+  itemsTotal = round2(itemsTotal);
+  consumablesTotal = round2(consumablesTotal);
+  equipmentTotal = round2(equipmentTotal);
+
+  return {
+    itemsTotal,
+    consumablesTotal,
+    equipmentTotal,
+    grandTotal: round2(itemsTotal + consumablesTotal + equipmentTotal),
   };
 }
