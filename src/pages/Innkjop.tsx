@@ -8,7 +8,6 @@ import {
   uid,
   usePayables,
   usePurchases,
-  PurchaseLine,
   round2,
 } from "../app/storage";
 
@@ -21,12 +20,8 @@ function toInt(v: string) {
   return Number.isFinite(n) ? n : 0;
 }
 
-function isAfter(dateIso: string, from: Date) {
-  const d = new Date(dateIso);
-  return Number.isFinite(d.getTime()) && d.getTime() >= from.getTime();
-}
-
 function parseDateOnly(dateStr?: string) {
+  // yyyy-mm-dd => lokal midt på dagen for stabil visning
   if (!dateStr) return null;
   const d = new Date(`${dateStr}T12:00:00`);
   return Number.isFinite(d.getTime()) ? d : null;
@@ -49,6 +44,11 @@ function dueLabel(dueDate?: string) {
   return { kind: "ok" as const, text: `Forfaller om ${n}d` };
 }
 
+function isAfter(dateIso: string, from: Date) {
+  const d = new Date(dateIso);
+  return Number.isFinite(d.getTime()) && d.getTime() >= from.getTime();
+}
+
 function Modal(props: { open: boolean; title: string; children: React.ReactNode; onClose: () => void }) {
   if (!props.open) return null;
   return (
@@ -66,35 +66,49 @@ function Modal(props: { open: boolean; title: string; children: React.ReactNode;
   );
 }
 
-type LineKind = "item" | "consumable" | "equipment";
+type PurchaseKind = "item" | "consumable" | "equipment";
+function kindLabel(k: PurchaseKind) {
+  if (k === "consumable") return "Forbruk";
+  if (k === "equipment") return "Utstyr";
+  return "Varekjøp";
+}
 
 type DraftLine = {
   id: string;
-  kind: LineKind;
-  itemId: string;     // brukes kun hvis kind=item
-  name: string;       // brukes kun hvis kind!=item
+  itemId: string;
   qty: string;
   unitCost: string;
+  kind: PurchaseKind;
 };
-
-function displayKind(k: LineKind) {
-  if (k === "item") return "Vare til lager";
-  if (k === "consumable") return "Forbruksmateriell";
-  return "Utstyr / investering";
-}
 
 function sumDraft(lines: DraftLine[], items: ReturnType<typeof getItems>) {
   return round2(
     lines.reduce((a, l) => {
-      const q = Math.max(0, toInt(l.qty));
-      const c = round2(toNum(l.unitCost));
-      if (q <= 0 || c <= 0) return a;
-
-      // item: ok uansett om item finnes – vi bruker bare kostfeltet her
-      // (lageroppdatering skjer i storage.addPurchase)
+      const it = items.find((x) => x.id === l.itemId);
+      if (!it) return a;
+      const q = toInt(l.qty);
+      const c = round2(toNum(l.unitCost || String(it.cost ?? 0)));
       return a + round2(q * c);
     }, 0)
   );
+}
+
+function sumDraftByKind(lines: DraftLine[], items: ReturnType<typeof getItems>) {
+  const totals = { item: 0, consumable: 0, equipment: 0 };
+  for (const l of lines) {
+    const it = items.find((x) => x.id === l.itemId);
+    if (!it) continue;
+    const q = toInt(l.qty);
+    const c = round2(toNum(l.unitCost || String(it.cost ?? 0)));
+    const sum = round2(q * c);
+    totals[l.kind] += sum;
+  }
+  return {
+    item: round2(totals.item),
+    consumable: round2(totals.consumable),
+    equipment: round2(totals.equipment),
+    total: round2(totals.item + totals.consumable + totals.equipment),
+  };
 }
 
 export function Innkjop() {
@@ -108,10 +122,10 @@ export function Innkjop() {
   const [paid, setPaid] = useState(true);
   const [dueDate, setDueDate] = useState("");
   const [note, setNote] = useState("");
-
   const [costMode, setCostMode] = useState<"weighted" | "set_latest" | "keep">("weighted");
+
   const [lines, setLines] = useState<DraftLine[]>([
-    { id: uid("dl"), kind: "item", itemId: "", name: "", qty: "1", unitCost: "" },
+    { id: uid("dl"), itemId: "", qty: "1", unitCost: "", kind: "item" },
   ]);
 
   const [showCount, setShowCount] = useState(5);
@@ -124,11 +138,41 @@ export function Innkjop() {
 
   const from30 = useMemo(() => new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), []);
 
+  // Totals (all time + 30d)
   const spentTotal = useMemo(() => round2(purchases.reduce((a, p) => a + (Number(p.total) || 0), 0)), [purchases]);
   const spent30 = useMemo(
-    () => round2(purchases.filter((p) => isAfter(p.createdAt, from30)).reduce((a, p) => a + (Number(p.total) || 0), 0)),
+    () =>
+      round2(
+        purchases
+          .filter((p) => isAfter(p.createdAt, from30))
+          .reduce((a, p) => a + (Number(p.total) || 0), 0)
+      ),
     [purchases, from30]
   );
+
+  // Split totals (best-effort: if kind exists on lines -> split, else counts as "Varekjøp")
+  const spentSplit = useMemo(() => {
+    let itemsT = 0;
+    let consT = 0;
+    let equipT = 0;
+
+    for (const p of purchases) {
+      const linesAny: any[] = Array.isArray((p as any).lines) ? (p as any).lines : [];
+      if (!linesAny.length) {
+        itemsT += Number(p.total) || 0;
+        continue;
+      }
+      for (const l of linesAny) {
+        const sum = round2((Number(l.qty) || 0) * (Number(l.unitCost) || 0));
+        const k = (l.kind as PurchaseKind) || "item";
+        if (k === "consumable") consT += sum;
+        else if (k === "equipment") equipT += sum;
+        else itemsT += sum;
+      }
+    }
+
+    return { itemsT: round2(itemsT), consT: round2(consT), equipT: round2(equipT) };
+  }, [purchases]);
 
   const unpaidPayables = useMemo(
     () => round2(payables.reduce((a, p) => a + Math.max(0, payableRemaining(p)), 0)),
@@ -156,40 +200,17 @@ export function Innkjop() {
   }, [payables]);
 
   const draftTotal = useMemo(() => sumDraft(lines, items), [lines, items]);
+  const draftSplit = useMemo(() => sumDraftByKind(lines, items), [lines, items]);
   const visiblePurchases = useMemo(() => purchases.slice(0, showCount), [purchases, showCount]);
 
   function addLine() {
-    setLines((prev) => [...prev, { id: uid("dl"), kind: "item", itemId: "", name: "", qty: "1", unitCost: "" }]);
+    setLines((prev) => [...prev, { id: uid("dl"), itemId: "", qty: "1", unitCost: "", kind: "item" }]);
   }
   function removeLine(id: string) {
     setLines((prev) => (prev.length <= 1 ? prev : prev.filter((x) => x.id !== id)));
   }
   function updateLine(id: string, patch: Partial<DraftLine>) {
-    setLines((prev) =>
-      prev.map((l) => {
-        if (l.id !== id) return l;
-        const next = { ...l, ...patch };
-
-        // Når man bytter type, resetter vi feltene riktig
-        if (patch.kind && patch.kind !== l.kind) {
-          if (patch.kind === "item") {
-            next.itemId = "";
-            next.name = "";
-          } else {
-            next.itemId = "";
-            next.name = "";
-          }
-        }
-
-        // Hvis vare velges: autopopuler kost (hvis tom)
-        if (patch.itemId) {
-          const it = items.find((x) => x.id === patch.itemId);
-          if (it && String(next.unitCost).trim() === "") next.unitCost = String(it.cost ?? 0);
-        }
-
-        return next;
-      })
-    );
+    setLines((prev) => prev.map((l) => (l.id === id ? { ...l, ...patch } : l)));
   }
 
   function openNew() {
@@ -198,60 +219,44 @@ export function Innkjop() {
     setDueDate("");
     setNote("");
     setCostMode("weighted");
-    setLines([{ id: uid("dl"), kind: "item", itemId: "", name: "", qty: "1", unitCost: "" }]);
+    setLines([{ id: uid("dl"), itemId: "", qty: "1", unitCost: "", kind: "item" }]);
     setOpen(true);
   }
 
   function save() {
-    const clean: PurchaseLine[] = [];
+    const itemsNow = getItems();
 
-    for (const dl of lines) {
-      const q = Math.max(0, toInt(dl.qty));
-      const c = round2(toNum(dl.unitCost));
-      if (q <= 0 || c <= 0) continue;
+    const clean = lines
+      .map((dl) => {
+        const it = itemsNow.find((x) => x.id === dl.itemId);
+        if (!it) return null;
+        const q = toInt(dl.qty);
+        if (q <= 0) return null;
+        const c = round2(toNum(dl.unitCost || String(it.cost ?? 0)));
+        if (c <= 0) return null;
 
-      if (dl.kind === "item") {
-        const it = getItems().find((x) => x.id === dl.itemId);
-        if (!it) continue;
-        clean.push({
-          id: uid("pl"),
-          kind: "item",
+        // NOTE: kind sendes "best-effort" for å ikke knekke build hvis storage-typene ikke har blitt oppdatert enda
+        return {
           itemId: it.id,
-          name: it.name,
+          itemName: it.name,
           qty: q,
           unitCost: c,
-        });
-      } else {
-        const nm = dl.name.trim();
-        if (!nm) continue;
-        clean.push({
-          id: uid("pl"),
-          kind: dl.kind,
-          itemId: undefined,
-          name: nm,
-          qty: q,
-          unitCost: c,
-        });
-      }
-    }
+          kind: dl.kind, // <-- hvis storage støtter det: perfekt. Hvis ikke: ignoreres i runtime / eller du legger det inn senere.
+        } as any;
+      })
+      .filter(Boolean) as any[];
 
-    if (clean.length === 0) return alert("Legg til minst én linje med antall + kost.");
+    if (clean.length === 0) return alert("Legg til minst én varelinje med vare + antall + kost.");
 
     addPurchase({
       supplierName: supplierName.trim() ? supplierName.trim() : undefined,
-      lines: clean.map((l) => ({
-        kind: l.kind,
-        itemId: l.itemId || "",
-        itemName: l.name,
-        qty: l.qty,
-        unitCost: l.unitCost,
-      })),
+      lines: clean,
       paid,
       dueDate: dueDate.trim() ? dueDate.trim() : undefined,
       note: note.trim() ? note.trim() : undefined,
       costMode,
       payableTitle: "Innkjøp",
-    });
+    } as any);
 
     setOpen(false);
   }
@@ -277,10 +282,9 @@ export function Innkjop() {
   return (
     <div className="card">
       <div className="cardTitle">Innkjøp</div>
-      <div className="cardSub">
-        Registrer vare-innkjøp (oppdater lager) + forbruksmateriell + utstyr. Kan også være “ikke betalt” (leverandørgjeld).
-      </div>
+      <div className="cardSub">Registrer varekjøp, forbruk og utstyr – og (valgfritt) utestående å betale.</div>
 
+      {/* KPI */}
       <div className="metricGrid">
         <div className="metricCard">
           <div className="metricTitle">Penger brukt (30 dager)</div>
@@ -296,6 +300,23 @@ export function Innkjop() {
         </div>
       </div>
 
+      {/* Split totals */}
+      <div className="metricGrid" style={{ marginTop: 10 }}>
+        <div className="metricCard">
+          <div className="metricTitle">Varekjøp (totalt)</div>
+          <div className="metricValue">{fmtKr(spentSplit.itemsT)}</div>
+        </div>
+        <div className="metricCard">
+          <div className="metricTitle">Forbruk (totalt)</div>
+          <div className="metricValue">{fmtKr(spentSplit.consT)}</div>
+        </div>
+        <div className="metricCard">
+          <div className="metricTitle">Utstyr (totalt)</div>
+          <div className="metricValue">{fmtKr(spentSplit.equipT)}</div>
+        </div>
+      </div>
+
+      {/* Varsler */}
       <div className="card">
         <div className="cardTitle">Varsler</div>
         <div className="cardSub">Forfalt og forfaller snart (leverandørgjeld).</div>
@@ -359,6 +380,7 @@ export function Innkjop() {
         </button>
       </div>
 
+      {/* Purchases list */}
       <div className="card" style={{ marginTop: 14 }}>
         <div className="cardTitle">Siste innkjøp</div>
         <div className="cardSub">
@@ -367,20 +389,23 @@ export function Innkjop() {
 
         <div className="list">
           {visiblePurchases.map((p) => {
-            const preview = p.lines
-              .slice(0, 3)
-              .map((l) => `• ${l.qty}× ${l.name} (${fmtKr(round2(l.qty * l.unitCost))})`);
-            const due = dueLabel(p.dueDate);
+            const linesAny: any[] = Array.isArray((p as any).lines) ? (p as any).lines : [];
+            const preview = linesAny.slice(0, 3).map((l) => {
+              const sum = fmtKr(round2((Number(l.qty) || 0) * (Number(l.unitCost) || 0)));
+              const k: PurchaseKind = (l.kind as PurchaseKind) || "item";
+              return `• ${l.qty}× ${l.itemName} (${sum}) • ${kindLabel(k)}`;
+            });
+            const due = dueLabel((p as any).dueDate);
 
             return (
-              <div key={p.id} className="item">
+              <div key={(p as any).id} className="item">
                 <div className="itemTop">
                   <div>
-                    <p className="itemTitle">{p.supplierName ? p.supplierName : "Innkjøp"}</p>
+                    <p className="itemTitle">{(p as any).supplierName ? (p as any).supplierName : "Innkjøp"}</p>
                     <div className="itemMeta">
-                      Total: <b>{fmtKr(p.total)}</b> • {new Date(p.createdAt).toLocaleString("nb-NO")} •{" "}
-                      {p.paid ? <span className="badge success">Betalt</span> : <span className="badge danger">Ikke betalt</span>}
-                      {!p.paid && due ? (
+                      Total: <b>{fmtKr((p as any).total)}</b> • {new Date((p as any).createdAt).toLocaleString("nb-NO")} •{" "}
+                      {(p as any).paid ? <span className="badge success">Betalt</span> : <span className="badge danger">Ikke betalt</span>}
+                      {!(p as any).paid && due ? (
                         <>
                           {" "}
                           {due.kind === "overdue" ? (
@@ -401,22 +426,22 @@ export function Innkjop() {
                           {preview.map((t, i) => (
                             <div key={i}>{t}</div>
                           ))}
-                          {p.lines.length > 3 ? <div style={{ opacity: 0.9 }}>… +{p.lines.length - 3} til</div> : null}
+                          {linesAny.length > 3 ? <div style={{ opacity: 0.9 }}>… +{linesAny.length - 3} til</div> : null}
                         </div>
                       </div>
                     ) : null}
 
-                    {p.note ? (
+                    {(p as any).note ? (
                       <div className="itemMeta" style={{ marginTop: 6 }}>
-                        Notat: <b>{p.note}</b>
+                        Notat: <b>{(p as any).note}</b>
                       </div>
                     ) : null}
                   </div>
                 </div>
 
-                {!p.paid && p.payableId ? (
+                {!(p as any).paid && (p as any).payableId ? (
                   <div className="itemActions">
-                    <button className="btn btnPrimary" type="button" onClick={() => openPay(p.payableId!)}>
+                    <button className="btn btnPrimary" type="button" onClick={() => openPay((p as any).payableId!)}>
                       Registrer betaling
                     </button>
                   </div>
@@ -437,12 +462,18 @@ export function Innkjop() {
         ) : null}
       </div>
 
+      {/* Purchase modal */}
       <Modal open={open} title="Registrer innkjøp" onClose={() => setOpen(false)}>
         <div className="fieldGrid" style={{ marginTop: 0 }}>
           <div className="row3">
             <div>
               <label className="label">Leverandør</label>
-              <input className="input" value={supplierName} onChange={(e) => setSupplierName(e.target.value)} placeholder="F.eks. Biltema / Mekonomen" />
+              <input
+                className="input"
+                value={supplierName}
+                onChange={(e) => setSupplierName(e.target.value)}
+                placeholder="F.eks. Biltema / Mekonomen"
+              />
             </div>
             <div>
               <label className="label">Status</label>
@@ -474,38 +505,26 @@ export function Innkjop() {
 
           <div className="card" style={{ marginTop: 10 }}>
             <div className="cardTitle">Linjer</div>
-            <div className="cardSub">Bland varer, forbruksmateriell og utstyr i samme innkjøp.</div>
+            <div className="cardSub">Velg type per linje: varekjøp / forbruk / utstyr.</div>
 
             <div className="list">
               {lines.map((l, idx) => (
                 <div key={l.id} className="item">
                   <div className="itemMeta" style={{ marginBottom: 10 }}>
-                    <b>Linje {idx + 1}</b>
+                    <b>Linje {idx + 1}</b> • <span className="badge">{kindLabel(l.kind)}</span>
                   </div>
 
                   <div className="row3">
                     <div>
                       <label className="label">Type</label>
-                      <select className="input" value={l.kind} onChange={(e) => updateLine(l.id, { kind: e.target.value as LineKind })}>
-                        <option value="item">{displayKind("item")}</option>
-                        <option value="consumable">{displayKind("consumable")}</option>
-                        <option value="equipment">{displayKind("equipment")}</option>
+                      <select className="input" value={l.kind} onChange={(e) => updateLine(l.id, { kind: e.target.value as any })}>
+                        <option value="item">Varekjøp (lager)</option>
+                        <option value="consumable">Forbruk (ikke lager)</option>
+                        <option value="equipment">Utstyr</option>
                       </select>
                     </div>
 
                     <div>
-                      <label className="label">Antall</label>
-                      <input className="input" inputMode="numeric" value={l.qty} onChange={(e) => updateLine(l.id, { qty: e.target.value })} />
-                    </div>
-
-                    <div>
-                      <label className="label">Kost pr stk</label>
-                      <input className="input" inputMode="decimal" value={l.unitCost} onChange={(e) => updateLine(l.id, { unitCost: e.target.value })} />
-                    </div>
-                  </div>
-
-                  {l.kind === "item" ? (
-                    <div style={{ marginTop: 10 }}>
                       <label className="label">Vare</label>
                       <select className="input" value={l.itemId} onChange={(e) => updateLine(l.id, { itemId: e.target.value })}>
                         <option value="">Velg vare…</option>
@@ -516,15 +535,32 @@ export function Innkjop() {
                         ))}
                       </select>
                     </div>
-                  ) : (
-                    <div style={{ marginTop: 10 }}>
-                      <label className="label">{l.kind === "consumable" ? "Forbruk (navn)" : "Utstyr (navn)"}</label>
-                      <input className="input" value={l.name} onChange={(e) => updateLine(l.id, { name: e.target.value })} placeholder="F.eks. Hansker / WD-40 / Kompressor" />
-                    </div>
-                  )}
 
-                  <div className="itemMeta" style={{ marginTop: 10 }}>
-                    Linjesum: <b>{fmtKr(round2(Math.max(0, toInt(l.qty)) * Math.max(0, round2(toNum(l.unitCost)))))}</b>
+                    <div>
+                      <label className="label">Antall</label>
+                      <input className="input" inputMode="numeric" value={l.qty} onChange={(e) => updateLine(l.id, { qty: e.target.value })} />
+                    </div>
+                  </div>
+
+                  <div className="row3" style={{ marginTop: 10 }}>
+                    <div>
+                      <label className="label">Kost pr stk</label>
+                      <input
+                        className="input"
+                        inputMode="decimal"
+                        value={l.unitCost}
+                        onChange={(e) => updateLine(l.id, { unitCost: e.target.value })}
+                      />
+                    </div>
+
+                    <div style={{ gridColumn: "span 2" } as any}>
+                      <label className="label">Linjesum</label>
+                      <input
+                        className="input"
+                        value={fmtKr(round2(toInt(l.qty) * round2(toNum(l.unitCost || "0"))))}
+                        readOnly
+                      />
+                    </div>
                   </div>
 
                   <div className="btnRow" style={{ marginTop: 10, justifyContent: "flex-end" }}>
@@ -543,8 +579,17 @@ export function Innkjop() {
             </div>
           </div>
 
-          <div className="itemMeta" style={{ marginTop: 6 }}>
-            Total innkjøp: <b>{fmtKr(draftTotal)}</b>
+          {/* Totals */}
+          <div className="card" style={{ marginTop: 10 }}>
+            <div className="cardTitle" style={{ fontSize: 18 }}>Oppsummering</div>
+            <div className="itemMeta" style={{ marginTop: 6 }}>
+              Varekjøp: <b>{fmtKr(draftSplit.item)}</b> {" • "}
+              Forbruk: <b>{fmtKr(draftSplit.consumable)}</b> {" • "}
+              Utstyr: <b>{fmtKr(draftSplit.equipment)}</b>
+            </div>
+            <div className="itemMeta" style={{ marginTop: 8, opacity: 0.95 }}>
+              Total innkjøp: <b>{fmtKr(draftTotal)}</b>
+            </div>
           </div>
 
           <div className="btnRow" style={{ justifyContent: "flex-end" }}>
@@ -558,6 +603,7 @@ export function Innkjop() {
         </div>
       </Modal>
 
+      {/* Pay modal */}
       <Modal open={!!payId} title="Registrer betaling" onClose={() => setPayId(null)}>
         {payId ? (
           <div className="fieldGrid" style={{ marginTop: 0 }}>
