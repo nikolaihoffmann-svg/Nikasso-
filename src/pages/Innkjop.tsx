@@ -1,638 +1,200 @@
-// src/pages/Innkjop.tsx
-import React, { useMemo, useState } from "react";
-import {
-  addPurchase,
-  fmtKr,
-  getItems,
-  payableRemaining,
-  uid,
-  usePayables,
-  usePurchases,
-  round2,
-} from "../app/storage";
+import { useState } from "react";
+import type { PurchaseDraft } from "../types";
+import { createEmptyPurchase, makePurchaseLine, savePurchase } from "../app/storage";
+import ItemPickerWithCreate from "../components/ItemPickerWithCreate";
 
-function toNum(v: string) {
-  const n = Number(String(v).replace(",", "."));
-  return Number.isFinite(n) ? n : 0;
-}
-function toInt(v: string) {
-  const n = Math.trunc(toNum(v));
-  return Number.isFinite(n) ? n : 0;
-}
+export default function Innkjop() {
+  const [draft, setDraft] = useState<PurchaseDraft>(createEmptyPurchase());
+  const [message, setMessage] = useState("");
 
-function parseDateOnly(dateStr?: string) {
-  // yyyy-mm-dd => lokal midt på dagen for stabil visning
-  if (!dateStr) return null;
-  const d = new Date(`${dateStr}T12:00:00`);
-  return Number.isFinite(d.getTime()) ? d : null;
-}
-
-function daysUntil(dueDate?: string) {
-  const d = parseDateOnly(dueDate);
-  if (!d) return null;
-  const now = new Date();
-  const diff = d.getTime() - now.getTime();
-  return Math.ceil(diff / (1000 * 60 * 60 * 24));
-}
-
-function dueLabel(dueDate?: string) {
-  const n = daysUntil(dueDate);
-  if (n === null) return null;
-  if (n < 0) return { kind: "overdue" as const, text: `Forfalt (${Math.abs(n)}d)` };
-  if (n === 0) return { kind: "soon" as const, text: "Forfaller i dag" };
-  if (n <= 7) return { kind: "soon" as const, text: `Forfaller om ${n}d` };
-  return { kind: "ok" as const, text: `Forfaller om ${n}d` };
-}
-
-function isAfter(dateIso: string, from: Date) {
-  const d = new Date(dateIso);
-  return Number.isFinite(d.getTime()) && d.getTime() >= from.getTime();
-}
-
-function Modal(props: { open: boolean; title: string; children: React.ReactNode; onClose: () => void }) {
-  if (!props.open) return null;
-  return (
-    <div className="modalBackdrop" role="dialog" aria-modal="true" onClick={props.onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modalHeader">
-          <p className="modalTitle">{props.title}</p>
-          <button className="iconBtn" type="button" onClick={props.onClose} aria-label="Lukk">
-            ✕
-          </button>
-        </div>
-        <div className="modalBody">{props.children}</div>
-      </div>
-    </div>
-  );
-}
-
-type PurchaseKind = "item" | "consumable" | "equipment";
-function kindLabel(k: PurchaseKind) {
-  if (k === "consumable") return "Forbruk";
-  if (k === "equipment") return "Utstyr";
-  return "Varekjøp";
-}
-
-type DraftLine = {
-  id: string;
-  itemId: string;
-  qty: string;
-  unitCost: string;
-  kind: PurchaseKind;
-};
-
-function sumDraft(lines: DraftLine[], items: ReturnType<typeof getItems>) {
-  return round2(
-    lines.reduce((a, l) => {
-      const it = items.find((x) => x.id === l.itemId);
-      if (!it) return a;
-      const q = toInt(l.qty);
-      const c = round2(toNum(l.unitCost || String(it.cost ?? 0)));
-      return a + round2(q * c);
-    }, 0)
-  );
-}
-
-function sumDraftByKind(lines: DraftLine[], items: ReturnType<typeof getItems>) {
-  const totals = { item: 0, consumable: 0, equipment: 0 };
-  for (const l of lines) {
-    const it = items.find((x) => x.id === l.itemId);
-    if (!it) continue;
-    const q = toInt(l.qty);
-    const c = round2(toNum(l.unitCost || String(it.cost ?? 0)));
-    const sum = round2(q * c);
-    totals[l.kind] += sum;
-  }
-  return {
-    item: round2(totals.item),
-    consumable: round2(totals.consumable),
-    equipment: round2(totals.equipment),
-    total: round2(totals.item + totals.consumable + totals.equipment),
-  };
-}
-
-export function Innkjop() {
-  const items = useMemo(() => getItems(), []);
-  const { purchases } = usePurchases();
-  const { payables, addPayment } = usePayables();
-
-  // NEW purchase modal
-  const [open, setOpen] = useState(false);
-  const [supplierName, setSupplierName] = useState("");
-  const [paid, setPaid] = useState(true);
-  const [dueDate, setDueDate] = useState("");
-  const [note, setNote] = useState("");
-  const [costMode, setCostMode] = useState<"weighted" | "set_latest" | "keep">("weighted");
-
-  const [lines, setLines] = useState<DraftLine[]>([
-    { id: uid("dl"), itemId: "", qty: "1", unitCost: "", kind: "item" },
-  ]);
-
-  const [showCount, setShowCount] = useState(5);
-
-  // Pay payable modal
-  const [payId, setPayId] = useState<string | null>(null);
-  const [payAmount, setPayAmount] = useState("0");
-  const [payDate, setPayDate] = useState<string>(new Date().toISOString().slice(0, 10));
-  const [payNote, setPayNote] = useState("");
-
-  const from30 = useMemo(() => new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), []);
-
-  // Totals (all time + 30d)
-  const spentTotal = useMemo(() => round2(purchases.reduce((a, p) => a + (Number(p.total) || 0), 0)), [purchases]);
-  const spent30 = useMemo(
-    () =>
-      round2(
-        purchases
-          .filter((p) => isAfter(p.createdAt, from30))
-          .reduce((a, p) => a + (Number(p.total) || 0), 0)
-      ),
-    [purchases, from30]
-  );
-
-  // Split totals (best-effort: if kind exists on lines -> split, else counts as "Varekjøp")
-  const spentSplit = useMemo(() => {
-    let itemsT = 0;
-    let consT = 0;
-    let equipT = 0;
-
-    for (const p of purchases) {
-      const linesAny: any[] = Array.isArray((p as any).lines) ? (p as any).lines : [];
-      if (!linesAny.length) {
-        itemsT += Number(p.total) || 0;
-        continue;
-      }
-      for (const l of linesAny) {
-        const sum = round2((Number(l.qty) || 0) * (Number(l.unitCost) || 0));
-        const k = (l.kind as PurchaseKind) || "item";
-        if (k === "consumable") consT += sum;
-        else if (k === "equipment") equipT += sum;
-        else itemsT += sum;
-      }
-    }
-
-    return { itemsT: round2(itemsT), consT: round2(consT), equipT: round2(equipT) };
-  }, [purchases]);
-
-  const unpaidPayables = useMemo(
-    () => round2(payables.reduce((a, p) => a + Math.max(0, payableRemaining(p)), 0)),
-    [payables]
-  );
-
-  const dueSoon = useMemo(() => {
-    const list = payables
-      .map((p) => ({ p, remain: Math.max(0, payableRemaining(p)), label: dueLabel(p.dueDate) }))
-      .filter((x) => x.remain > 0)
-      .sort((a, b) => {
-        const ad = parseDateOnly(a.p.dueDate)?.getTime() ?? Number.POSITIVE_INFINITY;
-        const bd = parseDateOnly(b.p.dueDate)?.getTime() ?? Number.POSITIVE_INFINITY;
-        return ad - bd;
+  function updateLine(lineId: string, patch: Partial<PurchaseDraft["lines"][number]>) {
+    setDraft((prev) => {
+      const lines = prev.lines.map((line) => {
+        if (line.id !== lineId) return line;
+        const next = { ...line, ...patch };
+        next.lineTotal = Number(next.qty || 0) * Number(next.unitCost || 0);
+        return next;
       });
-
-    const overdue = list.filter((x) => x.label?.kind === "overdue");
-    const soon = list.filter((x) => x.label?.kind === "soon");
-
-    return {
-      overdue: overdue.slice(0, 5),
-      soon: soon.slice(0, 5),
-      allUnpaid: list.slice(0, 12),
-    };
-  }, [payables]);
-
-  const draftTotal = useMemo(() => sumDraft(lines, items), [lines, items]);
-  const draftSplit = useMemo(() => sumDraftByKind(lines, items), [lines, items]);
-  const visiblePurchases = useMemo(() => purchases.slice(0, showCount), [purchases, showCount]);
+      return { ...prev, lines };
+    });
+  }
 
   function addLine() {
-    setLines((prev) => [...prev, { id: uid("dl"), itemId: "", qty: "1", unitCost: "", kind: "item" }]);
-  }
-  function removeLine(id: string) {
-    setLines((prev) => (prev.length <= 1 ? prev : prev.filter((x) => x.id !== id)));
-  }
-  function updateLine(id: string, patch: Partial<DraftLine>) {
-    setLines((prev) => prev.map((l) => (l.id === id ? { ...l, ...patch } : l)));
+    setDraft((prev) => ({ ...prev, lines: [...prev.lines, makePurchaseLine()] }));
   }
 
-  function openNew() {
-    setSupplierName("");
-    setPaid(true);
-    setDueDate("");
-    setNote("");
-    setCostMode("weighted");
-    setLines([{ id: uid("dl"), itemId: "", qty: "1", unitCost: "", kind: "item" }]);
-    setOpen(true);
-  }
-
-  function save() {
-    const itemsNow = getItems();
-
-    const clean = lines
-      .map((dl) => {
-        const it = itemsNow.find((x) => x.id === dl.itemId);
-        if (!it) return null;
-        const q = toInt(dl.qty);
-        if (q <= 0) return null;
-        const c = round2(toNum(dl.unitCost || String(it.cost ?? 0)));
-        if (c <= 0) return null;
-
-        // NOTE: kind sendes "best-effort" for å ikke knekke build hvis storage-typene ikke har blitt oppdatert enda
-        return {
-          itemId: it.id,
-          itemName: it.name,
-          qty: q,
-          unitCost: c,
-          kind: dl.kind, // <-- hvis storage støtter det: perfekt. Hvis ikke: ignoreres i runtime / eller du legger det inn senere.
-        } as any;
-      })
-      .filter(Boolean) as any[];
-
-    if (clean.length === 0) return alert("Legg til minst én varelinje med vare + antall + kost.");
-
-    addPurchase({
-      supplierName: supplierName.trim() ? supplierName.trim() : undefined,
-      lines: clean,
-      paid,
-      dueDate: dueDate.trim() ? dueDate.trim() : undefined,
-      note: note.trim() ? note.trim() : undefined,
-      costMode,
-      payableTitle: "Innkjøp",
-    } as any);
-
-    setOpen(false);
-  }
-
-  function openPay(payableId: string) {
-    const p = payables.find((x) => x.id === payableId);
-    if (!p) return;
-    setPayId(payableId);
-    setPayAmount(String(Math.max(0, payableRemaining(p)) || 0));
-    setPayNote("");
-    setPayDate(new Date().toISOString().slice(0, 10));
-  }
-
-  function savePay() {
-    if (!payId) return;
-    const a = toNum(payAmount);
-    if (a <= 0) return alert("Beløp må være over 0.");
-    const iso = payDate ? new Date(`${payDate}T12:00:00`).toISOString() : undefined;
-    addPayment(payId, a, payNote.trim() || undefined, iso);
-    setPayId(null);
+  function handleSave() {
+    savePurchase(draft);
+    setMessage("Innkjøp lagret");
+    setDraft(createEmptyPurchase());
   }
 
   return (
-    <div className="card">
-      <div className="cardTitle">Innkjøp</div>
-      <div className="cardSub">Registrer varekjøp, forbruk og utstyr – og (valgfritt) utestående å betale.</div>
+    <div style={pageStyle}>
+      <h1>Innkjøp</h1>
 
-      {/* KPI */}
-      <div className="metricGrid">
-        <div className="metricCard">
-          <div className="metricTitle">Penger brukt (30 dager)</div>
-          <div className="metricValue">{fmtKr(spent30)}</div>
-        </div>
-        <div className="metricCard">
-          <div className="metricTitle">Penger brukt (totalt)</div>
-          <div className="metricValue">{fmtKr(spentTotal)}</div>
-        </div>
-        <div className="metricCard">
-          <div className="metricTitle">Utestående å betale</div>
-          <div className="metricValue">{fmtKr(unpaidPayables)}</div>
-        </div>
-      </div>
+      <div style={cardStyle}>
+        <div style={{ display: "grid", gap: 12 }}>
+          <label style={fieldStyle}>
+            <span>Leverandør</span>
+            <input
+              value={draft.supplier}
+              onChange={(e) => setDraft((prev) => ({ ...prev, supplier: e.target.value }))}
+              placeholder="F.eks. Biltema / Mekonomen"
+            />
+          </label>
 
-      {/* Split totals */}
-      <div className="metricGrid" style={{ marginTop: 10 }}>
-        <div className="metricCard">
-          <div className="metricTitle">Varekjøp (totalt)</div>
-          <div className="metricValue">{fmtKr(spentSplit.itemsT)}</div>
-        </div>
-        <div className="metricCard">
-          <div className="metricTitle">Forbruk (totalt)</div>
-          <div className="metricValue">{fmtKr(spentSplit.consT)}</div>
-        </div>
-        <div className="metricCard">
-          <div className="metricTitle">Utstyr (totalt)</div>
-          <div className="metricValue">{fmtKr(spentSplit.equipT)}</div>
-        </div>
-      </div>
+          <label style={fieldStyle}>
+            <span>Status</span>
+            <select
+              value={draft.status}
+              onChange={(e) =>
+                setDraft((prev) => ({
+                  ...prev,
+                  status: e.target.value as PurchaseDraft["status"],
+                }))
+              }
+            >
+              <option value="betalt">Betalt</option>
+              <option value="ikke_betalt">Ikke betalt</option>
+            </select>
+          </label>
 
-      {/* Varsler */}
-      <div className="card">
-        <div className="cardTitle">Varsler</div>
-        <div className="cardSub">Forfalt og forfaller snart (leverandørgjeld).</div>
+          <label style={fieldStyle}>
+            <span>Oppdater vare-kost</span>
+            <select
+              value={draft.updateCostMode}
+              onChange={(e) =>
+                setDraft((prev) => ({
+                  ...prev,
+                  updateCostMode: e.target.value as PurchaseDraft["updateCostMode"],
+                }))
+              }
+            >
+              <option value="weighted_average">Vektet snitt (anbefalt)</option>
+              <option value="last_price">Sett til siste pris</option>
+              <option value="no_change">Ikke endre</option>
+            </select>
+          </label>
 
-        <div className="list">
-          {dueSoon.overdue.length === 0 && dueSoon.soon.length === 0 ? (
-            <div className="item">
-              <div className="itemMeta">Ingen forfalte / kommende betalinger 🎉</div>
-            </div>
-          ) : null}
+          {draft.lines.map((line, index) => (
+            <div key={line.id} style={lineCardStyle}>
+              <div style={{ fontWeight: 700 }}>Linje {index + 1}</div>
 
-          {dueSoon.overdue.map(({ p, remain, label }) => (
-            <div key={p.id} className="item low">
-              <div className="itemTop">
-                <div>
-                  <p className="itemTitle">{p.supplierName}</p>
-                  <div className="itemMeta">
-                    <span className="badge danger">{label?.text ?? "Forfalt"}</span>{" "}
-                    <span className="badge warn">Gjenstår: {fmtKr(remain)}</span>
-                  </div>
-                  <div className="itemMeta" style={{ marginTop: 6 }}>
-                    {p.title ? <b>{p.title}</b> : null} {p.dueDate ? <>• Forfall: <b>{p.dueDate}</b></> : null}
-                  </div>
-                </div>
+              <label style={fieldStyle}>
+                <span>Type</span>
+                <select
+                  value={line.kind}
+                  onChange={(e) =>
+                    updateLine(line.id, {
+                      kind: e.target.value as typeof line.kind,
+                    })
+                  }
+                >
+                  <option value="varekjop">Varekjøp (lager)</option>
+                  <option value="forbruk">Forbruk</option>
+                  <option value="utstyr">Utstyr</option>
+                </select>
+              </label>
+
+              <label style={fieldStyle}>
+                <span>Vare</span>
+                <ItemPickerWithCreate
+                  value={line.itemId}
+                  onChange={(item) => {
+                    updateLine(line.id, {
+                      itemId: item?.id,
+                      itemName: item?.name ?? "",
+                      unitCost: item?.costPrice ?? 0,
+                      lineTotal: (item?.costPrice ?? 0) * (line.qty || 0),
+                    });
+                  }}
+                />
+              </label>
+
+              <div style={twoColStyle}>
+                <label style={fieldStyle}>
+                  <span>Antall</span>
+                  <input
+                    type="number"
+                    value={line.qty}
+                    onChange={(e) => updateLine(line.id, { qty: Number(e.target.value || 0) })}
+                  />
+                </label>
+
+                <label style={fieldStyle}>
+                  <span>Kostpris</span>
+                  <input
+                    type="number"
+                    value={line.unitCost}
+                    onChange={(e) => updateLine(line.id, { unitCost: Number(e.target.value || 0) })}
+                  />
+                </label>
               </div>
-              <div className="itemActions">
-                <button className="btn btnPrimary" type="button" onClick={() => openPay(p.id)}>
-                  Registrer betaling
-                </button>
-              </div>
+
+              <div style={{ opacity: 0.8 }}>Linjesum: {line.lineTotal.toFixed(2)} kr</div>
             </div>
           ))}
 
-          {dueSoon.soon.map(({ p, remain, label }) => (
-            <div key={p.id} className="item">
-              <div className="itemTop">
-                <div>
-                  <p className="itemTitle">{p.supplierName}</p>
-                  <div className="itemMeta">
-                    <span className="badge warn">{label?.text ?? "Forfaller snart"}</span>{" "}
-                    <span className="badge warn">Gjenstår: {fmtKr(remain)}</span>
-                  </div>
-                  <div className="itemMeta" style={{ marginTop: 6 }}>
-                    {p.title ? <b>{p.title}</b> : null} {p.dueDate ? <>• Forfall: <b>{p.dueDate}</b></> : null}
-                  </div>
-                </div>
-              </div>
-              <div className="itemActions">
-                <button className="btn btnPrimary" type="button" onClick={() => openPay(p.id)}>
-                  Registrer betaling
-                </button>
-              </div>
-            </div>
-          ))}
+          <button style={secondaryButtonStyle} onClick={addLine}>
+            + Legg til linje
+          </button>
+
+          <button style={primaryButtonStyle} onClick={handleSave}>
+            Lagre innkjøp
+          </button>
+
+          {message ? <div>{message}</div> : null}
         </div>
       </div>
-
-      <div className="btnRow" style={{ justifyContent: "space-between" }}>
-        <button className="btn btnPrimary" type="button" onClick={openNew}>
-          + Registrer innkjøp
-        </button>
-      </div>
-
-      {/* Purchases list */}
-      <div className="card" style={{ marginTop: 14 }}>
-        <div className="cardTitle">Siste innkjøp</div>
-        <div className="cardSub">
-          Viser <b>{Math.min(showCount, purchases.length)}</b> av <b>{purchases.length}</b>
-        </div>
-
-        <div className="list">
-          {visiblePurchases.map((p) => {
-            const linesAny: any[] = Array.isArray((p as any).lines) ? (p as any).lines : [];
-            const preview = linesAny.slice(0, 3).map((l) => {
-              const sum = fmtKr(round2((Number(l.qty) || 0) * (Number(l.unitCost) || 0)));
-              const k: PurchaseKind = (l.kind as PurchaseKind) || "item";
-              return `• ${l.qty}× ${l.itemName} (${sum}) • ${kindLabel(k)}`;
-            });
-            const due = dueLabel((p as any).dueDate);
-
-            return (
-              <div key={(p as any).id} className="item">
-                <div className="itemTop">
-                  <div>
-                    <p className="itemTitle">{(p as any).supplierName ? (p as any).supplierName : "Innkjøp"}</p>
-                    <div className="itemMeta">
-                      Total: <b>{fmtKr((p as any).total)}</b> • {new Date((p as any).createdAt).toLocaleString("nb-NO")} •{" "}
-                      {(p as any).paid ? <span className="badge success">Betalt</span> : <span className="badge danger">Ikke betalt</span>}
-                      {!(p as any).paid && due ? (
-                        <>
-                          {" "}
-                          {due.kind === "overdue" ? (
-                            <span className="badge danger">{due.text}</span>
-                          ) : due.kind === "soon" ? (
-                            <span className="badge warn">{due.text}</span>
-                          ) : (
-                            <span className="badge">{due.text}</span>
-                          )}
-                        </>
-                      ) : null}
-                    </div>
-
-                    {preview.length ? (
-                      <div className="itemMeta" style={{ marginTop: 8 }}>
-                        <b>Linjer:</b>
-                        <div style={{ marginTop: 4 }}>
-                          {preview.map((t, i) => (
-                            <div key={i}>{t}</div>
-                          ))}
-                          {linesAny.length > 3 ? <div style={{ opacity: 0.9 }}>… +{linesAny.length - 3} til</div> : null}
-                        </div>
-                      </div>
-                    ) : null}
-
-                    {(p as any).note ? (
-                      <div className="itemMeta" style={{ marginTop: 6 }}>
-                        Notat: <b>{(p as any).note}</b>
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-
-                {!(p as any).paid && (p as any).payableId ? (
-                  <div className="itemActions">
-                    <button className="btn btnPrimary" type="button" onClick={() => openPay((p as any).payableId!)}>
-                      Registrer betaling
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-            );
-          })}
-
-          {purchases.length === 0 ? <div className="item">Ingen innkjøp enda.</div> : null}
-        </div>
-
-        {purchases.length > showCount ? (
-          <div className="btnRow" style={{ justifyContent: "center" }}>
-            <button className="btn" type="button" onClick={() => setShowCount((n) => Math.min(purchases.length, n + 10))}>
-              Vis 10 til
-            </button>
-          </div>
-        ) : null}
-      </div>
-
-      {/* Purchase modal */}
-      <Modal open={open} title="Registrer innkjøp" onClose={() => setOpen(false)}>
-        <div className="fieldGrid" style={{ marginTop: 0 }}>
-          <div className="row3">
-            <div>
-              <label className="label">Leverandør</label>
-              <input
-                className="input"
-                value={supplierName}
-                onChange={(e) => setSupplierName(e.target.value)}
-                placeholder="F.eks. Biltema / Mekonomen"
-              />
-            </div>
-            <div>
-              <label className="label">Status</label>
-              <select className="input" value={paid ? "paid" : "unpaid"} onChange={(e) => setPaid(e.target.value === "paid")}>
-                <option value="paid">Betalt</option>
-                <option value="unpaid">Ikke betalt (legg som utestående)</option>
-              </select>
-            </div>
-            <div>
-              <label className="label">Forfall (valgfritt)</label>
-              <input className="input" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
-            </div>
-          </div>
-
-          <div className="row3">
-            <div>
-              <label className="label">Oppdater vare-kost</label>
-              <select className="input" value={costMode} onChange={(e) => setCostMode(e.target.value as any)}>
-                <option value="weighted">Vektet snitt (anbefalt)</option>
-                <option value="set_latest">Sett til siste pris</option>
-                <option value="keep">Ikke endre</option>
-              </select>
-            </div>
-            <div style={{ gridColumn: "span 2" } as any}>
-              <label className="label">Notat</label>
-              <input className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Valgfritt" />
-            </div>
-          </div>
-
-          <div className="card" style={{ marginTop: 10 }}>
-            <div className="cardTitle">Linjer</div>
-            <div className="cardSub">Velg type per linje: varekjøp / forbruk / utstyr.</div>
-
-            <div className="list">
-              {lines.map((l, idx) => (
-                <div key={l.id} className="item">
-                  <div className="itemMeta" style={{ marginBottom: 10 }}>
-                    <b>Linje {idx + 1}</b> • <span className="badge">{kindLabel(l.kind)}</span>
-                  </div>
-
-                  <div className="row3">
-                    <div>
-                      <label className="label">Type</label>
-                      <select className="input" value={l.kind} onChange={(e) => updateLine(l.id, { kind: e.target.value as any })}>
-                        <option value="item">Varekjøp (lager)</option>
-                        <option value="consumable">Forbruk (ikke lager)</option>
-                        <option value="equipment">Utstyr</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="label">Vare</label>
-                      <select className="input" value={l.itemId} onChange={(e) => updateLine(l.id, { itemId: e.target.value })}>
-                        <option value="">Velg vare…</option>
-                        {items.map((it) => (
-                          <option key={it.id} value={it.id}>
-                            {it.name} (lager: {it.stock})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="label">Antall</label>
-                      <input className="input" inputMode="numeric" value={l.qty} onChange={(e) => updateLine(l.id, { qty: e.target.value })} />
-                    </div>
-                  </div>
-
-                  <div className="row3" style={{ marginTop: 10 }}>
-                    <div>
-                      <label className="label">Kost pr stk</label>
-                      <input
-                        className="input"
-                        inputMode="decimal"
-                        value={l.unitCost}
-                        onChange={(e) => updateLine(l.id, { unitCost: e.target.value })}
-                      />
-                    </div>
-
-                    <div style={{ gridColumn: "span 2" } as any}>
-                      <label className="label">Linjesum</label>
-                      <input
-                        className="input"
-                        value={fmtKr(round2(toInt(l.qty) * round2(toNum(l.unitCost || "0"))))}
-                        readOnly
-                      />
-                    </div>
-                  </div>
-
-                  <div className="btnRow" style={{ marginTop: 10, justifyContent: "flex-end" }}>
-                    <button className="btn" type="button" onClick={() => removeLine(l.id)} disabled={lines.length <= 1}>
-                      Fjern linje
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="btnRow">
-              <button className="btn" type="button" onClick={addLine}>
-                + Legg til linje
-              </button>
-            </div>
-          </div>
-
-          {/* Totals */}
-          <div className="card" style={{ marginTop: 10 }}>
-            <div className="cardTitle" style={{ fontSize: 18 }}>Oppsummering</div>
-            <div className="itemMeta" style={{ marginTop: 6 }}>
-              Varekjøp: <b>{fmtKr(draftSplit.item)}</b> {" • "}
-              Forbruk: <b>{fmtKr(draftSplit.consumable)}</b> {" • "}
-              Utstyr: <b>{fmtKr(draftSplit.equipment)}</b>
-            </div>
-            <div className="itemMeta" style={{ marginTop: 8, opacity: 0.95 }}>
-              Total innkjøp: <b>{fmtKr(draftTotal)}</b>
-            </div>
-          </div>
-
-          <div className="btnRow" style={{ justifyContent: "flex-end" }}>
-            <button className="btn" type="button" onClick={() => setOpen(false)}>
-              Avbryt
-            </button>
-            <button className="btn btnPrimary" type="button" onClick={save}>
-              Lagre innkjøp
-            </button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* Pay modal */}
-      <Modal open={!!payId} title="Registrer betaling" onClose={() => setPayId(null)}>
-        {payId ? (
-          <div className="fieldGrid" style={{ marginTop: 0 }}>
-            <div className="row3">
-              <div>
-                <label className="label">Dato</label>
-                <input className="input" type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} />
-              </div>
-              <div>
-                <label className="label">Beløp</label>
-                <input className="input" inputMode="decimal" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} />
-              </div>
-              <div>
-                <label className="label">Notat</label>
-                <input className="input" value={payNote} onChange={(e) => setPayNote(e.target.value)} placeholder="Valgfritt" />
-              </div>
-            </div>
-
-            <div className="btnRow" style={{ justifyContent: "flex-end" }}>
-              <button className="btn" type="button" onClick={() => setPayId(null)}>
-                Avbryt
-              </button>
-              <button className="btn btnPrimary" type="button" onClick={savePay}>
-                Lagre betaling
-              </button>
-            </div>
-          </div>
-        ) : null}
-      </Modal>
     </div>
   );
 }
+
+const pageStyle: React.CSSProperties = {
+  padding: 16,
+  color: "#fff",
+};
+
+const cardStyle: React.CSSProperties = {
+  background: "rgba(255,255,255,0.04)",
+  border: "1px solid rgba(255,255,255,0.08)",
+  borderRadius: 20,
+  padding: 16,
+};
+
+const lineCardStyle: React.CSSProperties = {
+  background: "rgba(255,255,255,0.03)",
+  borderRadius: 16,
+  padding: 14,
+  display: "grid",
+  gap: 12,
+};
+
+const fieldStyle: React.CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 8,
+};
+
+const twoColStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "1fr 1fr",
+  gap: 12,
+};
+
+const primaryButtonStyle: React.CSSProperties = {
+  padding: "14px 16px",
+  borderRadius: 14,
+  border: 0,
+  cursor: "pointer",
+};
+
+const secondaryButtonStyle: React.CSSProperties = {
+  padding: "14px 16px",
+  borderRadius: 14,
+  border: "1px solid rgba(255,255,255,0.12)",
+  background: "transparent",
+  color: "#fff",
+  cursor: "pointer",
+};
