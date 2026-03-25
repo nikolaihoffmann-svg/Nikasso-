@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { PurchaseDraft } from "../types";
+import type { PurchaseDraft, PurchaseLine } from "../types";
 import { createEmptyPurchase, makePurchaseLine, savePurchase } from "../app/storage";
 import ItemPickerWithCreate from "../components/ItemPickerWithCreate";
 
@@ -7,11 +7,11 @@ export default function Innkjop() {
   const [draft, setDraft] = useState<PurchaseDraft>(createEmptyPurchase());
   const [message, setMessage] = useState("");
 
-  function updateLine(lineId: string, patch: Partial<PurchaseDraft["lines"][number]>) {
-    setDraft((prev) => {
-      const lines = prev.lines.map((line) => {
+  function updateLine(lineId: string, patch: Partial<PurchaseLine>): void {
+    setDraft((prev: PurchaseDraft) => {
+      const lines = prev.lines.map((line: PurchaseLine) => {
         if (line.id !== lineId) return line;
-        const next = { ...line, ...patch };
+        const next: PurchaseLine = { ...line, ...patch };
         next.lineTotal = Number(next.qty || 0) * Number(next.unitCost || 0);
         return next;
       });
@@ -19,11 +19,14 @@ export default function Innkjop() {
     });
   }
 
-  function addLine() {
-    setDraft((prev) => ({ ...prev, lines: [...prev.lines, makePurchaseLine()] }));
+  function addLine(): void {
+    setDraft((prev: PurchaseDraft) => ({
+      ...prev,
+      lines: [...prev.lines, makePurchaseLine()],
+    }));
   }
 
-  function handleSave() {
+  function handleSave(): void {
     savePurchase(draft);
     setMessage("Innkjøp lagret");
     setDraft(createEmptyPurchase());
@@ -39,7 +42,9 @@ export default function Innkjop() {
             <span>Leverandør</span>
             <input
               value={draft.supplier}
-              onChange={(e) => setDraft((prev) => ({ ...prev, supplier: e.target.value }))}
+              onChange={(e) =>
+                setDraft((prev: PurchaseDraft) => ({ ...prev, supplier: e.target.value }))
+              }
               placeholder="F.eks. Biltema / Mekonomen"
             />
           </label>
@@ -49,7 +54,7 @@ export default function Innkjop() {
             <select
               value={draft.status}
               onChange={(e) =>
-                setDraft((prev) => ({
+                setDraft((prev: PurchaseDraft) => ({
                   ...prev,
                   status: e.target.value as PurchaseDraft["status"],
                 }))
@@ -65,7 +70,7 @@ export default function Innkjop() {
             <select
               value={draft.updateCostMode}
               onChange={(e) =>
-                setDraft((prev) => ({
+                setDraft((prev: PurchaseDraft) => ({
                   ...prev,
                   updateCostMode: e.target.value as PurchaseDraft["updateCostMode"],
                 }))
@@ -77,7 +82,7 @@ export default function Innkjop() {
             </select>
           </label>
 
-          {draft.lines.map((line, index) => (
+          {draft.lines.map((line: PurchaseLine, index: number) => (
             <div key={line.id} style={lineCardStyle}>
               <div style={{ fontWeight: 700 }}>Linje {index + 1}</div>
 
@@ -87,7 +92,7 @@ export default function Innkjop() {
                   value={line.kind}
                   onChange={(e) =>
                     updateLine(line.id, {
-                      kind: e.target.value as typeof line.kind,
+                      kind: e.target.value as PurchaseLine["kind"],
                     })
                   }
                 >
@@ -127,7 +132,9 @@ export default function Innkjop() {
                   <input
                     type="number"
                     value={line.unitCost}
-                    onChange={(e) => updateLine(line.id, { unitCost: Number(e.target.value || 0) })}
+                    onChange={(e) =>
+                      updateLine(line.id, { unitCost: Number(e.target.value || 0) })
+                    }
                   />
                 </label>
               </div>
@@ -136,11 +143,11 @@ export default function Innkjop() {
             </div>
           ))}
 
-          <button style={secondaryButtonStyle} onClick={addLine}>
+          <button style={secondaryButtonStyle} onClick={addLine} type="button">
             + Legg til linje
           </button>
 
-          <button style={primaryButtonStyle} onClick={handleSave}>
+          <button style={primaryButtonStyle} onClick={handleSave} type="button">
             Lagre innkjøp
           </button>
 
