@@ -37,19 +37,31 @@ export function App() {
           <div className="h1">NIKASSO</div>
 
           <div className="btnRow">
-            <button className="btn" onClick={() => setTab("backup")}>
+            <button className="btn" onClick={() => setTab("backup")} type="button">
               ⚙️ Data
             </button>
           </div>
         </div>
 
         <nav className="tabs">
-          <button className={tab === "oversikt" ? "active tab" : "tab"} onClick={() => setTab("oversikt")}>Oversikt</button>
-          <button className={tab === "varer" ? "active tab" : "tab"} onClick={() => setTab("varer")}>Varer</button>
-          <button className={tab === "innkjop" ? "active tab" : "tab"} onClick={() => setTab("innkjop")}>Innkjøp</button>
-          <button className={tab === "salg" ? "active tab" : "tab"} onClick={() => setTab("salg")}>Salg</button>
-          <button className={tab === "kunder" ? "active tab" : "tab"} onClick={() => setTab("kunder")}>Kunder</button>
-          <button className={tab === "gjeld" ? "active tab" : "tab"} onClick={() => setTab("gjeld")}>Gjeld</button>
+          <button className={tab === "oversikt" ? "active tab" : "tab"} onClick={() => setTab("oversikt")} type="button">
+            Oversikt
+          </button>
+          <button className={tab === "varer" ? "active tab" : "tab"} onClick={() => setTab("varer")} type="button">
+            Varer
+          </button>
+          <button className={tab === "innkjop" ? "active tab" : "tab"} onClick={() => setTab("innkjop")} type="button">
+            Innkjøp
+          </button>
+          <button className={tab === "salg" ? "active tab" : "tab"} onClick={() => setTab("salg")} type="button">
+            Salg
+          </button>
+          <button className={tab === "kunder" ? "active tab" : "tab"} onClick={() => setTab("kunder")} type="button">
+            Kunder
+          </button>
+          <button className={tab === "gjeld" ? "active tab" : "tab"} onClick={() => setTab("gjeld")} type="button">
+            Gjeld
+          </button>
         </nav>
       </header>
 
@@ -57,3 +69,5 @@ export function App() {
     </div>
   );
 }
+
+export default App;
