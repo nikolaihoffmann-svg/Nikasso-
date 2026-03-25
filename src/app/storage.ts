@@ -8,15 +8,15 @@ import type {
   SaleLine,
 } from "../types";
 
-const ITEMS_KEY = "app_items_v1";
-const PURCHASES_KEY = "app_purchases_v1";
-const SALES_KEY = "app_sales_v1";
+const ITEMS_KEY = "nikasso_items_v1";
+const PURCHASES_KEY = "nikasso_purchases_v1";
+const SALES_KEY = "nikasso_sales_v1";
 
-function nowIso() {
+function nowIso(): string {
   return new Date().toISOString();
 }
 
-function uid(prefix = "id") {
+export function uid(prefix = "id"): string {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}_${Date.now().toString(36)}`;
 }
 
@@ -30,17 +30,24 @@ function readJson<T>(key: string, fallback: T): T {
   }
 }
 
-function writeJson<T>(key: string, value: T) {
+function writeJson<T>(key: string, value: T): void {
   localStorage.setItem(key, JSON.stringify(value));
 }
 
-function clampNumber(value: unknown, fallback = 0) {
+function clampNumber(value: unknown, fallback = 0): number {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
 }
 
-function round2(n: number) {
+function round2(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+export function fmtKr(n: number): string {
+  return `${round2(n).toLocaleString("no-NO", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })} kr`;
 }
 
 export type CreateItemInput = {
@@ -144,7 +151,7 @@ export function updateItem(itemId: string, input: UpdateItemInput): InventoryIte
   return updated;
 }
 
-export function deleteItem(itemId: string) {
+export function deleteItem(itemId: string): void {
   const items = readJson<InventoryItem[]>(ITEMS_KEY, []);
   const index = items.findIndex((x) => x.id === itemId);
   if (index === -1) return;
@@ -158,7 +165,7 @@ export function deleteItem(itemId: string) {
   writeJson(ITEMS_KEY, items);
 }
 
-export function ensureSeedItems() {
+export function ensureSeedItems(): void {
   const items = readJson<InventoryItem[]>(ITEMS_KEY, []);
   if (items.length > 0) return;
 
@@ -250,7 +257,7 @@ function calcWeightedAverage(
   currentCost: number,
   incomingQty: number,
   incomingUnitCost: number
-) {
+): number {
   const totalQty = currentStock + incomingQty;
   if (totalQty <= 0) return round2(incomingUnitCost);
 
@@ -258,7 +265,7 @@ function calcWeightedAverage(
   return round2(totalValue / totalQty);
 }
 
-export function savePurchase(draft: PurchaseDraft) {
+export function savePurchase(draft: PurchaseDraft): void {
   const purchases = readJson<PurchaseDraft[]>(PURCHASES_KEY, []);
   const items = readJson<InventoryItem[]>(ITEMS_KEY, []);
 
@@ -294,7 +301,7 @@ export function savePurchase(draft: PurchaseDraft) {
   writeJson(PURCHASES_KEY, purchases);
 }
 
-export function saveSale(draft: SaleDraft) {
+export function saveSale(draft: SaleDraft): void {
   const sales = readJson<SaleDraft[]>(SALES_KEY, []);
   const items = readJson<InventoryItem[]>(ITEMS_KEY, []);
 
