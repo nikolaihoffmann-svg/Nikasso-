@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { SaleDraft } from "../types";
+import type { SaleDraft, SaleLine } from "../types";
 import { createEmptySale, makeSaleLine, saveSale } from "../app/storage";
 import ItemPickerWithCreate from "../components/ItemPickerWithCreate";
 
@@ -7,11 +7,11 @@ export default function Salg() {
   const [draft, setDraft] = useState<SaleDraft>(createEmptySale());
   const [message, setMessage] = useState("");
 
-  function updateLine(lineId: string, patch: Partial<SaleDraft["lines"][number]>) {
-    setDraft((prev) => {
-      const lines = prev.lines.map((line) => {
+  function updateLine(lineId: string, patch: Partial<SaleLine>): void {
+    setDraft((prev: SaleDraft) => {
+      const lines = prev.lines.map((line: SaleLine) => {
         if (line.id !== lineId) return line;
-        const next = { ...line, ...patch };
+        const next: SaleLine = { ...line, ...patch };
         next.lineTotal = Number(next.qty || 0) * Number(next.unitPrice || 0);
         return next;
       });
@@ -19,11 +19,11 @@ export default function Salg() {
     });
   }
 
-  function addLine() {
-    setDraft((prev) => ({ ...prev, lines: [...prev.lines, makeSaleLine()] }));
+  function addLine(): void {
+    setDraft((prev: SaleDraft) => ({ ...prev, lines: [...prev.lines, makeSaleLine()] }));
   }
 
-  function handleSave() {
+  function handleSave(): void {
     saveSale(draft);
     setMessage("Salg lagret");
     setDraft(createEmptySale());
@@ -35,7 +35,7 @@ export default function Salg() {
 
       <div style={cardStyle}>
         <div style={{ display: "grid", gap: 16 }}>
-          {draft.lines.map((line, index) => (
+          {draft.lines.map((line: SaleLine, index: number) => (
             <div key={line.id} style={lineCardStyle}>
               <div style={{ fontWeight: 700, marginBottom: 10 }}>Linje {index + 1}</div>
 
@@ -70,7 +70,9 @@ export default function Salg() {
                   <input
                     type="number"
                     value={line.unitPrice}
-                    onChange={(e) => updateLine(line.id, { unitPrice: Number(e.target.value || 0) })}
+                    onChange={(e) =>
+                      updateLine(line.id, { unitPrice: Number(e.target.value || 0) })
+                    }
                   />
                 </label>
               </div>
@@ -79,11 +81,11 @@ export default function Salg() {
             </div>
           ))}
 
-          <button style={secondaryButtonStyle} onClick={addLine}>
+          <button style={secondaryButtonStyle} onClick={addLine} type="button">
             + Legg til linje
           </button>
 
-          <button style={primaryButtonStyle} onClick={handleSave}>
+          <button style={primaryButtonStyle} onClick={handleSave} type="button">
             Lagre salg
           </button>
 
