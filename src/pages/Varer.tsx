@@ -7,7 +7,7 @@ export default function Varer() {
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [openNew, setOpenNew] = useState(false);
 
-  function refresh() {
+  function refresh(): void {
     setItems(getItems());
   }
 
@@ -23,7 +23,7 @@ export default function Varer() {
           <h1 style={{ margin: 0 }}>Varer</h1>
           <p style={{ opacity: 0.75 }}>Opprett og administrer varer</p>
         </div>
-        <button style={buttonStyle} onClick={() => setOpenNew(true)}>
+        <button style={buttonStyle} onClick={() => setOpenNew(true)} type="button">
           + Ny vare
         </button>
       </div>
