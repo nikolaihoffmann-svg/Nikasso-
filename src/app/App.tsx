@@ -1,25 +1,20 @@
 // src/app/App.tsx
-import React, { useEffect, useMemo, useState } from "react";
-import { applyThemeToDom, clearAllData, downloadExportAll, getTheme, pickImportAllFile, setTheme, Theme } from "./storage";
+import React, { useMemo, useState } from "react";
 
-import { Oversikt } from "../pages/Oversikt";
-import { Varer } from "../pages/Varer";
-import { Innkjop } from "../pages/Innkjop";
-import { Salg } from "../pages/Salg";
-import { Kunder } from "../pages/Kunder";
-import { Gjeld } from "../pages/Gjeld";
-import { Backup } from "../pages/Backup";
+import Oversikt from "../pages/Oversikt";
+import Varer from "../pages/Varer";
+import Innkjop from "../pages/Innkjop";
+import Salg from "../pages/Salg";
+import Kunder from "../pages/Kunder";
+import Gjeld from "../pages/Gjeld";
+import Backup from "../pages/Backup";
 
+type Theme = "dark" | "light";
 type TabKey = "oversikt" | "varer" | "innkjop" | "salg" | "kunder" | "gjeld" | "backup";
 
 export function App() {
-  const [theme, setThemeState] = useState<Theme>(() => getTheme());
+  const [theme, setThemeState] = useState<Theme>("dark");
   const [tab, setTab] = useState<TabKey>("oversikt");
-
-  useEffect(() => {
-    applyThemeToDom(theme);
-    setTheme(theme);
-  }, [theme]);
 
   function toggleTheme() {
     setThemeState((t) => (t === "dark" ? "light" : "dark"));
@@ -36,7 +31,7 @@ export function App() {
   }, [tab]);
 
   return (
-    <div className="container">
+    <div className={`container theme-${theme}`}>
       <header className="header">
         <div className="headerTop">
           <div>
@@ -74,34 +69,6 @@ export function App() {
             Gjeld
           </button>
         </nav>
-
-        {tab === "backup" ? (
-          <div className="card" style={{ marginTop: 14 }}>
-            <div className="cardTitle">Data</div>
-            <div className="cardSub">Eksport/Import/Nullstill – samlet på ett sted.</div>
-
-            <div className="btnRow">
-              <button className="btn btnPrimary" type="button" onClick={() => downloadExportAll()}>
-                Eksporter ALT
-              </button>
-              <button className="btn" type="button" onClick={() => pickImportAllFile("replace")}>
-                Importer (erstatt)
-              </button>
-              <button className="btn" type="button" onClick={() => pickImportAllFile("merge")}>
-                Importer (slå sammen)
-              </button>
-              <button
-                className="btn btnDanger"
-                type="button"
-                onClick={() => {
-                  if (confirm("Slette ALL data i nettleseren? (Varer, kunder, salg, gjeld, leverandørgjeld, innkjøp, saldo)")) clearAllData();
-                }}
-              >
-                Nullstill
-              </button>
-            </div>
-          </div>
-        ) : null}
       </header>
 
       {content}
