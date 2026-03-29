@@ -10,10 +10,13 @@ import {
 } from "../app/storage";
 import type { Customer } from "../types";
 
+type FilterMode = "skyldig" | "alle";
+
 export default function Kunder() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [selectedId, setSelectedId] = useState<string>("");
   const [query, setQuery] = useState("");
+  const [filterMode, setFilterMode] = useState<FilterMode>("skyldig");
 
   useEffect(() => {
     const all = getCustomers();
@@ -23,25 +26,32 @@ export default function Kunder() {
       (a, b) => customerTotalRemaining(b.id) - customerTotalRemaining(a.id)
     );
 
-    setSelectedId(sorted[0]?.id ?? "");
+    const firstWithDebt = sorted.find((x) => customerTotalRemaining(x.id) > 0);
+    setSelectedId(firstWithDebt?.id ?? sorted[0]?.id ?? "");
   }, []);
 
   const filteredCustomers = useMemo(() => {
     const q = query.trim().toLowerCase();
 
-    return [...customers]
-      .sort((a, b) => customerTotalRemaining(b.id) - customerTotalRemaining(a.id))
-      .filter((customer) => {
-        if (!q) return true;
+    let base = [...customers].sort(
+      (a, b) => customerTotalRemaining(b.id) - customerTotalRemaining(a.id)
+    );
 
-        return (
-          customer.name.toLowerCase().includes(q) ||
-          (customer.phone ?? "").toLowerCase().includes(q) ||
-          (customer.address ?? "").toLowerCase().includes(q) ||
-          (customer.note ?? "").toLowerCase().includes(q)
-        );
-      });
-  }, [customers, query]);
+    if (filterMode === "skyldig") {
+      base = base.filter((customer) => customerTotalRemaining(customer.id) > 0);
+    }
+
+    return base.filter((customer) => {
+      if (!q) return true;
+
+      return (
+        customer.name.toLowerCase().includes(q) ||
+        (customer.phone ?? "").toLowerCase().includes(q) ||
+        (customer.address ?? "").toLowerCase().includes(q) ||
+        (customer.note ?? "").toLowerCase().includes(q)
+      );
+    });
+  }, [customers, query, filterMode]);
 
   const selectedCustomer = useMemo(() => {
     return (
@@ -68,7 +78,7 @@ export default function Kunder() {
   return (
     <div>
       <h1 className="pageTitle">Kunder</h1>
-      <p className="pageLead">Oversikt over kunder, kjøp og utestående.</p>
+      <p className="pageLead">Viser skyldige kunder først, så du slipper rot.</p>
 
       <div className="grid3">
         <div className="statCard">
@@ -89,7 +99,26 @@ export default function Kunder() {
 
       <div className="splitLayout" style={{ marginTop: 16 }}>
         <div className="card">
-          <h2 className="sectionTitle">Kundeliste</h2>
+          <div className="rowBetween" style={{ marginBottom: 14 }}>
+            <h2 className="sectionTitle" style={{ marginBottom: 0 }}>Kundeliste</h2>
+
+            <div className="rowBetween" style={{ gap: 8 }}>
+              <button
+                type="button"
+                className={filterMode === "skyldig" ? "btn btnPrimary" : "btn"}
+                onClick={() => setFilterMode("skyldig")}
+              >
+                Skyldig
+              </button>
+              <button
+                type="button"
+                className={filterMode === "alle" ? "btn btnPrimary" : "btn"}
+                onClick={() => setFilterMode("alle")}
+              >
+                Alle
+              </button>
+            </div>
+          </div>
 
           <div style={{ marginBottom: 14 }}>
             <input
@@ -116,7 +145,7 @@ export default function Kunder() {
                     className={isSelected ? "customerButton active" : "customerButton"}
                   >
                     <div className="customerButtonTop">
-                      <div>
+                      <div className="customerMain">
                         <div className="customerName">{customer.name}</div>
                         <div className="customerMeta">
                           {customer.phone || customer.address || "Ingen ekstra info"}
@@ -140,7 +169,7 @@ export default function Kunder() {
           ) : (
             <>
               <div className="rowBetween" style={{ marginBottom: 18 }}>
-                <div>
+                <div className="customerMain">
                   <h2 className="sectionTitle" style={{ marginBottom: 8 }}>
                     {selectedCustomer.name}
                   </h2>
@@ -199,7 +228,7 @@ export default function Kunder() {
                   selectedSales.map((sale) => (
                     <div key={sale.id} className="infoCard">
                       <div className="rowBetween">
-                        <div>
+                        <div className="customerMain">
                           <div style={{ fontWeight: 700 }}>
                             {new Date(sale.createdAt).toLocaleString("no-NO")}
                           </div>
