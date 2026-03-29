@@ -23,6 +23,7 @@ export default function NewCustomerModal({
 
   useEffect(() => {
     if (!open) return;
+
     setName(initialName || "");
     setPhone("");
     setAddress("");
@@ -30,11 +31,33 @@ export default function NewCustomerModal({
     setError("");
   }, [open, initialName]);
 
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent): void {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    }
+
+    if (open) {
+      document.addEventListener("keydown", handleKeyDown);
+    }
+
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open, onClose]);
+
   if (!open) return null;
 
   function handleSave(): void {
     try {
-      const customer = createCustomer({ name, phone, address, note });
+      const customer = createCustomer({
+        name,
+        phone,
+        address,
+        note,
+      });
+
       onCreated(customer);
       onClose();
     } catch (err) {
@@ -43,39 +66,51 @@ export default function NewCustomerModal({
   }
 
   return (
-    <div className="modalOverlay">
-      <div className="modalCard">
-        <div className="rowBetween" style={{ marginBottom: 16 }}>
-          <h2 className="sectionTitle" style={{ margin: 0 }}>Ny kunde</h2>
-          <button className="btn" type="button" onClick={onClose}>Lukk</button>
+    <div className="modalOverlay" onClick={onClose}>
+      <div
+        className="modalCard"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Ny kunde"
+      >
+        <div className="rowBetween modalHeader">
+          <div>
+            <h2 className="sectionTitle" style={{ marginBottom: 6 }}>Ny kunde</h2>
+            <div className="muted">Opprett kunde direkte fra salgsflyten.</div>
+          </div>
+
+          <button className="btn" type="button" onClick={onClose}>
+            Lukk
+          </button>
         </div>
 
         <div className="grid2">
           <label className="label">
             <span>Navn</span>
-            <input value={name} onChange={(e) => setName(e.target.value)} />
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="F.eks. Ola Nordmann" />
           </label>
 
           <label className="label">
             <span>Telefon</span>
-            <input value={phone} onChange={(e) => setPhone(e.target.value)} />
+            <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Valgfritt" />
           </label>
 
           <label className="label">
             <span>Adresse</span>
-            <input value={address} onChange={(e) => setAddress(e.target.value)} />
+            <input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Valgfritt" />
           </label>
         </div>
 
         <label className="label" style={{ marginTop: 14 }}>
           <span>Notat</span>
-          <textarea value={note} onChange={(e) => setNote(e.target.value)} />
+          <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Valgfritt notat..." />
         </label>
 
-        {error ? <div style={{ color: "#fca5a5", marginTop: 12 }}>{error}</div> : null}
+        {error ? <div className="modalError">{error}</div> : null}
 
-        <div className="rowBetween" style={{ marginTop: 16 }}>
-          <div className="muted">Kunden kan opprettes direkte fra salg.</div>
+        <div className="cardActions">
+          <div className="muted">Kunden kan brukes med én gang i salg og gjeld.</div>
           <button className="btn btnPrimary" type="button" onClick={handleSave}>
             Lagre kunde
           </button>
