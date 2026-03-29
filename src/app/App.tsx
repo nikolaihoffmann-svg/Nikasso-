@@ -1,4 +1,6 @@
-import React, { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { ensureSeedData, getTheme, setTheme } from "./storage";
+import Logo from "./Logo";
 
 import Oversikt from "../pages/Oversikt";
 import Varer from "../pages/Varer";
@@ -6,7 +8,7 @@ import Innkjop from "../pages/Innkjop";
 import Salg from "../pages/Salg";
 import Kunder from "../pages/Kunder";
 import Gjeld from "../pages/Gjeld";
-import Backup from "../pages/Backup";
+import DataPage from "../pages/Data";
 
 type TabKey =
   | "oversikt"
@@ -15,10 +17,20 @@ type TabKey =
   | "salg"
   | "kunder"
   | "gjeld"
-  | "backup";
+  | "data";
 
 export function App() {
   const [tab, setTab] = useState<TabKey>("oversikt");
+  const [themeMode, setThemeMode] = useState<"dark" | "light">(getTheme());
+
+  useEffect(() => {
+    ensureSeedData();
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", themeMode);
+    setTheme(themeMode);
+  }, [themeMode]);
 
   const content = useMemo(() => {
     if (tab === "oversikt") return <Oversikt />;
@@ -27,45 +39,44 @@ export function App() {
     if (tab === "salg") return <Salg />;
     if (tab === "kunder") return <Kunder />;
     if (tab === "gjeld") return <Gjeld />;
-    return <Backup />;
+    return <DataPage />;
   }, [tab]);
 
   return (
-    <div className="container">
-      <header className="header">
-        <div className="headerTop">
-          <div className="h1">NIKASSO</div>
+    <div className="appShell">
+      <div className="appBgGlow appBgGlow1" />
+      <div className="appBgGlow appBgGlow2" />
 
-          <div className="btnRow">
-            <button className="btn" onClick={() => setTab("backup")} type="button">
+      <header className="appHeader">
+        <div className="appHeaderTop">
+          <Logo />
+
+          <div className="headerActions">
+            <button
+              className="btn ghostBtn"
+              type="button"
+              onClick={() => setThemeMode((p) => (p === "dark" ? "light" : "dark"))}
+            >
+              {themeMode === "dark" ? "☀️ Lys" : "🌙 Mørk"}
+            </button>
+
+            <button className="btn pillBtn" type="button" onClick={() => setTab("data")}>
               ⚙️ Data
             </button>
           </div>
         </div>
 
         <nav className="tabs">
-          <button className={tab === "oversikt" ? "active tab" : "tab"} onClick={() => setTab("oversikt")} type="button">
-            Oversikt
-          </button>
-          <button className={tab === "varer" ? "active tab" : "tab"} onClick={() => setTab("varer")} type="button">
-            Varer
-          </button>
-          <button className={tab === "innkjop" ? "active tab" : "tab"} onClick={() => setTab("innkjop")} type="button">
-            Innkjøp
-          </button>
-          <button className={tab === "salg" ? "active tab" : "tab"} onClick={() => setTab("salg")} type="button">
-            Salg
-          </button>
-          <button className={tab === "kunder" ? "active tab" : "tab"} onClick={() => setTab("kunder")} type="button">
-            Kunder
-          </button>
-          <button className={tab === "gjeld" ? "active tab" : "tab"} onClick={() => setTab("gjeld")} type="button">
-            Gjeld
-          </button>
+          <button className={tab === "oversikt" ? "tab active" : "tab"} onClick={() => setTab("oversikt")} type="button">Oversikt</button>
+          <button className={tab === "varer" ? "tab active" : "tab"} onClick={() => setTab("varer")} type="button">Varer</button>
+          <button className={tab === "innkjop" ? "tab active" : "tab"} onClick={() => setTab("innkjop")} type="button">Innkjøp</button>
+          <button className={tab === "salg" ? "tab active" : "tab"} onClick={() => setTab("salg")} type="button">Salg</button>
+          <button className={tab === "kunder" ? "tab active" : "tab"} onClick={() => setTab("kunder")} type="button">Kunder</button>
+          <button className={tab === "gjeld" ? "tab active" : "tab"} onClick={() => setTab("gjeld")} type="button">Gjeld</button>
         </nav>
       </header>
 
-      {content}
+      <main className="pageWrap">{content}</main>
     </div>
   );
 }
