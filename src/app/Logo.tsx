@@ -2,8 +2,10 @@ export default function Logo() {
   return (
     <div className="logo" aria-label="Nikasso">
       <div className="logoIcon" aria-hidden="true">
-        <span className="logoIconN">N</span>
-        <span className="logoIconPlus">+</span>
+        <div className="logoIconInner">
+          <span className="logoIconN">N</span>
+          <span className="logoIconPlus">+</span>
+        </div>
       </div>
 
       <div className="logoWordmarkWrap">
