@@ -21,12 +21,9 @@ function median(values: number[]): number {
   if (values.length === 0) return 0;
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
-
-  if (sorted.length % 2 === 0) {
-    return (sorted[mid - 1] + sorted[mid]) / 2;
-  }
-
-  return sorted[mid];
+  return sorted.length % 2 === 0
+    ? (sorted[mid - 1] + sorted[mid]) / 2
+    : sorted[mid];
 }
 
 function inventoryValue(items: InventoryItem[]): number {
@@ -69,10 +66,7 @@ export default function Oversikt() {
     .slice(0, 6);
 
   const recentSales = [...sales]
-    .sort(
-      (a, b) =>
-        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    )
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
     .slice(0, 6);
 
   const paidRatio = totalRevenue > 0 ? (totalPaid / totalRevenue) * 100 : 0;
@@ -83,109 +77,79 @@ export default function Oversikt() {
 
   return (
     <div>
-      <h1 style={{ fontSize: 44, marginBottom: 8 }}>Oversikt</h1>
-      <p style={{ marginTop: 0, marginBottom: 20, color: "#94a3b8" }}>
+      <h1 className="pageTitle">Oversikt</h1>
+      <p className="pageLead">
         Nerdete driftstall, lager, cashflow og utestående — men lett å lese.
       </p>
 
-      <div
-        style={{
-          display: "grid",
-          gap: 12,
-          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-          marginBottom: 16,
-        }}
-      >
-        <div className="card">
-          <div style={{ color: "#94a3b8", marginBottom: 8 }}>Saldo</div>
-          <div style={{ fontSize: 34, fontWeight: 800 }}>{fmtKr(Number(saldo || 0))}</div>
+      <div className="statsGrid">
+        <div className="statCard">
+          <div className="statLabel">Saldo</div>
+          <div className="statValue">{fmtKr(Number(saldo || 0))}</div>
         </div>
 
-        <div className="card">
-          <div style={{ color: "#94a3b8", marginBottom: 8 }}>Totalt omsatt</div>
-          <div style={{ fontSize: 34, fontWeight: 800 }}>{fmtKr(totalRevenue)}</div>
+        <div className="statCard">
+          <div className="statLabel">Totalt omsatt</div>
+          <div className="statValue">{fmtKr(totalRevenue)}</div>
         </div>
 
-        <div className="card">
-          <div style={{ color: "#94a3b8", marginBottom: 8 }}>Totalt utestående</div>
-          <div style={{ fontSize: 34, fontWeight: 800 }}>{fmtKr(totalOpen)}</div>
+        <div className="statCard">
+          <div className="statLabel">Totalt utestående</div>
+          <div className="statValue">{fmtKr(totalOpen)}</div>
         </div>
 
-        <div className="card">
-          <div style={{ color: "#94a3b8", marginBottom: 8 }}>Lagerverdi</div>
-          <div style={{ fontSize: 34, fontWeight: 800 }}>{fmtKr(stockValue)}</div>
+        <div className="statCard">
+          <div className="statLabel">Lagerverdi</div>
+          <div className="statValue">{fmtKr(stockValue)}</div>
         </div>
       </div>
 
-      <div
-        style={{
-          display: "grid",
-          gap: 12,
-          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-          marginBottom: 16,
-        }}
-      >
-        <div className="card">
-          <div style={{ color: "#94a3b8", marginBottom: 8 }}>Snittsalg</div>
-          <div style={{ fontSize: 26, fontWeight: 800 }}>{fmtKr(avgSale)}</div>
+      <div className="statsGridSmall" style={{ marginTop: 14 }}>
+        <div className="infoCard">
+          <div className="infoLabel">Snittsalg</div>
+          <div className="statMiniValue">{fmtKr(avgSale)}</div>
         </div>
 
-        <div className="card">
-          <div style={{ color: "#94a3b8", marginBottom: 8 }}>Median salg</div>
-          <div style={{ fontSize: 26, fontWeight: 800 }}>{fmtKr(medianSale)}</div>
+        <div className="infoCard">
+          <div className="infoLabel">Median salg</div>
+          <div className="statMiniValue">{fmtKr(medianSale)}</div>
         </div>
 
-        <div className="card">
-          <div style={{ color: "#94a3b8", marginBottom: 8 }}>Innbetalt andel</div>
-          <div style={{ fontSize: 26, fontWeight: 800 }}>{paidRatio.toFixed(0)}%</div>
+        <div className="infoCard">
+          <div className="infoLabel">Innbetalt andel</div>
+          <div className="statMiniValue">{paidRatio.toFixed(0)}%</div>
         </div>
 
-        <div className="card">
-          <div style={{ color: "#94a3b8", marginBottom: 8 }}>Utestående andel</div>
-          <div style={{ fontSize: 26, fontWeight: 800 }}>{debtRatio.toFixed(0)}%</div>
+        <div className="infoCard">
+          <div className="infoLabel">Utestående andel</div>
+          <div className="statMiniValue">{debtRatio.toFixed(0)}%</div>
         </div>
 
-        <div className="card">
-          <div style={{ color: "#94a3b8", marginBottom: 8 }}>Aktive varer</div>
-          <div style={{ fontSize: 26, fontWeight: 800 }}>{activeItems}</div>
+        <div className="infoCard">
+          <div className="infoLabel">Aktive varer</div>
+          <div className="statMiniValue">{activeItems}</div>
         </div>
 
-        <div className="card">
-          <div style={{ color: "#94a3b8", marginBottom: 8 }}>Tomt på lager</div>
-          <div style={{ fontSize: 26, fontWeight: 800 }}>{outOfStock}</div>
+        <div className="infoCard">
+          <div className="infoLabel">Tomt på lager</div>
+          <div className="statMiniValue">{outOfStock}</div>
         </div>
       </div>
 
-      <div
-        style={{
-          display: "grid",
-          gap: 16,
-          gridTemplateColumns: "1.2fr 1fr",
-          marginBottom: 16,
-        }}
-      >
+      <div className="splitLayout" style={{ marginTop: 16 }}>
         <div className="card">
-          <h2 style={{ marginTop: 0 }}>Kunder som skylder mest</h2>
+          <h2 className="sectionTitle">Kunder som skylder mest</h2>
 
-          <div style={{ display: "grid", gap: 10 }}>
+          <div className="featureList">
             {topDebtors.length === 0 ? (
-              <div style={{ color: "#94a3b8" }}>Ingen utestående kunder akkurat nå.</div>
+              <div className="emptyText">Ingen utestående kunder akkurat nå.</div>
             ) : (
               topDebtors.map((customer) => (
-                <div
-                  key={customer.id}
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    gap: 12,
-                    padding: 12,
-                    borderRadius: 14,
-                    background: "rgba(255,255,255,0.03)",
-                    border: "1px solid rgba(255,255,255,0.08)",
-                  }}
-                >
-                  <div>{customer.name}</div>
-                  <div style={{ fontWeight: 800 }}>{fmtKr(customer.remaining)}</div>
+                <div key={customer.id} className="featureRow">
+                  <div>
+                    <div className="featureRowTitle">{customer.name}</div>
+                  </div>
+                  <div className="featureRowRight">{fmtKr(customer.remaining)}</div>
                 </div>
               ))
             )}
@@ -193,35 +157,22 @@ export default function Oversikt() {
         </div>
 
         <div className="card">
-          <h2 style={{ marginTop: 0 }}>Lav lagerbeholdning</h2>
+          <h2 className="sectionTitle">Lav lagerbeholdning</h2>
 
-          <div style={{ display: "grid", gap: 10 }}>
+          <div className="featureList">
             {lowStockItems.length === 0 ? (
-              <div style={{ color: "#94a3b8" }}>Ingen varer under minimum.</div>
+              <div className="emptyText">Ingen varer under minimum.</div>
             ) : (
               lowStockItems.map((item) => (
-                <div
-                  key={item.id}
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    gap: 12,
-                    padding: 12,
-                    borderRadius: 14,
-                    background: "rgba(255,255,255,0.03)",
-                    border: "1px solid rgba(255,255,255,0.08)",
-                  }}
-                >
+                <div key={item.id} className="featureRow">
                   <div>
-                    <div style={{ fontWeight: 700 }}>{item.name}</div>
-                    <div style={{ color: "#94a3b8", marginTop: 4 }}>
-                      Min: {item.minStock}
-                    </div>
+                    <div className="featureRowTitle">{item.name}</div>
+                    <div className="featureRowSub">Min: {item.minStock}</div>
                   </div>
 
-                  <div style={{ textAlign: "right" }}>
-                    <div style={{ fontWeight: 800 }}>Lager: {item.stock}</div>
-                    <div style={{ color: "#94a3b8", marginTop: 4 }}>
+                  <div className="featureRowRight">
+                    <div>Lager: {item.stock}</div>
+                    <div className="featureRowSub">
                       Kost: {fmtKr(Number(item.costPrice ?? item.cost ?? 0))}
                     </div>
                   </div>
@@ -232,40 +183,25 @@ export default function Oversikt() {
         </div>
       </div>
 
-      <div className="card">
-        <h2 style={{ marginTop: 0 }}>Siste salg</h2>
+      <div className="card" style={{ marginTop: 16 }}>
+        <h2 className="sectionTitle">Siste salg</h2>
 
-        <div style={{ display: "grid", gap: 10 }}>
+        <div className="featureList">
           {recentSales.length === 0 ? (
-            <div style={{ color: "#94a3b8" }}>Ingen salg registrert enda.</div>
+            <div className="emptyText">Ingen salg registrert enda.</div>
           ) : (
             recentSales.map((sale) => (
-              <div
-                key={sale.id}
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  gap: 12,
-                  alignItems: "flex-start",
-                  flexWrap: "wrap",
-                  padding: 12,
-                  borderRadius: 14,
-                  background: "rgba(255,255,255,0.03)",
-                  border: "1px solid rgba(255,255,255,0.08)",
-                }}
-              >
+              <div key={sale.id} className="featureRow">
                 <div>
-                  <div style={{ fontWeight: 700 }}>{sale.customerName || "Kontantsalg"}</div>
-                  <div style={{ color: "#94a3b8", marginTop: 4 }}>
+                  <div className="featureRowTitle">{sale.customerName || "Kontantsalg"}</div>
+                  <div className="featureRowSub">
                     {new Date(sale.createdAt).toLocaleString("no-NO")}
                   </div>
                 </div>
 
-                <div style={{ textAlign: "right" }}>
-                  <div style={{ fontWeight: 800 }}>{fmtKr(sale.total)}</div>
-                  <div style={{ color: "#94a3b8", marginTop: 4 }}>
-                    Rest: {fmtKr(saleRemaining(sale))}
-                  </div>
+                <div className="featureRowRight">
+                  <div>{fmtKr(sale.total)}</div>
+                  <div className="featureRowSub">Rest: {fmtKr(saleRemaining(sale))}</div>
                 </div>
               </div>
             ))
@@ -273,24 +209,15 @@ export default function Oversikt() {
         </div>
       </div>
 
-      <div
-        style={{
-          display: "grid",
-          gap: 12,
-          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-          marginTop: 16,
-        }}
-      >
-        <div className="card">
-          <div style={{ color: "#94a3b8", marginBottom: 8 }}>Innkjøp totalt</div>
-          <div style={{ fontSize: 26, fontWeight: 800 }}>{fmtKr(purchaseTotal)}</div>
+      <div className="grid2" style={{ marginTop: 16 }}>
+        <div className="infoCard">
+          <div className="infoLabel">Innkjøp totalt</div>
+          <div className="statMiniValue">{fmtKr(purchaseTotal)}</div>
         </div>
 
-        <div className="card">
-          <div style={{ color: "#94a3b8", marginBottom: 8 }}>Brutto differanse</div>
-          <div style={{ fontSize: 26, fontWeight: 800 }}>
-            {fmtKr(totalRevenue - purchaseTotal)}
-          </div>
+        <div className="infoCard">
+          <div className="infoLabel">Brutto differanse</div>
+          <div className="statMiniValue">{fmtKr(totalRevenue - purchaseTotal)}</div>
         </div>
       </div>
     </div>
