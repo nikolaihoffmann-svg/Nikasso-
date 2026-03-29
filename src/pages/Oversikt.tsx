@@ -9,8 +9,9 @@ import {
   getSales,
   salePaidSum,
   saleRemaining,
+  saleProfit,
 } from "../app/storage";
-import type { InventoryItem } from "../types";
+import type { InventoryItem, SaleRecord } from "../types";
 
 function average(values: number[]): number {
   if (values.length === 0) return 0;
@@ -33,6 +34,44 @@ function inventoryValue(items: InventoryItem[]): number {
   }, 0);
 }
 
+function sumByMonth<T extends { createdAt: string }>(
+  rows: T[],
+  valueGetter: (row: T) => number
+) {
+  const map = new Map<string, number>();
+
+  rows
+    .slice()
+    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+    .forEach((row) => {
+      const d = new Date(row.createdAt);
+      const key = `${String(d.getMonth() + 1).padStart(2, "0")}.${String(
+        d.getFullYear()
+      ).slice(-2)}`;
+      map.set(key, (map.get(key) || 0) + valueGetter(row));
+    });
+
+  return [...map.entries()].slice(-6);
+}
+
+function salesThisMonth(sales: SaleRecord[]): number {
+  const now = new Date();
+  return sales
+    .filter((sale) => {
+      const d = new Date(sale.createdAt);
+      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+    })
+    .reduce((sum, sale) => sum + sale.total, 0);
+}
+
+function salesLast30Days(sales: SaleRecord[]): number {
+  const now = Date.now();
+  const days30 = 1000 * 60 * 60 * 24 * 30;
+  return sales
+    .filter((sale) => now - new Date(sale.createdAt).getTime() <= days30)
+    .reduce((sum, sale) => sum + sale.total, 0);
+}
+
 export default function Oversikt() {
   const customers = useMemo(() => getCustomers(), []);
   const items = useMemo(() => getItems(), []);
@@ -45,6 +84,7 @@ export default function Oversikt() {
   const totalOpen = sales.reduce((sum, sale) => sum + saleRemaining(sale), 0);
   const purchaseTotal = purchases.reduce((sum, purchase) => sum + Number(purchase.total || 0), 0);
   const stockValue = inventoryValue(items);
+  const grossProfit = sales.reduce((sum, sale) => sum + saleProfit(sale), 0);
 
   const saleTotals = sales.map((sale) => Number(sale.total || 0));
   const avgSale = average(saleTotals);
@@ -71,9 +111,53 @@ export default function Oversikt() {
 
   const paidRatio = totalRevenue > 0 ? (totalPaid / totalRevenue) * 100 : 0;
   const debtRatio = totalRevenue > 0 ? (totalOpen / totalRevenue) * 100 : 0;
+  const marginRatio = totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0;
 
   const activeItems = items.filter((item) => item.isActive !== false).length;
   const outOfStock = items.filter((item) => Number(item.stock || 0) <= 0).length;
+  const customerCountWithDebt = customers.filter((x) => customerTotalRemaining(x.id) > 0).length;
+  const monthSales = salesThisMonth(sales);
+  const sales30 = salesLast30Days(sales);
+
+  const salesByMonth = sumByMonth(sales, (sale) => Number(sale.total || 0));
+  const paymentsByMonth = sumByMonth(sales, (sale) => salePaidSum(sale));
+  const profitByMonth = sumByMonth(sales, (sale) => saleProfit(sale));
+
+  const maxSalesMonth = Math.max(...salesByMonth.map(([, value]) => value), 1);
+  const maxPaymentsMonth = Math.max(...paymentsByMonth.map(([, value]) => value), 1);
+  const maxProfitMonth = Math.max(...profitByMonth.map(([, value]) => value), 1);
+
+  const debtAging = [
+    {
+      label: "0–7 dager",
+      value: sales
+        .filter((sale) => {
+          const days = (Date.now() - new Date(sale.createdAt).getTime()) / (1000 * 60 * 60 * 24);
+          return saleRemaining(sale) > 0 && days <= 7;
+        })
+        .reduce((sum, sale) => sum + saleRemaining(sale), 0),
+    },
+    {
+      label: "8–30 dager",
+      value: sales
+        .filter((sale) => {
+          const days = (Date.now() - new Date(sale.createdAt).getTime()) / (1000 * 60 * 60 * 24);
+          return saleRemaining(sale) > 0 && days > 7 && days <= 30;
+        })
+        .reduce((sum, sale) => sum + saleRemaining(sale), 0),
+    },
+    {
+      label: "31+ dager",
+      value: sales
+        .filter((sale) => {
+          const days = (Date.now() - new Date(sale.createdAt).getTime()) / (1000 * 60 * 60 * 24);
+          return saleRemaining(sale) > 0 && days > 30;
+        })
+        .reduce((sum, sale) => sum + saleRemaining(sale), 0),
+    },
+  ];
+
+  const maxDebtAging = Math.max(...debtAging.map((x) => x.value), 1);
 
   return (
     <div>
@@ -93,7 +177,7 @@ export default function Oversikt() {
           <div className="statValue">{fmtKr(totalRevenue)}</div>
         </div>
 
-        <div className="statCard">
+        <div className="statCard debtGlowCard strongDebtCard">
           <div className="statLabel">Totalt utestående</div>
           <div className="statValue">{fmtKr(totalOpen)}</div>
         </div>
@@ -120,9 +204,14 @@ export default function Oversikt() {
           <div className="statMiniValue">{paidRatio.toFixed(0)}%</div>
         </div>
 
-        <div className="infoCard">
+        <div className="infoCard debtGlowCard">
           <div className="infoLabel">Utestående andel</div>
           <div className="statMiniValue">{debtRatio.toFixed(0)}%</div>
+        </div>
+
+        <div className="infoCard">
+          <div className="infoLabel">Bruttomargin</div>
+          <div className="statMiniValue">{marginRatio.toFixed(0)}%</div>
         </div>
 
         <div className="infoCard">
@@ -133,6 +222,31 @@ export default function Oversikt() {
         <div className="infoCard">
           <div className="infoLabel">Tomt på lager</div>
           <div className="statMiniValue">{outOfStock}</div>
+        </div>
+
+        <div className="infoCard">
+          <div className="infoLabel">Kunder med gjeld</div>
+          <div className="statMiniValue">{customerCountWithDebt}</div>
+        </div>
+
+        <div className="infoCard">
+          <div className="infoLabel">Omsatt denne måneden</div>
+          <div className="statMiniValue">{fmtKr(monthSales)}</div>
+        </div>
+
+        <div className="infoCard">
+          <div className="infoLabel">Omsatt siste 30 dager</div>
+          <div className="statMiniValue">{fmtKr(sales30)}</div>
+        </div>
+
+        <div className="infoCard">
+          <div className="infoLabel">Totalt innbetalt</div>
+          <div className="statMiniValue">{fmtKr(totalPaid)}</div>
+        </div>
+
+        <div className="infoCard">
+          <div className="infoLabel">Brutto fortjeneste</div>
+          <div className="statMiniValue">{fmtKr(grossProfit)}</div>
         </div>
       </div>
 
@@ -145,8 +259,8 @@ export default function Oversikt() {
               <div className="emptyText">Ingen utestående kunder akkurat nå.</div>
             ) : (
               topDebtors.map((customer) => (
-                <div key={customer.id} className="featureRow">
-                  <div>
+                <div key={customer.id} className="featureRow debtRow strongDebtRow">
+                  <div className="customerMain">
                     <div className="featureRowTitle">{customer.name}</div>
                   </div>
                   <div className="featureRowRight">{fmtKr(customer.remaining)}</div>
@@ -165,7 +279,7 @@ export default function Oversikt() {
             ) : (
               lowStockItems.map((item) => (
                 <div key={item.id} className="featureRow">
-                  <div>
+                  <div className="customerMain">
                     <div className="featureRowTitle">{item.name}</div>
                     <div className="featureRowSub">Min: {item.minStock}</div>
                   </div>
@@ -183,6 +297,94 @@ export default function Oversikt() {
         </div>
       </div>
 
+      <div className="splitLayout" style={{ marginTop: 16 }}>
+        <div className="card">
+          <h2 className="sectionTitle">Omsetning siste måneder</h2>
+          <div className="miniChart">
+            {salesByMonth.length === 0 ? (
+              <div className="emptyText">Ikke nok data enda.</div>
+            ) : (
+              salesByMonth.map(([label, value]) => (
+                <div key={label} className="chartRow">
+                  <div className="chartLabel">{label}</div>
+                  <div className="chartBarTrack">
+                    <div
+                      className="chartBarFill chartBarBlue"
+                      style={{ width: `${(value / maxSalesMonth) * 100}%` }}
+                    />
+                  </div>
+                  <div className="chartValue">{fmtKr(value)}</div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        <div className="card">
+          <h2 className="sectionTitle">Innbetaling siste måneder</h2>
+          <div className="miniChart">
+            {paymentsByMonth.length === 0 ? (
+              <div className="emptyText">Ikke nok data enda.</div>
+            ) : (
+              paymentsByMonth.map(([label, value]) => (
+                <div key={label} className="chartRow">
+                  <div className="chartLabel">{label}</div>
+                  <div className="chartBarTrack">
+                    <div
+                      className="chartBarFill chartBarGreen"
+                      style={{ width: `${(value / maxPaymentsMonth) * 100}%` }}
+                    />
+                  </div>
+                  <div className="chartValue">{fmtKr(value)}</div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="splitLayout" style={{ marginTop: 16 }}>
+        <div className="card">
+          <h2 className="sectionTitle">Fortjeneste siste måneder</h2>
+          <div className="miniChart">
+            {profitByMonth.length === 0 ? (
+              <div className="emptyText">Ikke nok data enda.</div>
+            ) : (
+              profitByMonth.map(([label, value]) => (
+                <div key={label} className="chartRow">
+                  <div className="chartLabel">{label}</div>
+                  <div className="chartBarTrack">
+                    <div
+                      className="chartBarFill chartBarGold"
+                      style={{ width: `${(value / maxProfitMonth) * 100}%` }}
+                    />
+                  </div>
+                  <div className="chartValue">{fmtKr(value)}</div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        <div className="card">
+          <h2 className="sectionTitle">Aldring på utestående</h2>
+          <div className="miniChart">
+            {debtAging.map((row) => (
+              <div key={row.label} className="chartRow">
+                <div className="chartLabel">{row.label}</div>
+                <div className="chartBarTrack">
+                  <div
+                    className="chartBarFill chartBarRed"
+                    style={{ width: `${(row.value / maxDebtAging) * 100}%` }}
+                  />
+                </div>
+                <div className="chartValue">{fmtKr(row.value)}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
       <div className="card" style={{ marginTop: 16 }}>
         <h2 className="sectionTitle">Siste salg</h2>
 
@@ -192,7 +394,7 @@ export default function Oversikt() {
           ) : (
             recentSales.map((sale) => (
               <div key={sale.id} className="featureRow">
-                <div>
+                <div className="customerMain">
                   <div className="featureRowTitle">{sale.customerName || "Kontantsalg"}</div>
                   <div className="featureRowSub">
                     {new Date(sale.createdAt).toLocaleString("no-NO")}
