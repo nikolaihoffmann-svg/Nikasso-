@@ -19,25 +19,25 @@ export default function NewItemModal({
   onCreated,
 }: Props) {
   const [name, setName] = useState(initialName);
-  const [sku, setSku] = useState("");
-  const [category, setCategory] = useState<ItemCategory>("Deler");
+  const [category, setCategory] = useState<ItemCategory>("Annet");
   const [unit, setUnit] = useState<ItemUnit>("stk");
   const [salePrice, setSalePrice] = useState("0");
   const [costPrice, setCostPrice] = useState("0");
   const [stock, setStock] = useState("0");
   const [minStock, setMinStock] = useState("0");
+  const [note, setNote] = useState("");
   const [error, setError] = useState("");
 
   useEffect(() => {
     if (!open) return;
     setName(initialName || "");
-    setSku("");
-    setCategory("Deler");
+    setCategory("Annet");
     setUnit("stk");
     setSalePrice("0");
     setCostPrice("0");
     setStock("0");
     setMinStock("0");
+    setNote("");
     setError("");
   }, [open, initialName]);
 
@@ -47,13 +47,13 @@ export default function NewItemModal({
     try {
       const item = createItem({
         name,
-        sku,
         category,
         unit,
         salePrice: Number(salePrice || 0),
         costPrice: Number(costPrice || 0),
         stock: Number(stock || 0),
         minStock: Number(minStock || 0),
+        note,
       });
       onCreated(item);
       onClose();
@@ -63,99 +63,64 @@ export default function NewItemModal({
   }
 
   return (
-    <div style={overlayStyle}>
-      <div style={modalStyle}>
-        <div style={headerStyle}>
-          <h2 style={{ margin: 0 }}>Ny vare</h2>
-          <button style={closeButtonStyle} onClick={onClose} type="button">
-            ×
-          </button>
+    <div className="modalOverlay">
+      <div className="modalCard">
+        <div className="rowBetween" style={{ marginBottom: 16 }}>
+          <h2 className="sectionTitle" style={{ margin: 0 }}>Ny vare</h2>
+          <button className="btn" type="button" onClick={onClose}>Lukk</button>
         </div>
 
-        <div style={gridStyle}>
-          <label style={fieldStyle}>
+        <div className="grid2">
+          <label className="label">
             <span>Varenavn</span>
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="F.eks. Bremseklosser bak"
-            />
+            <input value={name} onChange={(e) => setName(e.target.value)} />
           </label>
 
-          <label style={fieldStyle}>
-            <span>Varenr / SKU</span>
-            <input
-              value={sku}
-              onChange={(e) => setSku(e.target.value)}
-              placeholder="Valgfritt"
-            />
-          </label>
-
-          <label style={fieldStyle}>
+          <label className="label">
             <span>Kategori</span>
-            <select
-              value={category}
-              onChange={(e) => setCategory(e.target.value as ItemCategory)}
-            >
-              {categories.map((x) => (
-                <option key={x} value={x}>
-                  {x}
-                </option>
-              ))}
+            <select value={category} onChange={(e) => setCategory(e.target.value as ItemCategory)}>
+              {categories.map((x) => <option key={x} value={x}>{x}</option>)}
             </select>
           </label>
 
-          <label style={fieldStyle}>
+          <label className="label">
             <span>Enhet</span>
             <select value={unit} onChange={(e) => setUnit(e.target.value as ItemUnit)}>
-              {units.map((x) => (
-                <option key={x} value={x}>
-                  {x}
-                </option>
-              ))}
+              {units.map((x) => <option key={x} value={x}>{x}</option>)}
             </select>
           </label>
 
-          <label style={fieldStyle}>
+          <label className="label">
             <span>Salgspris</span>
-            <input
-              type="number"
-              value={salePrice}
-              onChange={(e) => setSalePrice(e.target.value)}
-            />
+            <input type="number" value={salePrice} onChange={(e) => setSalePrice(e.target.value)} />
           </label>
 
-          <label style={fieldStyle}>
+          <label className="label">
             <span>Kostpris</span>
-            <input
-              type="number"
-              value={costPrice}
-              onChange={(e) => setCostPrice(e.target.value)}
-            />
+            <input type="number" value={costPrice} onChange={(e) => setCostPrice(e.target.value)} />
           </label>
 
-          <label style={fieldStyle}>
+          <label className="label">
             <span>Lager</span>
             <input type="number" value={stock} onChange={(e) => setStock(e.target.value)} />
           </label>
 
-          <label style={fieldStyle}>
+          <label className="label">
             <span>Min. lager</span>
-            <input
-              type="number"
-              value={minStock}
-              onChange={(e) => setMinStock(e.target.value)}
-            />
+            <input type="number" value={minStock} onChange={(e) => setMinStock(e.target.value)} />
           </label>
         </div>
 
-        {error ? <div style={errorStyle}>{error}</div> : null}
+        <label className="label" style={{ marginTop: 14 }}>
+          <span>Notat</span>
+          <textarea value={note} onChange={(e) => setNote(e.target.value)} />
+        </label>
 
-        <div style={footerStyle}>
-          <button style={secondaryButtonStyle} onClick={onClose} type="button">
-            Avbryt
-          </button>
-          <button style={primaryButtonStyle} onClick={handleSave} type="button">
+        {error ? <div style={{ color: "#fca5a5", marginTop: 12 }}>{error}</div> : null}
+
+        <div className="rowBetween" style={{ marginTop: 16 }}>
+          <div className="muted">Varen kan opprettes direkte fra salg og innkjøp.</div>
+          <button className="btn btnPrimary" type="button" onClick={handleSave}>
             Lagre vare
           </button>
         </div>
@@ -163,82 +128,3 @@ export default function NewItemModal({
     </div>
   );
 }
-
-const overlayStyle: React.CSSProperties = {
-  position: "fixed",
-  inset: 0,
-  background: "rgba(0,0,0,0.55)",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  padding: 16,
-  zIndex: 1000,
-};
-
-const modalStyle: React.CSSProperties = {
-  width: "100%",
-  maxWidth: 720,
-  background: "#0f172a",
-  color: "#fff",
-  borderRadius: 20,
-  padding: 20,
-  border: "1px solid rgba(255,255,255,0.08)",
-};
-
-const headerStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  marginBottom: 16,
-};
-
-const closeButtonStyle: React.CSSProperties = {
-  width: 40,
-  height: 40,
-  borderRadius: 999,
-  border: "1px solid rgba(255,255,255,0.12)",
-  background: "transparent",
-  color: "#fff",
-  fontSize: 24,
-  cursor: "pointer",
-};
-
-const gridStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-  gap: 12,
-};
-
-const fieldStyle: React.CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: 8,
-};
-
-const footerStyle: React.CSSProperties = {
-  display: "flex",
-  justifyContent: "flex-end",
-  gap: 12,
-  marginTop: 20,
-};
-
-const primaryButtonStyle: React.CSSProperties = {
-  padding: "12px 16px",
-  borderRadius: 12,
-  border: 0,
-  cursor: "pointer",
-};
-
-const secondaryButtonStyle: React.CSSProperties = {
-  padding: "12px 16px",
-  borderRadius: 12,
-  border: "1px solid rgba(255,255,255,0.15)",
-  background: "transparent",
-  color: "#fff",
-  cursor: "pointer",
-};
-
-const errorStyle: React.CSSProperties = {
-  marginTop: 12,
-  color: "#fca5a5",
-};
