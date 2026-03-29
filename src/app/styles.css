@@ -1,20 +1,108 @@
-body {
-  margin: 0;
-  font-family: Inter, sans-serif;
-  background: radial-gradient(circle at top, #0b1a33, #060c17);
-  color: #e5e7eb;
+:root {
+  --bg-1: #060c17;
+  --bg-2: #0a1324;
+  --bg-3: #0f1d36;
+  --card: rgba(255, 255, 255, 0.04);
+  --card-strong: rgba(255, 255, 255, 0.055);
+  --border: rgba(255, 255, 255, 0.08);
+  --text: #e5e7eb;
+  --muted: #94a3b8;
+  --blue: #3b82f6;
+  --gold: #f59e0b;
+  --shadow: 0 12px 34px rgba(0, 0, 0, 0.22);
 }
 
-/* HEADER */
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
+  background:
+    radial-gradient(circle at top, #0b1a33, #060c17);
+  color: var(--text);
+  font-family: Inter, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px 14px;
+  outline: none;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--muted);
+}
+
+.app {
+  position: relative;
+  min-height: 100vh;
+  padding: 16px;
+  overflow-x: hidden;
+}
+
+.bgGlow {
+  position: fixed;
+  pointer-events: none;
+  filter: blur(80px);
+  opacity: 0.2;
+  z-index: 0;
+}
+
+.bgGlowBlue {
+  width: 250px;
+  height: 250px;
+  left: -70px;
+  top: 80px;
+  background: var(--blue);
+}
+
+.bgGlowGold {
+  width: 220px;
+  height: 220px;
+  right: -80px;
+  bottom: 80px;
+  background: var(--gold);
+}
+
+.header,
+.content {
+  position: relative;
+  z-index: 1;
+}
 
 .header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 16px;
+  margin-bottom: 18px;
 }
 
-/* LOGO */
+.headerTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
 
 .logo {
   display: flex;
@@ -23,67 +111,88 @@ body {
 }
 
 .logoText {
-  font-size: 34px;
+  font-size: clamp(30px, 7vw, 54px);
   font-weight: 800;
+  letter-spacing: -0.03em;
+  color: #f8fafc;
 }
 
 .logoPlus {
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  background: rgba(255,170,0,0.15);
-  color: orange;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.14);
+  color: var(--gold);
   display: flex;
   align-items: center;
   justify-content: center;
   font-weight: 900;
-  box-shadow: 0 0 12px rgba(255,170,0,0.4);
+  font-size: 20px;
+  box-shadow: 0 0 14px rgba(245, 158, 11, 0.24);
+  border: 1px solid rgba(245, 158, 11, 0.22);
 }
-
-/* NAV */
 
 .nav {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  padding: 0 16px 12px;
 }
 
-.nav button {
-  background: rgba(255,255,255,0.05);
-  border: none;
+.navBtn {
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--text);
+  border: 1px solid var(--border);
   padding: 10px 14px;
   border-radius: 999px;
-  color: #e5e7eb;
+  min-height: 42px;
 }
 
-.nav button.active {
-  background: rgba(59,130,246,0.25);
-  border: 1px solid #3b82f6;
+.navBtn.active {
+  background: rgba(59, 130, 246, 0.18);
+  border-color: rgba(59, 130, 246, 0.55);
 }
-
-/* CONTENT */
 
 .content {
-  padding: 16px;
+  padding-top: 4px;
 }
-
-/* CARD */
 
 .card {
-  background: rgba(255,255,255,0.03);
-  border: 1px solid rgba(255,255,255,0.08);
+  background: var(--card);
+  border: 1px solid var(--border);
   border-radius: 20px;
   padding: 16px;
-  margin-bottom: 12px;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(12px);
 }
 
-/* BUTTON */
-
 .dataBtn {
-  background: transparent;
-  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  border: 1px solid var(--border);
   border-radius: 50%;
-  width: 38px;
-  height: 38px;
+  width: 40px;
+  height: 40px;
+  box-shadow: var(--shadow);
+}
+
+.customerCard {
+  background: var(--card-strong);
+  padding: 14px;
+  border-radius: 16px;
+  margin-bottom: 10px;
+  border: 1px solid var(--border);
+}
+
+@media (max-width: 700px) {
+  .app {
+    padding: 14px;
+  }
+
+  .logoText {
+    font-size: 38px;
+  }
+
+  .navBtn {
+    min-width: 0;
+  }
 }
