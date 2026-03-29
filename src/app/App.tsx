@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ensureSeedData, getTheme, setTheme } from "./storage";
+import { ensureSeedData } from "./storage";
 import Logo from "./Logo";
 
 import Oversikt from "../pages/Oversikt";
@@ -21,16 +21,11 @@ type TabKey =
 
 export function App() {
   const [tab, setTab] = useState<TabKey>("oversikt");
-  const [themeMode, setThemeMode] = useState<"dark" | "light">(getTheme());
 
   useEffect(() => {
     ensureSeedData();
+    document.documentElement.setAttribute("data-theme", "dark");
   }, []);
-
-  useEffect(() => {
-    document.documentElement.setAttribute("data-theme", themeMode);
-    setTheme(themeMode);
-  }, [themeMode]);
 
   const content = useMemo(() => {
     if (tab === "oversikt") return <Oversikt />;
@@ -48,31 +43,35 @@ export function App() {
       <div className="appBgGlow appBgGlow2" />
 
       <header className="appHeader">
-        <div className="appHeaderTop">
+        <div className="appHeaderTop appHeaderTopTight">
           <Logo />
 
           <div className="headerActions">
-            <button
-              className="btn ghostBtn"
-              type="button"
-              onClick={() => setThemeMode((p) => (p === "dark" ? "light" : "dark"))}
-            >
-              {themeMode === "dark" ? "☀️ Lys" : "🌙 Mørk"}
-            </button>
-
-            <button className="btn pillBtn" type="button" onClick={() => setTab("data")}>
+            <button className="btn dataBtn" type="button" onClick={() => setTab("data")}>
               ⚙️ Data
             </button>
           </div>
         </div>
 
-        <nav className="tabs">
-          <button className={tab === "oversikt" ? "tab active" : "tab"} onClick={() => setTab("oversikt")} type="button">Oversikt</button>
-          <button className={tab === "varer" ? "tab active" : "tab"} onClick={() => setTab("varer")} type="button">Varer</button>
-          <button className={tab === "innkjop" ? "tab active" : "tab"} onClick={() => setTab("innkjop")} type="button">Innkjøp</button>
-          <button className={tab === "salg" ? "tab active" : "tab"} onClick={() => setTab("salg")} type="button">Salg</button>
-          <button className={tab === "kunder" ? "tab active" : "tab"} onClick={() => setTab("kunder")} type="button">Kunder</button>
-          <button className={tab === "gjeld" ? "tab active" : "tab"} onClick={() => setTab("gjeld")} type="button">Gjeld</button>
+        <nav className="tabs tabsCompact">
+          <button className={tab === "oversikt" ? "tab active" : "tab"} onClick={() => setTab("oversikt")} type="button">
+            Oversikt
+          </button>
+          <button className={tab === "varer" ? "tab active" : "tab"} onClick={() => setTab("varer")} type="button">
+            Varer
+          </button>
+          <button className={tab === "innkjop" ? "tab active" : "tab"} onClick={() => setTab("innkjop")} type="button">
+            Innkjøp
+          </button>
+          <button className={tab === "salg" ? "tab active" : "tab"} onClick={() => setTab("salg")} type="button">
+            Salg
+          </button>
+          <button className={tab === "kunder" ? "tab active" : "tab"} onClick={() => setTab("kunder")} type="button">
+            Kunder
+          </button>
+          <button className={tab === "gjeld" ? "tab active" : "tab"} onClick={() => setTab("gjeld")} type="button">
+            Gjeld
+          </button>
         </nav>
       </header>
 
