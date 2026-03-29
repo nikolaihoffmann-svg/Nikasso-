@@ -47,7 +47,9 @@ export default function Gjeld() {
   return (
     <div>
       <h1 className="pageTitle">Gjeld</h1>
-      <p className="pageLead">Åpne poster, raske betalinger og full oversikt.</p>
+      <p className="pageLead">
+        Åpne poster og registrering av betaling. Ny gjeld lages fra <strong>Salg</strong>.
+      </p>
 
       <div className="grid3">
         <div className="statCard">
@@ -82,7 +84,7 @@ export default function Gjeld() {
           receivables.map(({ sale, remaining }) => (
             <div key={sale.id} className="card">
               <div className="rowBetween" style={{ marginBottom: 14 }}>
-                <div>
+                <div className="customerMain">
                   <div style={{ fontSize: 20, fontWeight: 800 }}>
                     {sale.customerName || "Kontantsalg"}
                   </div>
