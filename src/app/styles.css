@@ -1,18 +1,8 @@
-:root {
-  --bg: #060c17;
-  --card: #0e1626;
-  --border: rgba(255,255,255,0.08);
-  --text: #f1f5f9;
-  --muted: #94a3b8;
-  --accent: #f59e0b;
-  --blue: #3b82f6;
-}
-
 body {
   margin: 0;
-  background: radial-gradient(circle at top, #0b1a33, #060c17);
-  color: var(--text);
   font-family: Inter, sans-serif;
+  background: radial-gradient(circle at top, #0b1a33, #060c17);
+  color: #e5e7eb;
 }
 
 /* HEADER */
@@ -24,50 +14,52 @@ body {
   padding: 16px;
 }
 
-.brand {
+/* LOGO */
+
+.logo {
   display: flex;
   align-items: center;
   gap: 10px;
 }
 
-.brandText {
+.logoText {
   font-size: 34px;
   font-weight: 800;
 }
 
-.brandMark {
-  width: 28px;
-  height: 28px;
+.logoPlus {
+  width: 26px;
+  height: 26px;
   border-radius: 50%;
-  background: rgba(245,158,11,0.15);
-  color: var(--accent);
+  background: rgba(255,170,0,0.15);
+  color: orange;
   display: flex;
   align-items: center;
   justify-content: center;
   font-weight: 900;
-  box-shadow: 0 0 10px rgba(245,158,11,0.3);
+  box-shadow: 0 0 12px rgba(255,170,0,0.4);
 }
 
 /* NAV */
 
 .nav {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   padding: 0 16px 12px;
-  flex-wrap: wrap;
 }
 
-.navBtn {
+.nav button {
   background: rgba(255,255,255,0.05);
-  border: 1px solid var(--border);
+  border: none;
   padding: 10px 14px;
   border-radius: 999px;
-  color: var(--text);
+  color: #e5e7eb;
 }
 
-.navBtn.active {
-  background: rgba(59,130,246,0.2);
-  border-color: var(--blue);
+.nav button.active {
+  background: rgba(59,130,246,0.25);
+  border: 1px solid #3b82f6;
 }
 
 /* CONTENT */
@@ -76,56 +68,21 @@ body {
   padding: 16px;
 }
 
-/* CARDS */
+/* CARD */
 
 .card {
-  background: var(--card);
-  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.08);
   border-radius: 20px;
   padding: 16px;
-}
-
-.grid {
-  display: grid;
-  gap: 12px;
-}
-
-.grid2 {
-  grid-template-columns: 1fr 1fr;
-}
-
-/* KPI */
-
-.kpi {
-  font-size: 26px;
-  font-weight: 800;
-}
-
-.label {
-  color: var(--muted);
-  font-size: 14px;
-}
-
-/* LIST */
-
-.list {
-  display: grid;
-  gap: 10px;
-}
-
-.row {
-  display: flex;
-  justify-content: space-between;
-  padding: 12px;
-  border-radius: 14px;
-  background: rgba(255,255,255,0.03);
+  margin-bottom: 12px;
 }
 
 /* BUTTON */
 
 .dataBtn {
   background: transparent;
-  border: 1px solid var(--border);
+  border: 1px solid rgba(255,255,255,0.1);
   border-radius: 50%;
   width: 38px;
   height: 38px;
