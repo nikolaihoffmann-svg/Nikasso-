@@ -1,12 +1,7 @@
 import { useMemo, useState } from "react";
 import CustomerPickerWithCreate from "../components/CustomerPickerWithCreate";
 import ItemPickerWithCreate from "../components/ItemPickerWithCreate";
-import {
-  createEmptySale,
-  fmtKr,
-  makeSaleLine,
-  saveSale,
-} from "../app/storage";
+import { createEmptySale, fmtKr, makeSaleLine, saveSale } from "../app/storage";
 import type { SaleDraft, SaleLine } from "../types";
 
 export default function Salg() {
@@ -59,6 +54,7 @@ export default function Salg() {
   return (
     <div>
       <h1 className="pageTitle">Salg</h1>
+      <p className="pageLead">Registrer salg raskt, med fortjeneste og betaling i samme flyt.</p>
 
       <div className="card">
         <div className="grid2">
@@ -86,7 +82,7 @@ export default function Salg() {
           </label>
         </div>
 
-        <div className="list" style={{ marginTop: 16 }}>
+        <div className="list" style={{ marginTop: 18 }}>
           {draft.lines.map((line, index) => (
             <div key={line.id} className="lineCard">
               <div style={{ fontWeight: 800, fontSize: 22 }}>Linje {index + 1}</div>
@@ -137,14 +133,14 @@ export default function Salg() {
           ))}
         </div>
 
-        <div className="rowBetween" style={{ marginTop: 16 }}>
+        <div className="cardActions">
           <button className="btn" type="button" onClick={addLine}>
             + Legg til linje
           </button>
 
-          <div style={{ textAlign: "right" }}>
+          <div className="saleSummary">
             <div className="muted">Estimert fortjeneste</div>
-            <div style={{ fontSize: 24, fontWeight: 800 }}>{fmtKr(estimatedProfit)}</div>
+            <div className="saleSummaryValue">{fmtKr(estimatedProfit)}</div>
           </div>
         </div>
 
@@ -168,10 +164,10 @@ export default function Salg() {
           </label>
         </div>
 
-        <div className="rowBetween" style={{ marginTop: 18 }}>
-          <div>
+        <div className="cardActions">
+          <div className="saleSummary">
             <div className="muted">Totalt</div>
-            <div style={{ fontSize: 32, fontWeight: 900 }}>{fmtKr(total)}</div>
+            <div className="saleSummaryValue">{fmtKr(total)}</div>
           </div>
 
           <button className="btn btnPrimary" type="button" onClick={handleSave}>
