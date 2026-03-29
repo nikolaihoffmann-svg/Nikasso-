@@ -30,6 +30,7 @@ export default function NewItemModal({
 
   useEffect(() => {
     if (!open) return;
+
     setName(initialName || "");
     setCategory("Annet");
     setUnit("stk");
@@ -40,6 +41,22 @@ export default function NewItemModal({
     setNote("");
     setError("");
   }, [open, initialName]);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent): void {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    }
+
+    if (open) {
+      document.addEventListener("keydown", handleKeyDown);
+    }
+
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open, onClose]);
 
   if (!open) return null;
 
@@ -55,6 +72,7 @@ export default function NewItemModal({
         minStock: Number(minStock || 0),
         note,
       });
+
       onCreated(item);
       onClose();
     } catch (err) {
@@ -63,30 +81,50 @@ export default function NewItemModal({
   }
 
   return (
-    <div className="modalOverlay">
-      <div className="modalCard">
-        <div className="rowBetween" style={{ marginBottom: 16 }}>
-          <h2 className="sectionTitle" style={{ margin: 0 }}>Ny vare</h2>
-          <button className="btn" type="button" onClick={onClose}>Lukk</button>
+    <div className="modalOverlay" onClick={onClose}>
+      <div
+        className="modalCard"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Ny vare"
+      >
+        <div className="rowBetween modalHeader">
+          <div>
+            <h2 className="sectionTitle" style={{ marginBottom: 6 }}>Ny vare</h2>
+            <div className="muted">Opprett vare for lager, salg og innkjøp.</div>
+          </div>
+
+          <button className="btn" type="button" onClick={onClose}>
+            Lukk
+          </button>
         </div>
 
         <div className="grid2">
           <label className="label">
             <span>Varenavn</span>
-            <input value={name} onChange={(e) => setName(e.target.value)} />
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="F.eks. Bremseklosser" />
           </label>
 
           <label className="label">
             <span>Kategori</span>
             <select value={category} onChange={(e) => setCategory(e.target.value as ItemCategory)}>
-              {categories.map((x) => <option key={x} value={x}>{x}</option>)}
+              {categories.map((x) => (
+                <option key={x} value={x}>
+                  {x}
+                </option>
+              ))}
             </select>
           </label>
 
           <label className="label">
             <span>Enhet</span>
             <select value={unit} onChange={(e) => setUnit(e.target.value as ItemUnit)}>
-              {units.map((x) => <option key={x} value={x}>{x}</option>)}
+              {units.map((x) => (
+                <option key={x} value={x}>
+                  {x}
+                </option>
+              ))}
             </select>
           </label>
 
@@ -113,13 +151,13 @@ export default function NewItemModal({
 
         <label className="label" style={{ marginTop: 14 }}>
           <span>Notat</span>
-          <textarea value={note} onChange={(e) => setNote(e.target.value)} />
+          <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Valgfritt notat..." />
         </label>
 
-        {error ? <div style={{ color: "#fca5a5", marginTop: 12 }}>{error}</div> : null}
+        {error ? <div className="modalError">{error}</div> : null}
 
-        <div className="rowBetween" style={{ marginTop: 16 }}>
-          <div className="muted">Varen kan opprettes direkte fra salg og innkjøp.</div>
+        <div className="cardActions">
+          <div className="muted">Varen kan også opprettes direkte fra salg og innkjøp.</div>
           <button className="btn btnPrimary" type="button" onClick={handleSave}>
             Lagre vare
           </button>
