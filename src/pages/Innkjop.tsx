@@ -1,15 +1,20 @@
-import { useState } from "react";
-import type { PurchaseDraft, PurchaseLine } from "../types";
-import { createEmptyPurchase, makePurchaseLine, savePurchase } from "../app/storage";
+import { useMemo, useState } from "react";
 import ItemPickerWithCreate from "../components/ItemPickerWithCreate";
+import {
+  createEmptyPurchase,
+  fmtKr,
+  makePurchaseLine,
+  savePurchase,
+} from "../app/storage";
+import type { PurchaseDraft, PurchaseLine } from "../types";
 
 export default function Innkjop() {
   const [draft, setDraft] = useState<PurchaseDraft>(createEmptyPurchase());
   const [message, setMessage] = useState("");
 
   function updateLine(lineId: string, patch: Partial<PurchaseLine>): void {
-    setDraft((prev: PurchaseDraft) => {
-      const lines = prev.lines.map((line: PurchaseLine) => {
+    setDraft((prev) => {
+      const lines = prev.lines.map((line) => {
         if (line.id !== lineId) return line;
         const next: PurchaseLine = { ...line, ...patch };
         next.lineTotal = Number(next.qty || 0) * Number(next.unitCost || 0);
@@ -20,11 +25,15 @@ export default function Innkjop() {
   }
 
   function addLine(): void {
-    setDraft((prev: PurchaseDraft) => ({
+    setDraft((prev) => ({
       ...prev,
       lines: [...prev.lines, makePurchaseLine()],
     }));
   }
+
+  const total = useMemo(() => {
+    return draft.lines.reduce((sum, line) => sum + Number(line.lineTotal || 0), 0);
+  }, [draft.lines]);
 
   function handleSave(): void {
     savePurchase(draft);
@@ -33,28 +42,26 @@ export default function Innkjop() {
   }
 
   return (
-    <div style={pageStyle}>
-      <h1>Innkjøp</h1>
+    <div>
+      <h1 className="pageTitle">Innkjøp</h1>
 
-      <div style={cardStyle}>
-        <div style={{ display: "grid", gap: 12 }}>
-          <label style={fieldStyle}>
+      <div className="card">
+        <div className="grid2">
+          <label className="label">
             <span>Leverandør</span>
             <input
               value={draft.supplier}
-              onChange={(e) =>
-                setDraft((prev: PurchaseDraft) => ({ ...prev, supplier: e.target.value }))
-              }
+              onChange={(e) => setDraft((prev) => ({ ...prev, supplier: e.target.value }))}
               placeholder="F.eks. Biltema / Mekonomen"
             />
           </label>
 
-          <label style={fieldStyle}>
+          <label className="label">
             <span>Status</span>
             <select
               value={draft.status}
               onChange={(e) =>
-                setDraft((prev: PurchaseDraft) => ({
+                setDraft((prev) => ({
                   ...prev,
                   status: e.target.value as PurchaseDraft["status"],
                 }))
@@ -64,29 +71,31 @@ export default function Innkjop() {
               <option value="ikke_betalt">Ikke betalt</option>
             </select>
           </label>
+        </div>
 
-          <label style={fieldStyle}>
-            <span>Oppdater vare-kost</span>
-            <select
-              value={draft.updateCostMode}
-              onChange={(e) =>
-                setDraft((prev: PurchaseDraft) => ({
-                  ...prev,
-                  updateCostMode: e.target.value as PurchaseDraft["updateCostMode"],
-                }))
-              }
-            >
-              <option value="weighted_average">Vektet snitt (anbefalt)</option>
-              <option value="last_price">Sett til siste pris</option>
-              <option value="no_change">Ikke endre</option>
-            </select>
-          </label>
+        <label className="label" style={{ marginTop: 14 }}>
+          <span>Oppdater vare-kost</span>
+          <select
+            value={draft.updateCostMode}
+            onChange={(e) =>
+              setDraft((prev) => ({
+                ...prev,
+                updateCostMode: e.target.value as PurchaseDraft["updateCostMode"],
+              }))
+            }
+          >
+            <option value="weighted_average">Vektet snitt (anbefalt)</option>
+            <option value="last_price">Sett til siste pris</option>
+            <option value="no_change">Ikke endre</option>
+          </select>
+        </label>
 
-          {draft.lines.map((line: PurchaseLine, index: number) => (
-            <div key={line.id} style={lineCardStyle}>
-              <div style={{ fontWeight: 700 }}>Linje {index + 1}</div>
+        <div className="list" style={{ marginTop: 16 }}>
+          {draft.lines.map((line, index) => (
+            <div key={line.id} className="lineCard">
+              <div style={{ fontWeight: 800, fontSize: 22 }}>Linje {index + 1}</div>
 
-              <label style={fieldStyle}>
+              <label className="label">
                 <span>Type</span>
                 <select
                   value={line.kind}
@@ -102,7 +111,7 @@ export default function Innkjop() {
                 </select>
               </label>
 
-              <label style={fieldStyle}>
+              <label className="label">
                 <span>Vare</span>
                 <ItemPickerWithCreate
                   value={line.itemId}
@@ -117,8 +126,8 @@ export default function Innkjop() {
                 />
               </label>
 
-              <div style={twoColStyle}>
-                <label style={fieldStyle}>
+              <div className="grid2">
+                <label className="label">
                   <span>Antall</span>
                   <input
                     type="number"
@@ -127,81 +136,41 @@ export default function Innkjop() {
                   />
                 </label>
 
-                <label style={fieldStyle}>
+                <label className="label">
                   <span>Kostpris</span>
                   <input
                     type="number"
                     value={line.unitCost}
-                    onChange={(e) =>
-                      updateLine(line.id, { unitCost: Number(e.target.value || 0) })
-                    }
+                    onChange={(e) => updateLine(line.id, { unitCost: Number(e.target.value || 0) })}
                   />
                 </label>
               </div>
 
-              <div style={{ opacity: 0.8 }}>Linjesum: {line.lineTotal.toFixed(2)} kr</div>
+              <span className="badge badgeBlue">Linjesum: {fmtKr(line.lineTotal)}</span>
             </div>
           ))}
+        </div>
 
-          <button style={secondaryButtonStyle} onClick={addLine} type="button">
+        <div className="rowBetween" style={{ marginTop: 16 }}>
+          <button className="btn" type="button" onClick={addLine}>
             + Legg til linje
           </button>
 
-          <button style={primaryButtonStyle} onClick={handleSave} type="button">
+          <div style={{ textAlign: "right" }}>
+            <div className="muted">Totalt</div>
+            <div style={{ fontSize: 32, fontWeight: 900 }}>{fmtKr(total)}</div>
+          </div>
+        </div>
+
+        <div className="rowBetween" style={{ marginTop: 18 }}>
+          <div className="muted">Lagrer lagerøkning og oppdaterer kostpris.</div>
+          <button className="btn btnPrimary" type="button" onClick={handleSave}>
             Lagre innkjøp
           </button>
-
-          {message ? <div>{message}</div> : null}
         </div>
+
+        {message ? <div style={{ marginTop: 12, color: "#86efac" }}>{message}</div> : null}
       </div>
     </div>
   );
 }
-
-const pageStyle: React.CSSProperties = {
-  padding: 16,
-  color: "#fff",
-};
-
-const cardStyle: React.CSSProperties = {
-  background: "rgba(255,255,255,0.04)",
-  border: "1px solid rgba(255,255,255,0.08)",
-  borderRadius: 20,
-  padding: 16,
-};
-
-const lineCardStyle: React.CSSProperties = {
-  background: "rgba(255,255,255,0.03)",
-  borderRadius: 16,
-  padding: 14,
-  display: "grid",
-  gap: 12,
-};
-
-const fieldStyle: React.CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: 8,
-};
-
-const twoColStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "1fr 1fr",
-  gap: 12,
-};
-
-const primaryButtonStyle: React.CSSProperties = {
-  padding: "14px 16px",
-  borderRadius: 14,
-  border: 0,
-  cursor: "pointer",
-};
-
-const secondaryButtonStyle: React.CSSProperties = {
-  padding: "14px 16px",
-  borderRadius: 14,
-  border: "1px solid rgba(255,255,255,0.12)",
-  background: "transparent",
-  color: "#fff",
-  cursor: "pointer",
-};
