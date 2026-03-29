@@ -10,7 +10,7 @@ import Kunder from "../pages/Kunder";
 import Gjeld from "../pages/Gjeld";
 import DataPage from "../pages/Data";
 
-type TabKey =
+type Tab =
   | "oversikt"
   | "varer"
   | "innkjop"
@@ -19,17 +19,8 @@ type TabKey =
   | "gjeld"
   | "data";
 
-const NAV_ITEMS: Array<{ key: TabKey; label: string }> = [
-  { key: "oversikt", label: "Oversikt" },
-  { key: "varer", label: "Varer" },
-  { key: "innkjop", label: "Innkjøp" },
-  { key: "salg", label: "Salg" },
-  { key: "kunder", label: "Kunder" },
-  { key: "gjeld", label: "Gjeld" },
-];
-
-export function App() {
-  const [tab, setTab] = useState<TabKey>("oversikt");
+export default function App() {
+  const [tab, setTab] = useState<Tab>("oversikt");
 
   useEffect(() => {
     ensureSeedData();
@@ -37,47 +28,40 @@ export function App() {
   }, []);
 
   const content = useMemo(() => {
-    if (tab === "oversikt") return <Oversikt />;
-    if (tab === "varer") return <Varer />;
-    if (tab === "innkjop") return <Innkjop />;
-    if (tab === "salg") return <Salg />;
-    if (tab === "kunder") return <Kunder />;
-    if (tab === "gjeld") return <Gjeld />;
-    return <DataPage />;
+    switch (tab) {
+      case "varer": return <Varer />;
+      case "innkjop": return <Innkjop />;
+      case "salg": return <Salg />;
+      case "kunder": return <Kunder />;
+      case "gjeld": return <Gjeld />;
+      case "data": return <DataPage />;
+      default: return <Oversikt />;
+    }
   }, [tab]);
 
   return (
-    <div className="appShell">
-      <div className="bgGlow bgGlowBlue" />
-      <div className="bgGlow bgGlowGold" />
+    <div className="app">
+      <header className="header">
+        <Logo />
 
-      <header className="topbar">
-        <div className="topbarRow">
-          <Logo />
-
-          <button className="utilityBtn" type="button" onClick={() => setTab("data")}>
-            <span aria-hidden="true">⚙️</span>
-            <span>Data</span>
-          </button>
-        </div>
-
-        <nav className="navPills" aria-label="Hovednavigasjon">
-          {NAV_ITEMS.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              onClick={() => setTab(item.key)}
-              className={tab === item.key ? "navPill active" : "navPill"}
-            >
-              {item.label}
-            </button>
-          ))}
-        </nav>
+        <button className="dataBtn" onClick={() => setTab("data")}>
+          ⚙️
+        </button>
       </header>
 
-      <main className="pageWrap">{content}</main>
+      <nav className="nav">
+        {["oversikt","varer","innkjop","salg","kunder","gjeld"].map((t) => (
+          <button
+            key={t}
+            className={tab === t ? "navBtn active" : "navBtn"}
+            onClick={() => setTab(t as Tab)}
+          >
+            {t}
+          </button>
+        ))}
+      </nav>
+
+      <main className="content">{content}</main>
     </div>
   );
 }
-
-export default App;
