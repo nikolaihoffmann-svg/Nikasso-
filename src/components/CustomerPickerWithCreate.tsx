@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Customer } from "../types";
 import { getCustomers } from "../app/storage";
 import NewCustomerModal from "./NewCustomerModal";
@@ -18,9 +18,33 @@ export default function CustomerPickerWithCreate({
   const [query, setQuery] = useState("");
   const [openList, setOpenList] = useState(false);
   const [openNew, setOpenNew] = useState(false);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setCustomers(getCustomers());
+  }, []);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent): void {
+      if (!wrapRef.current) return;
+      if (!wrapRef.current.contains(event.target as Node)) {
+        setOpenList(false);
+      }
+    }
+
+    function handleEscape(event: KeyboardEvent): void {
+      if (event.key === "Escape") {
+        setOpenList(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleEscape);
+
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleEscape);
+    };
   }, []);
 
   const selected = useMemo(
@@ -37,16 +61,20 @@ export default function CustomerPickerWithCreate({
         return (
           customer.name.toLowerCase().includes(q) ||
           (customer.phone ?? "").toLowerCase().includes(q) ||
-          (customer.address ?? "").toLowerCase().includes(q)
+          (customer.address ?? "").toLowerCase().includes(q) ||
+          (customer.note ?? "").toLowerCase().includes(q)
         );
       })
       .slice(0, 20);
   }, [customers, query]);
 
+  const shownValue = openList ? query : selected?.name ?? query;
+
   return (
-    <div style={{ position: "relative" }}>
+    <div className="picker" ref={wrapRef}>
       <input
-        value={openList ? query : selected?.name ?? query}
+        className="pickerInput"
+        value={shownValue}
         placeholder={placeholder}
         onFocus={() => {
           setOpenList(true);
@@ -58,43 +86,60 @@ export default function CustomerPickerWithCreate({
         }}
       />
 
-      {openList && (
-        <div className="dropdown">
-          {filtered.map((customer) => (
-            <button
-              key={customer.id}
-              type="button"
-              className="dropdownItem"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => {
-                onChange(customer);
-                setQuery(customer.name);
-                setOpenList(false);
-              }}
-            >
-              <div style={{ fontWeight: 700 }}>{customer.name}</div>
-              <div className="muted" style={{ fontSize: 13 }}>
-                {[customer.phone, customer.address].filter(Boolean).join(" • ") || "Ingen ekstra info"}
-              </div>
-            </button>
-          ))}
+      {openList ? (
+        <div className="pickerDropdown">
+          <div className="pickerList">
+            {filtered.map((customer) => (
+              <button
+                key={customer.id}
+                type="button"
+                className="pickerItem"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  onChange(customer);
+                  setQuery(customer.name);
+                  setOpenList(false);
+                }}
+              >
+                <div className="pickerItemTitle">{customer.name}</div>
+                <div className="pickerItemMeta">
+                  {[customer.phone, customer.address].filter(Boolean).join(" • ") || "Ingen ekstra info"}
+                </div>
+              </button>
+            ))}
+          </div>
 
           {filtered.length === 0 ? (
-            <div style={{ padding: 12 }}>
-              <div className="emptyState">Ingen kunder funnet</div>
-              <button className="btn btnPrimary" type="button" onClick={() => setOpenNew(true)}>
-                + Opprett “{query.trim() || "ny kunde"}”
-              </button>
-            </div>
+            <>
+              <div className="pickerHint">Ingen kunder funnet.</div>
+              <div className="pickerFooter">
+                <button className="btn btnPrimary" type="button" onClick={() => setOpenNew(true)}>
+                  + Opprett “{query.trim() || "ny kunde"}”
+                </button>
+              </div>
+            </>
           ) : (
-            <div style={{ padding: 10 }}>
+            <div className="pickerFooter">
               <button className="btn" type="button" onClick={() => setOpenNew(true)}>
                 + Ny kunde
               </button>
+              {selected ? (
+                <button
+                  className="btn"
+                  type="button"
+                  onClick={() => {
+                    onChange(undefined);
+                    setQuery("");
+                    setOpenList(false);
+                  }}
+                >
+                  Tøm valg
+                </button>
+              ) : null}
             </div>
           )}
         </div>
-      )}
+      ) : null}
 
       <NewCustomerModal
         open={openNew}
