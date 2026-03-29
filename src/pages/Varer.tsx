@@ -62,7 +62,7 @@ export default function Varer() {
             ) : (
               lowItems.map((item) => (
                 <div key={item.id} className="featureRow">
-                  <div>
+                  <div className="customerMain">
                     <div className="featureRowTitle">{item.name}</div>
                     <div className="featureRowSub">
                       Nå: {item.stock} • Min: {item.minStock}
