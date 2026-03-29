@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ensureSeedData } from "./storage";
 import Logo from "./Logo";
 
@@ -27,34 +27,53 @@ export default function App() {
     document.documentElement.setAttribute("data-theme", "dark");
   }, []);
 
+  const content = useMemo(() => {
+    if (tab === "oversikt") return <Oversikt />;
+    if (tab === "varer") return <Varer />;
+    if (tab === "innkjop") return <Innkjop />;
+    if (tab === "salg") return <Salg />;
+    if (tab === "kunder") return <Kunder />;
+    if (tab === "gjeld") return <Gjeld />;
+    return <DataPage />;
+  }, [tab]);
+
   return (
     <div className="app">
-      <header className="header">
-        <Logo />
+      <div className="bgGlow bgGlowBlue" />
+      <div className="bgGlow bgGlowGold" />
 
-        <button className="dataBtn" onClick={() => setTab("data")}>
-          ⚙️
-        </button>
+      <header className="header">
+        <div className="headerTop">
+          <Logo />
+
+          <button className="dataBtn" type="button" onClick={() => setTab("data")}>
+            ⚙️
+          </button>
+        </div>
+
+        <nav className="nav">
+          <button className={tab === "oversikt" ? "navBtn active" : "navBtn"} onClick={() => setTab("oversikt")} type="button">
+            Oversikt
+          </button>
+          <button className={tab === "varer" ? "navBtn active" : "navBtn"} onClick={() => setTab("varer")} type="button">
+            Varer
+          </button>
+          <button className={tab === "innkjop" ? "navBtn active" : "navBtn"} onClick={() => setTab("innkjop")} type="button">
+            Innkjøp
+          </button>
+          <button className={tab === "salg" ? "navBtn active" : "navBtn"} onClick={() => setTab("salg")} type="button">
+            Salg
+          </button>
+          <button className={tab === "kunder" ? "navBtn active" : "navBtn"} onClick={() => setTab("kunder")} type="button">
+            Kunder
+          </button>
+          <button className={tab === "gjeld" ? "navBtn active" : "navBtn"} onClick={() => setTab("gjeld")} type="button">
+            Gjeld
+          </button>
+        </nav>
       </header>
 
-      <nav className="nav">
-        <button className={tab==="oversikt"?"active":""} onClick={()=>setTab("oversikt")}>oversikt</button>
-        <button className={tab==="varer"?"active":""} onClick={()=>setTab("varer")}>varer</button>
-        <button className={tab==="innkjop"?"active":""} onClick={()=>setTab("innkjop")}>innkjop</button>
-        <button className={tab==="salg"?"active":""} onClick={()=>setTab("salg")}>salg</button>
-        <button className={tab==="kunder"?"active":""} onClick={()=>setTab("kunder")}>kunder</button>
-        <button className={tab==="gjeld"?"active":""} onClick={()=>setTab("gjeld")}>gjeld</button>
-      </nav>
-
-      <main className="content">
-        {tab==="oversikt" && <Oversikt />}
-        {tab==="varer" && <Varer />}
-        {tab==="innkjop" && <Innkjop />}
-        {tab==="salg" && <Salg />}
-        {tab==="kunder" && <Kunder />}
-        {tab==="gjeld" && <Gjeld />}
-        {tab==="data" && <DataPage />}
-      </main>
+      <main className="content">{content}</main>
     </div>
   );
 }
