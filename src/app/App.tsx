@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { ensureSeedData } from "./storage";
 import Logo from "./Logo";
 
@@ -27,18 +27,6 @@ export default function App() {
     document.documentElement.setAttribute("data-theme", "dark");
   }, []);
 
-  const content = useMemo(() => {
-    switch (tab) {
-      case "varer": return <Varer />;
-      case "innkjop": return <Innkjop />;
-      case "salg": return <Salg />;
-      case "kunder": return <Kunder />;
-      case "gjeld": return <Gjeld />;
-      case "data": return <DataPage />;
-      default: return <Oversikt />;
-    }
-  }, [tab]);
-
   return (
     <div className="app">
       <header className="header">
@@ -50,18 +38,23 @@ export default function App() {
       </header>
 
       <nav className="nav">
-        {["oversikt","varer","innkjop","salg","kunder","gjeld"].map((t) => (
-          <button
-            key={t}
-            className={tab === t ? "navBtn active" : "navBtn"}
-            onClick={() => setTab(t as Tab)}
-          >
-            {t}
-          </button>
-        ))}
+        <button className={tab==="oversikt"?"active":""} onClick={()=>setTab("oversikt")}>oversikt</button>
+        <button className={tab==="varer"?"active":""} onClick={()=>setTab("varer")}>varer</button>
+        <button className={tab==="innkjop"?"active":""} onClick={()=>setTab("innkjop")}>innkjop</button>
+        <button className={tab==="salg"?"active":""} onClick={()=>setTab("salg")}>salg</button>
+        <button className={tab==="kunder"?"active":""} onClick={()=>setTab("kunder")}>kunder</button>
+        <button className={tab==="gjeld"?"active":""} onClick={()=>setTab("gjeld")}>gjeld</button>
       </nav>
 
-      <main className="content">{content}</main>
+      <main className="content">
+        {tab==="oversikt" && <Oversikt />}
+        {tab==="varer" && <Varer />}
+        {tab==="innkjop" && <Innkjop />}
+        {tab==="salg" && <Salg />}
+        {tab==="kunder" && <Kunder />}
+        {tab==="gjeld" && <Gjeld />}
+        {tab==="data" && <DataPage />}
+      </main>
     </div>
   );
 }
