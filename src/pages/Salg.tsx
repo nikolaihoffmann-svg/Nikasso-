@@ -1,15 +1,23 @@
-import { useState } from "react";
-import type { SaleDraft, SaleLine } from "../types";
-import { createEmptySale, makeSaleLine, saveSale } from "../app/storage";
+import { useMemo, useState } from "react";
+import CustomerPickerWithCreate from "../components/CustomerPickerWithCreate";
 import ItemPickerWithCreate from "../components/ItemPickerWithCreate";
+import {
+  createEmptySale,
+  fmtKr,
+  makeSaleLine,
+  saveSale,
+} from "../app/storage";
+import type { SaleDraft, SaleLine } from "../types";
 
 export default function Salg() {
   const [draft, setDraft] = useState<SaleDraft>(createEmptySale());
   const [message, setMessage] = useState("");
+  const [paymentAmount, setPaymentAmount] = useState("0");
+  const [paymentNote, setPaymentNote] = useState("");
 
   function updateLine(lineId: string, patch: Partial<SaleLine>): void {
-    setDraft((prev: SaleDraft) => {
-      const lines = prev.lines.map((line: SaleLine) => {
+    setDraft((prev) => {
+      const lines = prev.lines.map((line) => {
         if (line.id !== lineId) return line;
         const next: SaleLine = { ...line, ...patch };
         next.lineTotal = Number(next.qty || 0) * Number(next.unitPrice || 0);
@@ -20,26 +28,70 @@ export default function Salg() {
   }
 
   function addLine(): void {
-    setDraft((prev: SaleDraft) => ({ ...prev, lines: [...prev.lines, makeSaleLine()] }));
+    setDraft((prev) => ({
+      ...prev,
+      lines: [...prev.lines, makeSaleLine()],
+    }));
   }
 
+  const total = useMemo(() => {
+    return draft.lines.reduce((sum, line) => sum + Number(line.lineTotal || 0), 0);
+  }, [draft.lines]);
+
+  const estimatedProfit = useMemo(() => {
+    return draft.lines.reduce((sum, line) => {
+      return sum + (Number(line.unitPrice || 0) - Number(line.unitCost || 0)) * Number(line.qty || 0);
+    }, 0);
+  }, [draft.lines]);
+
   function handleSave(): void {
-    saveSale(draft);
+    saveSale(draft, {
+      paymentAmount: Number(paymentAmount || 0),
+      paymentNote,
+    });
+
     setMessage("Salg lagret");
     setDraft(createEmptySale());
+    setPaymentAmount("0");
+    setPaymentNote("");
   }
 
   return (
-    <div style={pageStyle}>
-      <h1>Salg</h1>
+    <div>
+      <h1 className="pageTitle">Salg</h1>
 
-      <div style={cardStyle}>
-        <div style={{ display: "grid", gap: 16 }}>
-          {draft.lines.map((line: SaleLine, index: number) => (
-            <div key={line.id} style={lineCardStyle}>
-              <div style={{ fontWeight: 700, marginBottom: 10 }}>Linje {index + 1}</div>
+      <div className="card">
+        <div className="grid2">
+          <label className="label">
+            <span>Kunde</span>
+            <CustomerPickerWithCreate
+              value={draft.customerId}
+              onChange={(customer) =>
+                setDraft((prev) => ({
+                  ...prev,
+                  customerId: customer?.id,
+                  customerName: customer?.name ?? "",
+                }))
+              }
+            />
+          </label>
 
-              <label style={fieldStyle}>
+          <label className="label">
+            <span>Notat</span>
+            <input
+              value={draft.note ?? ""}
+              onChange={(e) => setDraft((prev) => ({ ...prev, note: e.target.value }))}
+              placeholder="Valgfritt notat..."
+            />
+          </label>
+        </div>
+
+        <div className="list" style={{ marginTop: 16 }}>
+          {draft.lines.map((line, index) => (
+            <div key={line.id} className="lineCard">
+              <div style={{ fontWeight: 800, fontSize: 22 }}>Linje {index + 1}</div>
+
+              <label className="label">
                 <span>Vare</span>
                 <ItemPickerWithCreate
                   value={line.itemId}
@@ -55,8 +107,8 @@ export default function Salg() {
                 />
               </label>
 
-              <div style={twoColStyle}>
-                <label style={fieldStyle}>
+              <div className="grid2">
+                <label className="label">
                   <span>Antall</span>
                   <input
                     type="number"
@@ -65,81 +117,70 @@ export default function Salg() {
                   />
                 </label>
 
-                <label style={fieldStyle}>
+                <label className="label">
                   <span>Pris per stk</span>
                   <input
                     type="number"
                     value={line.unitPrice}
-                    onChange={(e) =>
-                      updateLine(line.id, { unitPrice: Number(e.target.value || 0) })
-                    }
+                    onChange={(e) => updateLine(line.id, { unitPrice: Number(e.target.value || 0) })}
                   />
                 </label>
               </div>
 
-              <div style={{ opacity: 0.8 }}>Linjesum: {line.lineTotal.toFixed(2)} kr</div>
+              <div className="rowBetween">
+                <span className="badge badgeBlue">Linjesum: {fmtKr(line.lineTotal)}</span>
+                <span className="badge badgeGold">
+                  Fortjeneste: {fmtKr((line.unitPrice - line.unitCost) * line.qty)}
+                </span>
+              </div>
             </div>
           ))}
+        </div>
 
-          <button style={secondaryButtonStyle} onClick={addLine} type="button">
+        <div className="rowBetween" style={{ marginTop: 16 }}>
+          <button className="btn" type="button" onClick={addLine}>
             + Legg til linje
           </button>
 
-          <button style={primaryButtonStyle} onClick={handleSave} type="button">
+          <div style={{ textAlign: "right" }}>
+            <div className="muted">Estimert fortjeneste</div>
+            <div style={{ fontSize: 24, fontWeight: 800 }}>{fmtKr(estimatedProfit)}</div>
+          </div>
+        </div>
+
+        <div className="grid2" style={{ marginTop: 18 }}>
+          <label className="label">
+            <span>Betalt nå</span>
+            <input
+              type="number"
+              value={paymentAmount}
+              onChange={(e) => setPaymentAmount(e.target.value)}
+            />
+          </label>
+
+          <label className="label">
+            <span>Betalingsnotat</span>
+            <input
+              value={paymentNote}
+              onChange={(e) => setPaymentNote(e.target.value)}
+              placeholder="Vipps, kontant, bank..."
+            />
+          </label>
+        </div>
+
+        <div className="rowBetween" style={{ marginTop: 18 }}>
+          <div>
+            <div className="muted">Totalt</div>
+            <div style={{ fontSize: 32, fontWeight: 900 }}>{fmtKr(total)}</div>
+          </div>
+
+          <button className="btn btnPrimary" type="button" onClick={handleSave}>
             Lagre salg
           </button>
-
-          {message ? <div>{message}</div> : null}
         </div>
+
+        {message ? <div style={{ marginTop: 12, color: "#86efac" }}>{message}</div> : null}
       </div>
     </div>
   );
 }
-
-const pageStyle: React.CSSProperties = {
-  padding: 16,
-  color: "#fff",
-};
-
-const cardStyle: React.CSSProperties = {
-  background: "rgba(255,255,255,0.04)",
-  border: "1px solid rgba(255,255,255,0.08)",
-  borderRadius: 20,
-  padding: 16,
-};
-
-const lineCardStyle: React.CSSProperties = {
-  background: "rgba(255,255,255,0.03)",
-  borderRadius: 16,
-  padding: 14,
-  display: "grid",
-  gap: 12,
-};
-
-const fieldStyle: React.CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: 8,
-};
-
-const twoColStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "1fr 1fr",
-  gap: 12,
-};
-
-const primaryButtonStyle: React.CSSProperties = {
-  padding: "14px 16px",
-  borderRadius: 14,
-  border: 0,
-  cursor: "pointer",
-};
-
-const secondaryButtonStyle: React.CSSProperties = {
-  padding: "14px 16px",
-  borderRadius: 14,
-  border: "1px solid rgba(255,255,255,0.12)",
-  background: "transparent",
-  color: "#fff",
-  cursor: "pointer",
-};
