@@ -46,97 +46,62 @@ export default function Gjeld() {
 
   return (
     <div>
-      <h1 style={{ fontSize: 44, marginBottom: 8 }}>Gjeld</h1>
-      <p style={{ marginTop: 0, marginBottom: 20, color: "#94a3b8" }}>
-        Åpne poster, raske betalinger og full oversikt.
-      </p>
+      <h1 className="pageTitle">Gjeld</h1>
+      <p className="pageLead">Åpne poster, raske betalinger og full oversikt.</p>
 
-      <div
-        style={{
-          display: "grid",
-          gap: 12,
-          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-          marginBottom: 16,
-        }}
-      >
-        <div className="card">
-          <div style={{ color: "#94a3b8", marginBottom: 8 }}>Totalt utestående</div>
-          <div style={{ fontSize: 34, fontWeight: 800 }}>{fmtKr(totalOpen)}</div>
+      <div className="grid3">
+        <div className="statCard">
+          <div className="statLabel">Totalt utestående</div>
+          <div className="statValue">{fmtKr(totalOpen)}</div>
         </div>
 
-        <div className="card">
-          <div style={{ color: "#94a3b8", marginBottom: 8 }}>Åpne poster</div>
-          <div style={{ fontSize: 34, fontWeight: 800 }}>{totalCount}</div>
+        <div className="statCard">
+          <div className="statLabel">Åpne poster</div>
+          <div className="statValue">{totalCount}</div>
         </div>
 
-        <div className="card">
-          <div style={{ color: "#94a3b8", marginBottom: 8 }}>Største åpne post</div>
-          <div style={{ fontSize: 34, fontWeight: 800 }}>{fmtKr(biggestOpen)}</div>
+        <div className="statCard">
+          <div className="statLabel">Største åpne post</div>
+          <div className="statValue">{fmtKr(biggestOpen)}</div>
         </div>
       </div>
 
-      <div className="card" style={{ marginBottom: 16 }}>
-        <div style={{ marginBottom: 14 }}>
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Søk kunde..."
-          />
-        </div>
+      <div className="card" style={{ marginTop: 16 }}>
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Søk kunde..."
+        />
       </div>
 
-      <div style={{ display: "grid", gap: 12 }}>
+      <div className="receivableList" style={{ marginTop: 16 }}>
         {receivables.length === 0 ? (
-          <div className="card" style={{ color: "#94a3b8" }}>
-            Ingen åpne poster.
-          </div>
+          <div className="card emptyText">Ingen åpne poster.</div>
         ) : (
           receivables.map(({ sale, remaining }) => (
-            <div
-              key={sale.id}
-              className="card"
-              style={{
-                padding: 16,
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  gap: 12,
-                  alignItems: "flex-start",
-                  flexWrap: "wrap",
-                  marginBottom: 14,
-                }}
-              >
+            <div key={sale.id} className="card">
+              <div className="rowBetween" style={{ marginBottom: 14 }}>
                 <div>
                   <div style={{ fontSize: 20, fontWeight: 800 }}>
                     {sale.customerName || "Kontantsalg"}
                   </div>
-                  <div style={{ color: "#94a3b8", marginTop: 6 }}>
+                  <div className="muted" style={{ marginTop: 6 }}>
                     {new Date(sale.createdAt).toLocaleString("no-NO")}
                   </div>
                 </div>
 
                 <div style={{ textAlign: "right" }}>
                   <div style={{ fontSize: 24, fontWeight: 800 }}>{fmtKr(remaining)}</div>
-                  <div style={{ color: "#94a3b8", marginTop: 6 }}>
+                  <div className="muted" style={{ marginTop: 6 }}>
                     Total: {fmtKr(sale.total)}
                   </div>
                 </div>
               </div>
 
-              <div
-                style={{
-                  display: "grid",
-                  gap: 12,
-                  gridTemplateColumns: "minmax(140px, 220px) auto",
-                  alignItems: "end",
-                }}
-              >
-                <div>
-                  <div style={{ color: "#94a3b8", marginBottom: 8 }}>Registrer betaling</div>
+              <div className="grid2">
+                <label className="label">
+                  <span>Registrer betaling</span>
                   <input
                     type="number"
                     value={amounts[sale.id] ?? ""}
@@ -145,24 +110,13 @@ export default function Gjeld() {
                     }
                     placeholder="Beløp"
                   />
-                </div>
+                </label>
 
-                <button
-                  className="dataBtn"
-                  style={{
-                    borderRadius: 14,
-                    width: "auto",
-                    height: "auto",
-                    padding: "12px 18px",
-                    background: "rgba(34,197,94,0.14)",
-                    border: "1px solid rgba(34,197,94,0.28)",
-                    color: "#d1fae5",
-                  }}
-                  type="button"
-                  onClick={() => handlePay(sale.id)}
-                >
-                  Registrer betaling
-                </button>
+                <div className="cardActions" style={{ marginTop: 0 }}>
+                  <button className="btn btnSuccess" type="button" onClick={() => handlePay(sale.id)}>
+                    Registrer betaling
+                  </button>
+                </div>
               </div>
             </div>
           ))
