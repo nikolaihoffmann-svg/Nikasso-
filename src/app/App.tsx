@@ -19,6 +19,15 @@ type Tab =
   | "gjeld"
   | "data";
 
+const navItems: Array<{ key: Tab; label: string }> = [
+  { key: "oversikt", label: "Oversikt" },
+  { key: "varer", label: "Varer" },
+  { key: "innkjop", label: "Innkjøp" },
+  { key: "salg", label: "Salg" },
+  { key: "kunder", label: "Kunder" },
+  { key: "gjeld", label: "Gjeld" },
+];
+
 export default function App() {
   const [tab, setTab] = useState<Tab>("oversikt");
 
@@ -46,30 +55,28 @@ export default function App() {
         <div className="headerTop">
           <Logo />
 
-          <button className="dataBtn" type="button" onClick={() => setTab("data")}>
+          <button
+            className="iconBtn"
+            type="button"
+            onClick={() => setTab("data")}
+            aria-label="Data"
+            title="Data"
+          >
             ⚙️
           </button>
         </div>
 
         <nav className="nav">
-          <button className={tab === "oversikt" ? "navBtn active" : "navBtn"} onClick={() => setTab("oversikt")} type="button">
-            Oversikt
-          </button>
-          <button className={tab === "varer" ? "navBtn active" : "navBtn"} onClick={() => setTab("varer")} type="button">
-            Varer
-          </button>
-          <button className={tab === "innkjop" ? "navBtn active" : "navBtn"} onClick={() => setTab("innkjop")} type="button">
-            Innkjøp
-          </button>
-          <button className={tab === "salg" ? "navBtn active" : "navBtn"} onClick={() => setTab("salg")} type="button">
-            Salg
-          </button>
-          <button className={tab === "kunder" ? "navBtn active" : "navBtn"} onClick={() => setTab("kunder")} type="button">
-            Kunder
-          </button>
-          <button className={tab === "gjeld" ? "navBtn active" : "navBtn"} onClick={() => setTab("gjeld")} type="button">
-            Gjeld
-          </button>
+          {navItems.map((item) => (
+            <button
+              key={item.key}
+              className={tab === item.key ? "navBtn active" : "navBtn"}
+              onClick={() => setTab(item.key)}
+              type="button"
+            >
+              {item.label}
+            </button>
+          ))}
         </nav>
       </header>
 
