@@ -2,13 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { addPaymentToSale, fmtKr, getSales, saleRemaining } from "../app/storage";
 import type { SaleRecord } from "../types";
 
-type FilterKey = "all" | "big" | "small";
-
 export default function Gjeld() {
   const [sales, setSales] = useState<SaleRecord[]>([]);
   const [amounts, setAmounts] = useState<Record<string, string>>({});
-  const [filter, setFilter] = useState<FilterKey>("all");
-  const [search, setSearch] = useState("");
+  const [query, setQuery] = useState("");
 
   function refresh(): void {
     setSales(getSales());
@@ -19,41 +16,29 @@ export default function Gjeld() {
   }, []);
 
   const receivables = useMemo(() => {
-    const all = sales
+    const q = query.trim().toLowerCase();
+
+    return sales
       .map((sale) => ({
         sale,
         remaining: saleRemaining(sale),
       }))
-      .filter((x) => x.remaining > 0);
+      .filter((x) => x.remaining > 0)
+      .filter((x) => {
+        if (!q) return true;
+        return (x.sale.customerName || "kontantsalg").toLowerCase().includes(q);
+      })
+      .sort((a, b) => b.remaining - a.remaining);
+  }, [sales, query]);
 
-    let filtered = all;
-
-    if (filter === "big") {
-      filtered = filtered.filter((x) => x.remaining >= 1000);
-    }
-
-    if (filter === "small") {
-      filtered = filtered.filter((x) => x.remaining < 1000);
-    }
-
-    const q = search.trim().toLowerCase();
-    if (q) {
-      filtered = filtered.filter((x) =>
-        (x.sale.customerName || "kontantsalg").toLowerCase().includes(q)
-      );
-    }
-
-    return filtered.sort((a, b) => b.remaining - a.remaining);
-  }, [sales, filter, search]);
-
-  const totalOpen = useMemo(
-    () => receivables.reduce((sum, x) => sum + x.remaining, 0),
-    [receivables]
-  );
+  const totalOpen = receivables.reduce((sum, x) => sum + x.remaining, 0);
+  const totalCount = receivables.length;
+  const biggestOpen = receivables[0]?.remaining ?? 0;
 
   function handlePay(saleId: string): void {
     const amount = Number(amounts[saleId] || 0);
     if (amount <= 0) return;
+
     addPaymentToSale(saleId, amount, "Registrert fra Gjeld");
     setAmounts((prev) => ({ ...prev, [saleId]: "" }));
     refresh();
@@ -61,78 +46,97 @@ export default function Gjeld() {
 
   return (
     <div>
-      <div className="rowBetween" style={{ marginBottom: 16 }}>
-        <div>
-          <h1 className="pageTitle" style={{ marginBottom: 6 }}>Gjeld</h1>
-          <div className="muted">Ryddig oversikt over åpne poster og raske betalinger</div>
+      <h1 style={{ fontSize: 44, marginBottom: 8 }}>Gjeld</h1>
+      <p style={{ marginTop: 0, marginBottom: 20, color: "#94a3b8" }}>
+        Åpne poster, raske betalinger og full oversikt.
+      </p>
+
+      <div
+        style={{
+          display: "grid",
+          gap: 12,
+          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+          marginBottom: 16,
+        }}
+      >
+        <div className="card">
+          <div style={{ color: "#94a3b8", marginBottom: 8 }}>Totalt utestående</div>
+          <div style={{ fontSize: 34, fontWeight: 800 }}>{fmtKr(totalOpen)}</div>
         </div>
-        <span className="badge badgeGold">Totalt: {fmtKr(totalOpen)}</span>
+
+        <div className="card">
+          <div style={{ color: "#94a3b8", marginBottom: 8 }}>Åpne poster</div>
+          <div style={{ fontSize: 34, fontWeight: 800 }}>{totalCount}</div>
+        </div>
+
+        <div className="card">
+          <div style={{ color: "#94a3b8", marginBottom: 8 }}>Største åpne post</div>
+          <div style={{ fontSize: 34, fontWeight: 800 }}>{fmtKr(biggestOpen)}</div>
+        </div>
       </div>
 
       <div className="card" style={{ marginBottom: 16 }}>
-        <div className="rowBetween" style={{ marginBottom: 14 }}>
-          <label className="label" style={{ flex: 1, minWidth: 220 }}>
-            <span>Søk kunde</span>
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Navn..."
-            />
-          </label>
-        </div>
-
-        <div className="filterBar">
-          <button
-            type="button"
-            className={`filterChip ${filter === "all" ? "filterChipActive" : ""}`}
-            onClick={() => setFilter("all")}
-          >
-            Alle
-          </button>
-          <button
-            type="button"
-            className={`filterChip ${filter === "big" ? "filterChipActive" : ""}`}
-            onClick={() => setFilter("big")}
-          >
-            1000 kr+
-          </button>
-          <button
-            type="button"
-            className={`filterChip ${filter === "small" ? "filterChipActive" : ""}`}
-            onClick={() => setFilter("small")}
-          >
-            Under 1000 kr
-          </button>
+        <div style={{ marginBottom: 14 }}>
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Søk kunde..."
+          />
         </div>
       </div>
 
-      <div className="compactList">
+      <div style={{ display: "grid", gap: 12 }}>
         {receivables.length === 0 ? (
-          <div className="card">
-            <div className="emptyState">Ingen åpne poster.</div>
+          <div className="card" style={{ color: "#94a3b8" }}>
+            Ingen åpne poster.
           </div>
         ) : (
           receivables.map(({ sale, remaining }) => (
-            <div key={sale.id} className="card" style={{ padding: 16 }}>
-              <div className="rowBetween" style={{ marginBottom: 12 }}>
+            <div
+              key={sale.id}
+              className="card"
+              style={{
+                padding: 16,
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  alignItems: "flex-start",
+                  flexWrap: "wrap",
+                  marginBottom: 14,
+                }}
+              >
                 <div>
-                  <div style={{ fontWeight: 800, fontSize: 22 }}>
+                  <div style={{ fontSize: 20, fontWeight: 800 }}>
                     {sale.customerName || "Kontantsalg"}
                   </div>
-                  <div className="muted" style={{ marginTop: 4 }}>
+                  <div style={{ color: "#94a3b8", marginTop: 6 }}>
                     {new Date(sale.createdAt).toLocaleString("no-NO")}
                   </div>
                 </div>
 
                 <div style={{ textAlign: "right" }}>
-                  <div style={{ fontWeight: 900, fontSize: 22 }}>{fmtKr(remaining)}</div>
-                  <div className="muted">Total: {fmtKr(sale.total)}</div>
+                  <div style={{ fontSize: 24, fontWeight: 800 }}>{fmtKr(remaining)}</div>
+                  <div style={{ color: "#94a3b8", marginTop: 6 }}>
+                    Total: {fmtKr(sale.total)}
+                  </div>
                 </div>
               </div>
 
-              <div className="grid2" style={{ alignItems: "end" }}>
-                <label className="label">
-                  <span>Registrer betaling</span>
+              <div
+                style={{
+                  display: "grid",
+                  gap: 12,
+                  gridTemplateColumns: "minmax(140px, 220px) auto",
+                  alignItems: "end",
+                }}
+              >
+                <div>
+                  <div style={{ color: "#94a3b8", marginBottom: 8 }}>Registrer betaling</div>
                   <input
                     type="number"
                     value={amounts[sale.id] ?? ""}
@@ -141,10 +145,19 @@ export default function Gjeld() {
                     }
                     placeholder="Beløp"
                   />
-                </label>
+                </div>
 
                 <button
-                  className="btn btnSuccess"
+                  className="dataBtn"
+                  style={{
+                    borderRadius: 14,
+                    width: "auto",
+                    height: "auto",
+                    padding: "12px 18px",
+                    background: "rgba(34,197,94,0.14)",
+                    border: "1px solid rgba(34,197,94,0.28)",
+                    color: "#d1fae5",
+                  }}
                   type="button"
                   onClick={() => handlePay(sale.id)}
                 >
