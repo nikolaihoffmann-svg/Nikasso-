@@ -5,31 +5,28 @@ import NewItemModal from "./NewItemModal";
 
 type Props = {
   value?: string;
-  placeholder?: string;
   onChange: (item: InventoryItem | undefined) => void;
+  placeholder?: string;
 };
 
 export default function ItemPickerWithCreate({
   value,
-  placeholder = "Søk eller velg vare...",
   onChange,
+  placeholder = "Søk eller velg vare...",
 }: Props) {
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [query, setQuery] = useState("");
   const [openList, setOpenList] = useState(false);
-  const [openNewModal, setOpenNewModal] = useState(false);
+  const [openNew, setOpenNew] = useState(false);
 
   useEffect(() => {
-    refresh();
+    setItems(getItems());
   }, []);
 
-  function refresh(): void {
-    setItems(getItems());
-  }
-
-  const selectedItem = useMemo(() => {
-    return items.find((x) => x.id === value);
-  }, [items, value]);
+  const selected = useMemo(
+    () => items.find((x) => x.id === value),
+    [items, value]
+  );
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -39,7 +36,6 @@ export default function ItemPickerWithCreate({
       .filter((item) => {
         return (
           item.name.toLowerCase().includes(q) ||
-          (item.sku ?? "").toLowerCase().includes(q) ||
           item.category.toLowerCase().includes(q)
         );
       })
@@ -49,62 +45,49 @@ export default function ItemPickerWithCreate({
   return (
     <div style={{ position: "relative" }}>
       <input
-        value={openList ? query : selectedItem?.name ?? query}
+        value={openList ? query : selected?.name ?? query}
         placeholder={placeholder}
         onFocus={() => {
           setOpenList(true);
-          setQuery(selectedItem?.name ?? "");
+          setQuery(selected?.name ?? "");
         }}
         onChange={(e) => {
           setQuery(e.target.value);
           setOpenList(true);
         }}
-        style={inputStyle}
       />
 
       {openList && (
-        <div style={dropdownStyle}>
+        <div className="dropdown">
           {filtered.map((item) => (
             <button
               key={item.id}
-              style={optionStyle}
+              type="button"
+              className="dropdownItem"
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => {
                 onChange(item);
                 setQuery(item.name);
                 setOpenList(false);
               }}
-              type="button"
             >
-              <div style={{ fontWeight: 600 }}>{item.name}</div>
-              <div style={{ opacity: 0.7, fontSize: 13 }}>
-                Lager: {item.stock} • Kost: {item.costPrice} • Salg: {item.salePrice}
+              <div style={{ fontWeight: 700 }}>{item.name}</div>
+              <div className="muted" style={{ fontSize: 13 }}>
+                Lager: {item.stock} • Salg: {item.salePrice} • Kost: {item.costPrice}
               </div>
             </button>
           ))}
 
-          {filtered.length === 0 && (
-            <div style={{ padding: 10 }}>
-              <div style={{ opacity: 0.75, marginBottom: 8 }}>Ingen varer funnet</div>
-              <button
-                style={createButtonStyle}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => setOpenNewModal(true)}
-                type="button"
-              >
+          {filtered.length === 0 ? (
+            <div style={{ padding: 12 }}>
+              <div className="emptyState">Ingen varer funnet</div>
+              <button className="btn btnPrimary" type="button" onClick={() => setOpenNew(true)}>
                 + Opprett “{query.trim() || "ny vare"}”
               </button>
             </div>
-          )}
-
-          {filtered.length > 0 && (
-            <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", padding: 8 }}>
-              <button
-                style={createButtonStyle}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => setOpenNewModal(true)}
-                type="button"
-              >
+          ) : (
+            <div style={{ padding: 10 }}>
+              <button className="btn" type="button" onClick={() => setOpenNew(true)}>
                 + Ny vare
               </button>
             </div>
@@ -113,11 +96,12 @@ export default function ItemPickerWithCreate({
       )}
 
       <NewItemModal
-        open={openNewModal}
+        open={openNew}
         initialName={query}
-        onClose={() => setOpenNewModal(false)}
+        onClose={() => setOpenNew(false)}
         onCreated={(item) => {
-          refresh();
+          const next = getItems();
+          setItems(next);
           onChange(item);
           setQuery(item.name);
           setOpenList(false);
@@ -126,46 +110,3 @@ export default function ItemPickerWithCreate({
     </div>
   );
 }
-
-const inputStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "14px 16px",
-  borderRadius: 14,
-  border: "1px solid rgba(255,255,255,0.12)",
-  background: "rgba(255,255,255,0.04)",
-  color: "#fff",
-};
-
-const dropdownStyle: React.CSSProperties = {
-  position: "absolute",
-  top: "calc(100% + 8px)",
-  left: 0,
-  right: 0,
-  background: "#111827",
-  border: "1px solid rgba(255,255,255,0.10)",
-  borderRadius: 16,
-  zIndex: 50,
-  maxHeight: 320,
-  overflowY: "auto",
-};
-
-const optionStyle: React.CSSProperties = {
-  width: "100%",
-  textAlign: "left",
-  padding: 12,
-  background: "transparent",
-  color: "#fff",
-  border: 0,
-  borderBottom: "1px solid rgba(255,255,255,0.06)",
-  cursor: "pointer",
-};
-
-const createButtonStyle: React.CSSProperties = {
-  width: "100%",
-  padding: 12,
-  borderRadius: 12,
-  border: "1px solid rgba(255,255,255,0.12)",
-  background: "rgba(255,255,255,0.04)",
-  color: "#fff",
-  cursor: "pointer",
-};
