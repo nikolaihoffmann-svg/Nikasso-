@@ -158,6 +158,8 @@ export default function Oversikt() {
   ];
 
   const maxDebtAging = Math.max(...debtAging.map((x) => x.value), 1);
+  const bestSale = saleTotals.length ? Math.max(...saleTotals) : 0;
+  const lowestSale = saleTotals.length ? Math.min(...saleTotals) : 0;
 
   return (
     <div>
@@ -177,9 +179,9 @@ export default function Oversikt() {
           <div className="statValue">{fmtKr(totalRevenue)}</div>
         </div>
 
-        <div className="statCard debtGlowCard strongDebtCard">
+        <div className="statCard">
           <div className="statLabel">Totalt utestående</div>
-          <div className="statValue">{fmtKr(totalOpen)}</div>
+          <div className="statValue debtText">{fmtKr(totalOpen)}</div>
         </div>
 
         <div className="statCard">
@@ -204,9 +206,9 @@ export default function Oversikt() {
           <div className="statMiniValue">{paidRatio.toFixed(0)}%</div>
         </div>
 
-        <div className="infoCard debtGlowCard">
+        <div className="infoCard">
           <div className="infoLabel">Utestående andel</div>
-          <div className="statMiniValue">{debtRatio.toFixed(0)}%</div>
+          <div className="statMiniValue debtText">{debtRatio.toFixed(0)}%</div>
         </div>
 
         <div className="infoCard">
@@ -252,6 +254,29 @@ export default function Oversikt() {
 
       <div className="splitLayout" style={{ marginTop: 16 }}>
         <div className="card">
+          <h2 className="sectionTitle">Hurtig innsikt</h2>
+
+          <div className="featureList">
+            <div className="featureRow">
+              <div className="featureRowTitle">Beste salg</div>
+              <div className="featureRowRight">{fmtKr(bestSale)}</div>
+            </div>
+            <div className="featureRow">
+              <div className="featureRowTitle">Laveste salg</div>
+              <div className="featureRowRight">{fmtKr(lowestSale)}</div>
+            </div>
+            <div className="featureRow">
+              <div className="featureRowTitle">Antall salg</div>
+              <div className="featureRowRight">{sales.length}</div>
+            </div>
+            <div className="featureRow">
+              <div className="featureRowTitle">Antall varer</div>
+              <div className="featureRowRight">{items.length}</div>
+            </div>
+          </div>
+        </div>
+
+        <div className="card">
           <h2 className="sectionTitle">Kunder som skylder mest</h2>
 
           <div className="featureList">
@@ -259,37 +284,11 @@ export default function Oversikt() {
               <div className="emptyText">Ingen utestående kunder akkurat nå.</div>
             ) : (
               topDebtors.map((customer) => (
-                <div key={customer.id} className="featureRow debtRow strongDebtRow">
+                <div key={customer.id} className="featureRow">
                   <div className="customerMain">
                     <div className="featureRowTitle">{customer.name}</div>
                   </div>
-                  <div className="featureRowRight">{fmtKr(customer.remaining)}</div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        <div className="card">
-          <h2 className="sectionTitle">Lav lagerbeholdning</h2>
-
-          <div className="featureList">
-            {lowStockItems.length === 0 ? (
-              <div className="emptyText">Ingen varer under minimum.</div>
-            ) : (
-              lowStockItems.map((item) => (
-                <div key={item.id} className="featureRow">
-                  <div className="customerMain">
-                    <div className="featureRowTitle">{item.name}</div>
-                    <div className="featureRowSub">Min: {item.minStock}</div>
-                  </div>
-
-                  <div className="featureRowRight">
-                    <div>Lager: {item.stock}</div>
-                    <div className="featureRowSub">
-                      Kost: {fmtKr(Number(item.costPrice ?? item.cost ?? 0))}
-                    </div>
-                  </div>
+                  <div className="featureRowRight debtText">{fmtKr(customer.remaining)}</div>
                 </div>
               ))
             )}
@@ -378,10 +377,36 @@ export default function Oversikt() {
                     style={{ width: `${(row.value / maxDebtAging) * 100}%` }}
                   />
                 </div>
-                <div className="chartValue">{fmtKr(row.value)}</div>
+                <div className="chartValue debtText">{fmtKr(row.value)}</div>
               </div>
             ))}
           </div>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 16 }}>
+        <h2 className="sectionTitle">Lav lagerbeholdning</h2>
+
+        <div className="featureList">
+          {lowStockItems.length === 0 ? (
+            <div className="emptyText">Ingen varer under minimum.</div>
+          ) : (
+            lowStockItems.map((item) => (
+              <div key={item.id} className="featureRow">
+                <div className="customerMain">
+                  <div className="featureRowTitle">{item.name}</div>
+                  <div className="featureRowSub">Min: {item.minStock}</div>
+                </div>
+
+                <div className="featureRowRight">
+                  <div>Lager: {item.stock}</div>
+                  <div className="featureRowSub">
+                    Kost: {fmtKr(Number(item.costPrice ?? item.cost ?? 0))}
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </div>
 
