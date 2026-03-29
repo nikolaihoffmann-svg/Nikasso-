@@ -1,57 +1,121 @@
-import { useEffect, useState } from "react";
-import type { InventoryItem } from "../types";
-import { ensureSeedItems, getItems } from "../app/storage";
+import { useEffect, useMemo, useState } from "react";
 import NewItemModal from "../components/NewItemModal";
+import { ensureSeedData, fmtKr, getItems, lowStockItems } from "../app/storage";
+import type { InventoryItem } from "../types";
 
 export default function Varer() {
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [openNew, setOpenNew] = useState(false);
+  const [query, setQuery] = useState("");
 
   function refresh(): void {
     setItems(getItems());
   }
 
   useEffect(() => {
-    ensureSeedItems();
+    ensureSeedData();
     refresh();
   }, []);
 
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return items;
+    return items.filter((item) => {
+      return (
+        item.name.toLowerCase().includes(q) ||
+        item.category.toLowerCase().includes(q) ||
+        (item.note ?? "").toLowerCase().includes(q)
+      );
+    });
+  }, [items, query]);
+
+  const lowItems = useMemo(() => lowStockItems(), [items]);
+
   return (
-    <div style={pageStyle}>
-      <div style={headerStyle}>
+    <div>
+      <div className="rowBetween" style={{ marginBottom: 18 }}>
         <div>
-          <h1 style={{ margin: 0 }}>Varer</h1>
-          <p style={{ opacity: 0.75 }}>Opprett og administrer varer</p>
+          <h1 className="pageTitle" style={{ marginBottom: 6 }}>Varer</h1>
+          <div className="muted">Lager, priser og varsler på ett sted</div>
         </div>
-        <button style={buttonStyle} onClick={() => setOpenNew(true)} type="button">
+        <button className="btn btnPrimary" type="button" onClick={() => setOpenNew(true)}>
           + Ny vare
         </button>
       </div>
 
-      <div style={cardStyle}>
-        {items.length === 0 ? (
-          <div>Ingen varer enda</div>
-        ) : (
-          <div style={{ display: "grid", gap: 10 }}>
-            {items.map((item) => (
-              <div key={item.id} style={rowStyle}>
-                <div>
-                  <div style={{ fontWeight: 700 }}>{item.name}</div>
-                  <div style={{ opacity: 0.7, fontSize: 14 }}>
-                    {item.category} • {item.unit}
-                  </div>
-                </div>
-
-                <div style={{ textAlign: "right" }}>
-                  <div>Lager: {item.stock}</div>
-                  <div style={{ opacity: 0.7, fontSize: 14 }}>
-                    Kost: {item.costPrice} • Salg: {item.salePrice}
-                  </div>
-                </div>
-              </div>
-            ))}
+      <div className="grid2">
+        <div className="card">
+          <div className="rowBetween">
+            <h2 className="sectionTitle">Lagervarsling</h2>
+            <span className={lowItems.length > 0 ? "badge badgeDanger" : "badge badgeSuccess"}>
+              {lowItems.length > 0 ? `${lowItems.length} varer` : "Ingen varsler"}
+            </span>
           </div>
-        )}
+
+          <div className="list">
+            {lowItems.length === 0 ? (
+              <div className="emptyState">Ingen varer under minimum.</div>
+            ) : (
+              lowItems.map((item) => (
+                <div key={item.id} className="itemRow">
+                  <div>
+                    <div style={{ fontWeight: 700 }}>{item.name}</div>
+                    <div className="muted">
+                      Nå: {item.stock} • Min: {item.minStock}
+                    </div>
+                  </div>
+                  <span className="badge badgeDanger">Lav lager</span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        <div className="card">
+          <h2 className="sectionTitle">Søk i varer</h2>
+          <label className="label">
+            <span>Filter</span>
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Søk etter navn, kategori eller notat..."
+            />
+          </label>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 16 }}>
+        <h2 className="sectionTitle">Vareliste</h2>
+
+        <div className="list">
+          {filtered.length === 0 ? (
+            <div className="emptyState">Ingen varer funnet.</div>
+          ) : (
+            filtered.map((item) => {
+              const margin = item.salePrice - item.costPrice;
+              return (
+                <div key={item.id} className="itemRow">
+                  <div>
+                    <div style={{ fontWeight: 800, fontSize: 18 }}>{item.name}</div>
+                    <div className="muted">
+                      {item.category} • {item.unit}
+                    </div>
+                    {item.note ? <div className="muted" style={{ marginTop: 6 }}>{item.note}</div> : null}
+                  </div>
+
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontWeight: 700 }}>Lager: {item.stock}</div>
+                    <div className="muted">Salg: {fmtKr(item.salePrice)}</div>
+                    <div className="muted">Kost: {fmtKr(item.costPrice)}</div>
+                    <div className={margin >= 0 ? "badge badgeSuccess" : "badge badgeDanger"} style={{ marginTop: 8 }}>
+                      Margin: {fmtKr(margin)}
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
       </div>
 
       <NewItemModal
@@ -62,38 +126,3 @@ export default function Varer() {
     </div>
   );
 }
-
-const pageStyle: React.CSSProperties = {
-  padding: 16,
-  color: "#fff",
-};
-
-const headerStyle: React.CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "center",
-  marginBottom: 16,
-};
-
-const cardStyle: React.CSSProperties = {
-  background: "rgba(255,255,255,0.04)",
-  border: "1px solid rgba(255,255,255,0.08)",
-  borderRadius: 20,
-  padding: 16,
-};
-
-const rowStyle: React.CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  gap: 12,
-  padding: 14,
-  borderRadius: 14,
-  background: "rgba(255,255,255,0.03)",
-};
-
-const buttonStyle: React.CSSProperties = {
-  padding: "12px 16px",
-  borderRadius: 14,
-  border: 0,
-  cursor: "pointer",
-};
