@@ -10,31 +10,39 @@ import {
 } from "../app/storage";
 import type { Customer } from "../types";
 
+type ViewMode = "skyldig" | "alle";
+
 export default function Kunder() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [selectedId, setSelectedId] = useState<string>("");
   const [query, setQuery] = useState("");
+  const [viewMode, setViewMode] = useState<ViewMode>("skyldig");
 
   useEffect(() => {
     const all = getCustomers();
     setCustomers(all);
 
-    const withDebt = all
-      .map((c) => ({ id: c.id, remaining: customerTotalRemaining(c.id) }))
-      .sort((a, b) => b.remaining - a.remaining);
-
-    setSelectedId(withDebt[0]?.id ?? all[0]?.id ?? "");
-  }, []);
-
-  const filteredCustomers = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const sorted = [...customers].sort(
+    const sortedByDebt = [...all].sort(
       (a, b) => customerTotalRemaining(b.id) - customerTotalRemaining(a.id)
     );
 
-    if (!q) return sorted;
+    const firstWithDebt = sortedByDebt.find((c) => customerTotalRemaining(c.id) > 0);
+    setSelectedId(firstWithDebt?.id ?? sortedByDebt[0]?.id ?? "");
+  }, []);
 
-    return sorted.filter((customer) => {
+  const filteredCustomers = useMemo(() => {
+    let base = [...customers].sort(
+      (a, b) => customerTotalRemaining(b.id) - customerTotalRemaining(a.id)
+    );
+
+    if (viewMode === "skyldig") {
+      base = base.filter((customer) => customerTotalRemaining(customer.id) > 0);
+    }
+
+    const q = query.trim().toLowerCase();
+    if (!q) return base;
+
+    return base.filter((customer) => {
       return (
         customer.name.toLowerCase().includes(q) ||
         (customer.phone ?? "").toLowerCase().includes(q) ||
@@ -42,10 +50,12 @@ export default function Kunder() {
         (customer.note ?? "").toLowerCase().includes(q)
       );
     });
-  }, [customers, query]);
+  }, [customers, query, viewMode]);
 
   const selected = useMemo(
-    () => filteredCustomers.find((x) => x.id === selectedId) || customers.find((x) => x.id === selectedId),
+    () =>
+      filteredCustomers.find((x) => x.id === selectedId) ||
+      customers.find((x) => x.id === selectedId),
     [filteredCustomers, customers, selectedId]
   );
 
@@ -69,7 +79,7 @@ export default function Kunder() {
       <div className="rowBetween" style={{ marginBottom: 16 }}>
         <div>
           <h1 className="pageTitle" style={{ marginBottom: 6 }}>Kunder</h1>
-          <div className="muted">Ryddig oversikt over kunder, historikk og utestående</div>
+          <div className="muted">Fokus på de som faktisk skylder penger først</div>
         </div>
       </div>
 
@@ -95,6 +105,23 @@ export default function Kunder() {
             <span className="badge badgeBlue">{filteredCustomers.length} vises</span>
           </div>
 
+          <div className="filterBar" style={{ marginBottom: 14 }}>
+            <button
+              type="button"
+              className={`filterChip ${viewMode === "skyldig" ? "filterChipActive" : ""}`}
+              onClick={() => setViewMode("skyldig")}
+            >
+              Skyldig
+            </button>
+            <button
+              type="button"
+              className={`filterChip ${viewMode === "alle" ? "filterChipActive" : ""}`}
+              onClick={() => setViewMode("alle")}
+            >
+              Alle
+            </button>
+          </div>
+
           <label className="label" style={{ marginBottom: 14 }}>
             <span>Søk kunde</span>
             <input
@@ -106,7 +133,9 @@ export default function Kunder() {
 
           <div className="compactList">
             {filteredCustomers.length === 0 ? (
-              <div className="emptyState">Ingen kunder funnet.</div>
+              <div className="emptyState">
+                {viewMode === "skyldig" ? "Ingen kunder med utestående." : "Ingen kunder funnet."}
+              </div>
             ) : (
               filteredCustomers.map((customer) => {
                 const remaining = customerTotalRemaining(customer.id);
