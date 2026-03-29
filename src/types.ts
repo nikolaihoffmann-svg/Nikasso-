@@ -15,8 +15,13 @@ export type InventoryItem = {
   sku?: string;
   category: ItemCategory;
   unit: ItemUnit;
+
+  // gamle + nye prisfelt
   salePrice: number;
   costPrice: number;
+  price?: number;
+  cost?: number;
+
   stock: number;
   minStock: number;
   note?: string;
