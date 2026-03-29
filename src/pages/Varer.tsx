@@ -20,6 +20,7 @@ export default function Varer() {
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return items;
+
     return items.filter((item) => {
       return (
         item.name.toLowerCase().includes(q) ||
@@ -35,32 +36,35 @@ export default function Varer() {
     <div>
       <div className="rowBetween" style={{ marginBottom: 18 }}>
         <div>
-          <h1 className="pageTitle" style={{ marginBottom: 6 }}>Varer</h1>
-          <div className="muted">Lager, priser og varsler på ett sted</div>
+          <h1 className="pageTitle">Varer</h1>
+          <p className="pageLead" style={{ marginBottom: 0 }}>
+            Lager, priser og varsler samlet på ett sted.
+          </p>
         </div>
+
         <button className="btn btnPrimary" type="button" onClick={() => setOpenNew(true)}>
           + Ny vare
         </button>
       </div>
 
-      <div className="grid2">
+      <div className="varerTopGrid">
         <div className="card">
-          <div className="rowBetween">
-            <h2 className="sectionTitle">Lagervarsling</h2>
+          <div className="rowBetween" style={{ marginBottom: 14 }}>
+            <h2 className="sectionTitle" style={{ marginBottom: 0 }}>Lagervarsling</h2>
             <span className={lowItems.length > 0 ? "badge badgeDanger" : "badge badgeSuccess"}>
               {lowItems.length > 0 ? `${lowItems.length} varer` : "Ingen varsler"}
             </span>
           </div>
 
-          <div className="list">
+          <div className="featureList">
             {lowItems.length === 0 ? (
               <div className="emptyState">Ingen varer under minimum.</div>
             ) : (
               lowItems.map((item) => (
-                <div key={item.id} className="itemRow">
+                <div key={item.id} className="featureRow">
                   <div>
-                    <div style={{ fontWeight: 700 }}>{item.name}</div>
-                    <div className="muted">
+                    <div className="featureRowTitle">{item.name}</div>
+                    <div className="featureRowSub">
                       Nå: {item.stock} • Min: {item.minStock}
                     </div>
                   </div>
@@ -73,6 +77,7 @@ export default function Varer() {
 
         <div className="card">
           <h2 className="sectionTitle">Søk i varer</h2>
+
           <label className="label">
             <span>Filter</span>
             <input
@@ -87,28 +92,31 @@ export default function Varer() {
       <div className="card" style={{ marginTop: 16 }}>
         <h2 className="sectionTitle">Vareliste</h2>
 
-        <div className="list">
+        <div className="varerList">
           {filtered.length === 0 ? (
             <div className="emptyState">Ingen varer funnet.</div>
           ) : (
             filtered.map((item) => {
               const margin = item.salePrice - item.costPrice;
+
               return (
-                <div key={item.id} className="itemRow">
-                  <div>
-                    <div style={{ fontWeight: 800, fontSize: 18 }}>{item.name}</div>
-                    <div className="muted">
+                <div key={item.id} className="vareRow">
+                  <div className="vareMain">
+                    <div className="vareName">{item.name}</div>
+                    <div className="vareMeta">
                       {item.category} • {item.unit}
                     </div>
-                    {item.note ? <div className="muted" style={{ marginTop: 6 }}>{item.note}</div> : null}
+                    {item.note ? <div className="vareNote">{item.note}</div> : null}
                   </div>
 
-                  <div style={{ textAlign: "right" }}>
-                    <div style={{ fontWeight: 700 }}>Lager: {item.stock}</div>
-                    <div className="muted">Salg: {fmtKr(item.salePrice)}</div>
-                    <div className="muted">Kost: {fmtKr(item.costPrice)}</div>
-                    <div className={margin >= 0 ? "badge badgeSuccess" : "badge badgeDanger"} style={{ marginTop: 8 }}>
-                      Margin: {fmtKr(margin)}
+                  <div className="vareRight">
+                    <div className="vareRightTop">Lager: {item.stock}</div>
+                    <div className="vareRightMeta">Salg: {fmtKr(item.salePrice)}</div>
+                    <div className="vareRightMeta">Kost: {fmtKr(item.costPrice)}</div>
+                    <div style={{ marginTop: 8 }}>
+                      <span className={margin >= 0 ? "badge badgeSuccess" : "badge badgeDanger"}>
+                        Margin: {fmtKr(margin)}
+                      </span>
                     </div>
                   </div>
                 </div>
