@@ -196,6 +196,7 @@ textarea {
   margin: 0 0 8px;
   line-height: 1;
   letter-spacing: -0.03em;
+  overflow-wrap: anywhere;
 }
 
 .pageLead {
@@ -235,6 +236,7 @@ textarea {
   font-size: 22px;
   line-height: 1.1;
   letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
 }
 
 .muted {
@@ -410,9 +412,14 @@ textarea {
   gap: 12px;
 }
 
+.customerMain {
+  min-width: 0;
+}
+
 .customerName {
   font-size: 18px;
   font-weight: 800;
+  overflow-wrap: anywhere;
 }
 
 .customerMeta {
@@ -474,6 +481,7 @@ textarea {
 
 .featureRowTitle {
   font-weight: 700;
+  overflow-wrap: anywhere;
 }
 
 .featureRowSub {
@@ -575,7 +583,8 @@ textarea {
 }
 
 .vareRow {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   justify-content: space-between;
   gap: 16px;
   padding: 14px 16px;
@@ -591,6 +600,7 @@ textarea {
 .vareName {
   font-size: 18px;
   font-weight: 800;
+  overflow-wrap: anywhere;
 }
 
 .vareMeta {
@@ -689,6 +699,10 @@ textarea {
     text-align: left;
     width: 100%;
     min-width: 0;
+  }
+
+  .vareRow {
+    grid-template-columns: 1fr;
   }
 
   .pickerFooter {
