@@ -13,16 +13,40 @@ import type { Customer } from "../types";
 export default function Kunder() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [selectedId, setSelectedId] = useState<string>("");
+  const [query, setQuery] = useState("");
 
   useEffect(() => {
     const all = getCustomers();
     setCustomers(all);
-    setSelectedId(all[0]?.id ?? "");
+
+    const withDebt = all
+      .map((c) => ({ id: c.id, remaining: customerTotalRemaining(c.id) }))
+      .sort((a, b) => b.remaining - a.remaining);
+
+    setSelectedId(withDebt[0]?.id ?? all[0]?.id ?? "");
   }, []);
 
+  const filteredCustomers = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const sorted = [...customers].sort(
+      (a, b) => customerTotalRemaining(b.id) - customerTotalRemaining(a.id)
+    );
+
+    if (!q) return sorted;
+
+    return sorted.filter((customer) => {
+      return (
+        customer.name.toLowerCase().includes(q) ||
+        (customer.phone ?? "").toLowerCase().includes(q) ||
+        (customer.address ?? "").toLowerCase().includes(q) ||
+        (customer.note ?? "").toLowerCase().includes(q)
+      );
+    });
+  }, [customers, query]);
+
   const selected = useMemo(
-    () => customers.find((x) => x.id === selectedId),
-    [customers, selectedId]
+    () => filteredCustomers.find((x) => x.id === selectedId) || customers.find((x) => x.id === selectedId),
+    [filteredCustomers, customers, selectedId]
   );
 
   const sales = useMemo(
@@ -30,39 +54,85 @@ export default function Kunder() {
     [selected]
   );
 
+  const customerCountWithDebt = useMemo(
+    () => customers.filter((c) => customerTotalRemaining(c.id) > 0).length,
+    [customers]
+  );
+
+  const totalDebt = useMemo(
+    () => customers.reduce((sum, c) => sum + customerTotalRemaining(c.id), 0),
+    [customers]
+  );
+
   return (
     <div>
-      <h1 className="pageTitle">Kunder</h1>
+      <div className="rowBetween" style={{ marginBottom: 16 }}>
+        <div>
+          <h1 className="pageTitle" style={{ marginBottom: 6 }}>Kunder</h1>
+          <div className="muted">Ryddig oversikt over kunder, historikk og utestående</div>
+        </div>
+      </div>
+
+      <div className="kpiGrid" style={{ marginBottom: 16 }}>
+        <div className="kpiCard">
+          <div className="kpiLabel">Totalt kunder</div>
+          <div className="kpiValue">{customers.length}</div>
+        </div>
+        <div className="kpiCard">
+          <div className="kpiLabel">Kunder med utestående</div>
+          <div className="kpiValue">{customerCountWithDebt}</div>
+        </div>
+        <div className="kpiCard">
+          <div className="kpiLabel">Totalt utestående</div>
+          <div className="kpiValue">{fmtKr(totalDebt)}</div>
+        </div>
+      </div>
 
       <div className="grid2">
         <div className="card">
-          <h2 className="sectionTitle">Kundeliste</h2>
-          <div className="list">
-            {customers.length === 0 ? (
-              <div className="emptyState">Ingen kunder enda.</div>
+          <div className="rowBetween" style={{ marginBottom: 14 }}>
+            <h2 className="sectionTitle" style={{ margin: 0 }}>Kundeliste</h2>
+            <span className="badge badgeBlue">{filteredCustomers.length} vises</span>
+          </div>
+
+          <label className="label" style={{ marginBottom: 14 }}>
+            <span>Søk kunde</span>
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Navn, telefon, adresse..."
+            />
+          </label>
+
+          <div className="compactList">
+            {filteredCustomers.length === 0 ? (
+              <div className="emptyState">Ingen kunder funnet.</div>
             ) : (
-              customers.map((customer) => (
-                <button
-                  key={customer.id}
-                  type="button"
-                  className="dropdownItem"
-                  style={{
-                    borderRadius: 16,
-                    border: selectedId === customer.id
-                      ? "1px solid rgba(79,124,255,0.65)"
-                      : "1px solid rgba(255,255,255,0.06)",
-                    background: selectedId === customer.id
-                      ? "rgba(79,124,255,0.14)"
-                      : "rgba(255,255,255,0.03)",
-                  }}
-                  onClick={() => setSelectedId(customer.id)}
-                >
-                  <div style={{ fontWeight: 800 }}>{customer.name}</div>
-                  <div className="muted">
-                    Skylder: {fmtKr(customerTotalRemaining(customer.id))}
-                  </div>
-                </button>
-              ))
+              filteredCustomers.map((customer) => {
+                const remaining = customerTotalRemaining(customer.id);
+                return (
+                  <button
+                    key={customer.id}
+                    type="button"
+                    className={`compactRow ${selectedId === customer.id ? "compactRowActive" : ""}`}
+                    style={{ textAlign: "left", color: "inherit" }}
+                    onClick={() => setSelectedId(customer.id)}
+                  >
+                    <div className="rowBetween">
+                      <div>
+                        <div style={{ fontWeight: 800, fontSize: 18 }}>{customer.name}</div>
+                        <div className="muted" style={{ marginTop: 4 }}>
+                          {customer.phone || customer.address || "Ingen ekstra info"}
+                        </div>
+                      </div>
+
+                      <span className={remaining > 0 ? "badge badgeGold" : "badge"}>
+                        {fmtKr(remaining)}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })
             )}
           </div>
         </div>
@@ -72,49 +142,62 @@ export default function Kunder() {
             <div className="emptyState">Velg en kunde.</div>
           ) : (
             <>
-              <div className="rowBetween">
-                <h2 className="sectionTitle" style={{ marginBottom: 0 }}>{selected.name}</h2>
+              <div className="rowBetween" style={{ marginBottom: 12 }}>
+                <div>
+                  <h2 className="sectionTitle" style={{ margin: 0 }}>{selected.name}</h2>
+                  <div className="muted" style={{ marginTop: 6 }}>
+                    {selected.phone || selected.address || "Ingen kontaktinfo lagt inn"}
+                  </div>
+                </div>
+
                 <span className={customerTotalRemaining(selected.id) > 0 ? "badge badgeGold" : "badge badgeSuccess"}>
                   {customerTotalRemaining(selected.id) > 0 ? "Utestående" : "A jour"}
                 </span>
               </div>
 
-              <div className="grid2" style={{ marginTop: 14 }}>
-                <div className="card" style={{ padding: 14 }}>
-                  <div className="cardTitle">Totalt kjøpt</div>
-                  <div className="cardValue" style={{ fontSize: 30 }}>{fmtKr(customerTotalBought(selected.id))}</div>
+              <div className="kpiGrid" style={{ marginBottom: 16 }}>
+                <div className="kpiCard">
+                  <div className="kpiLabel">Totalt kjøpt</div>
+                  <div className="kpiValue">{fmtKr(customerTotalBought(selected.id))}</div>
                 </div>
-
-                <div className="card" style={{ padding: 14 }}>
-                  <div className="cardTitle">Utestående</div>
-                  <div className="cardValue" style={{ fontSize: 30 }}>{fmtKr(customerTotalRemaining(selected.id))}</div>
+                <div className="kpiCard">
+                  <div className="kpiLabel">Utestående</div>
+                  <div className="kpiValue">{fmtKr(customerTotalRemaining(selected.id))}</div>
+                </div>
+                <div className="kpiCard">
+                  <div className="kpiLabel">Antall salg</div>
+                  <div className="kpiValue">{sales.length}</div>
                 </div>
               </div>
 
-              <div style={{ marginTop: 14 }} className="list">
-                {selected.phone ? <div className="muted">Telefon: {selected.phone}</div> : null}
-                {selected.address ? <div className="muted">Adresse: {selected.address}</div> : null}
-                {selected.note ? <div className="muted">Notat: {selected.note}</div> : null}
-              </div>
+              {selected.note ? (
+                <div className="compactRow" style={{ marginBottom: 16 }}>
+                  <div className="kpiLabel">Notat</div>
+                  <div>{selected.note}</div>
+                </div>
+              ) : null}
 
-              <h3 className="sectionTitle" style={{ marginTop: 20 }}>Historikk</h3>
-              <div className="list">
+              <h3 className="sectionTitle">Historikk</h3>
+              <div className="compactList">
                 {sales.length === 0 ? (
                   <div className="emptyState">Ingen salg på denne kunden enda.</div>
                 ) : (
-                  sales.map((sale) => (
-                    <div key={sale.id} className="itemRow">
-                      <div>
-                        <div style={{ fontWeight: 700 }}>
-                          {new Date(sale.createdAt).toLocaleString("no-NO")}
+                  sales.slice(0, 8).map((sale) => (
+                    <div key={sale.id} className="compactRow">
+                      <div className="rowBetween">
+                        <div>
+                          <div style={{ fontWeight: 700 }}>
+                            {new Date(sale.createdAt).toLocaleString("no-NO")}
+                          </div>
+                          <div className="muted" style={{ marginTop: 4 }}>
+                            Betalt: {fmtKr(salePaidSum(sale))} • Rest: {fmtKr(saleRemaining(sale))}
+                          </div>
                         </div>
-                        <div className="muted">
-                          Betalt: {fmtKr(salePaidSum(sale))} • Rest: {fmtKr(saleRemaining(sale))}
+
+                        <div style={{ textAlign: "right" }}>
+                          <div style={{ fontWeight: 800 }}>{fmtKr(sale.total)}</div>
+                          <div className="muted">{sale.lines.length} linjer</div>
                         </div>
-                      </div>
-                      <div style={{ textAlign: "right" }}>
-                        <div style={{ fontWeight: 700 }}>{fmtKr(sale.total)}</div>
-                        <div className="muted">{sale.lines.length} linjer</div>
                       </div>
                     </div>
                   ))
