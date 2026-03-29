@@ -1,8 +1,8 @@
 export default function Logo() {
   return (
-    <div className="brand">
-      <span className="brandText">Nikasso</span>
-      <span className="brandMark">+</span>
+    <div className="logo">
+      <span className="logoText">Nikasso</span>
+      <span className="logoPlus">+</span>
     </div>
   );
 }
