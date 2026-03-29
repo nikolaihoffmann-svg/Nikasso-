@@ -19,6 +19,15 @@ type TabKey =
   | "gjeld"
   | "data";
 
+const NAV_ITEMS: Array<{ key: TabKey; label: string }> = [
+  { key: "oversikt", label: "Oversikt" },
+  { key: "varer", label: "Varer" },
+  { key: "innkjop", label: "Innkjøp" },
+  { key: "salg", label: "Salg" },
+  { key: "kunder", label: "Kunder" },
+  { key: "gjeld", label: "Gjeld" },
+];
+
 export function App() {
   const [tab, setTab] = useState<TabKey>("oversikt");
 
@@ -39,39 +48,30 @@ export function App() {
 
   return (
     <div className="appShell">
-      <div className="appBgGlow appBgGlow1" />
-      <div className="appBgGlow appBgGlow2" />
+      <div className="bgGlow bgGlowBlue" />
+      <div className="bgGlow bgGlowGold" />
 
-      <header className="appHeader">
-        <div className="appHeaderTop appHeaderTopTight">
+      <header className="topbar">
+        <div className="topbarRow">
           <Logo />
 
-          <div className="headerActions">
-            <button className="btn dataBtn" type="button" onClick={() => setTab("data")}>
-              ⚙️ Data
-            </button>
-          </div>
+          <button className="utilityBtn" type="button" onClick={() => setTab("data")}>
+            <span aria-hidden="true">⚙️</span>
+            <span>Data</span>
+          </button>
         </div>
 
-        <nav className="tabs tabsCompact">
-          <button className={tab === "oversikt" ? "tab active" : "tab"} onClick={() => setTab("oversikt")} type="button">
-            Oversikt
-          </button>
-          <button className={tab === "varer" ? "tab active" : "tab"} onClick={() => setTab("varer")} type="button">
-            Varer
-          </button>
-          <button className={tab === "innkjop" ? "tab active" : "tab"} onClick={() => setTab("innkjop")} type="button">
-            Innkjøp
-          </button>
-          <button className={tab === "salg" ? "tab active" : "tab"} onClick={() => setTab("salg")} type="button">
-            Salg
-          </button>
-          <button className={tab === "kunder" ? "tab active" : "tab"} onClick={() => setTab("kunder")} type="button">
-            Kunder
-          </button>
-          <button className={tab === "gjeld" ? "tab active" : "tab"} onClick={() => setTab("gjeld")} type="button">
-            Gjeld
-          </button>
+        <nav className="navPills" aria-label="Hovednavigasjon">
+          {NAV_ITEMS.map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              onClick={() => setTab(item.key)}
+              className={tab === item.key ? "navPill active" : "navPill"}
+            >
+              {item.label}
+            </button>
+          ))}
         </nav>
       </header>
 
