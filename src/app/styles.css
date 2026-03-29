@@ -135,7 +135,7 @@ button {
 }
 
 .brandCompact {
-  gap: 8px;
+  gap: 10px;
 }
 
 .brandText {
@@ -157,17 +157,17 @@ button {
   line-height: 1;
 }
 
-.brandPlusClean {
-  width: 34px;
-  height: 34px;
+.brandPlusIcon {
+  width: 42px;
+  height: 42px;
   border-radius: 999px;
-  font-size: 24px;
+  font-size: 29px;
   color: var(--gold);
-  border: 1px solid rgba(245, 163, 59, 0.28);
-  background: radial-gradient(circle at center, rgba(245, 163, 59, 0.12), rgba(245, 163, 59, 0.03));
+  border: 1px solid rgba(245, 163, 59, 0.24);
+  background: radial-gradient(circle at center, rgba(245, 163, 59, 0.14), rgba(245, 163, 59, 0.03));
   box-shadow:
-    0 0 0 1px rgba(245, 163, 59, 0.06),
-    0 0 22px rgba(245, 163, 59, 0.12);
+    0 0 0 1px rgba(245, 163, 59, 0.05),
+    0 0 26px rgba(245, 163, 59, 0.14);
 }
 
 .tabs {
@@ -519,9 +519,9 @@ button {
     font-size: 56px;
   }
 
-  .brandPlusClean {
-    width: 30px;
-    height: 30px;
-    font-size: 21px;
+  .brandPlusIcon {
+    width: 38px;
+    height: 38px;
+    font-size: 27px;
   }
 }
