@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
+import NewCustomerModal from "../components/NewCustomerModal";
 import {
   customerSales,
   customerTotalBought,
   customerTotalRemaining,
+  deleteCustomer,
   fmtKr,
   getCustomers,
   salePaidSum,
@@ -17,17 +19,29 @@ export default function Kunder() {
   const [selectedId, setSelectedId] = useState<string>("");
   const [query, setQuery] = useState("");
   const [filterMode, setFilterMode] = useState<FilterMode>("skyldig");
+  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
+  const [openNew, setOpenNew] = useState(false);
 
-  useEffect(() => {
+  function refresh(): void {
     const all = getCustomers();
     setCustomers(all);
 
-    const sorted = [...all].sort(
-      (a, b) => customerTotalRemaining(b.id) - customerTotalRemaining(a.id)
-    );
+    if (!selectedId && all.length > 0) {
+      const sorted = [...all].sort(
+        (a, b) => customerTotalRemaining(b.id) - customerTotalRemaining(a.id)
+      );
+      const firstWithDebt = sorted.find((x) => customerTotalRemaining(x.id) > 0);
+      setSelectedId(firstWithDebt?.id ?? sorted[0]?.id ?? "");
+      return;
+    }
 
-    const firstWithDebt = sorted.find((x) => customerTotalRemaining(x.id) > 0);
-    setSelectedId(firstWithDebt?.id ?? sorted[0]?.id ?? "");
+    if (selectedId && !all.some((x) => x.id === selectedId)) {
+      setSelectedId(all[0]?.id ?? "");
+    }
+  }
+
+  useEffect(() => {
+    refresh();
   }, []);
 
   const filteredCustomers = useMemo(() => {
@@ -75,10 +89,32 @@ export default function Kunder() {
     0
   );
 
+  function handleDeleteSelected(): void {
+    if (!selectedCustomer) return;
+
+    const ok = confirm(`Slette kunden "${selectedCustomer.name}"?`);
+    if (!ok) return;
+
+    try {
+      deleteCustomer(selectedCustomer.id);
+      refresh();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Kunne ikke slette kunden");
+    }
+  }
+
   return (
     <div>
-      <h1 className="pageTitle">Kunder</h1>
-      <p className="pageLead">Viser skyldige kunder først, så du slipper rot.</p>
+      <div className="rowBetween" style={{ marginBottom: 18 }}>
+        <div>
+          <h1 className="pageTitle">Kunder</h1>
+          <p className="pageLead">Viser skyldige kunder først, så du slipper rot.</p>
+        </div>
+
+        <button className="btn btnPrimary" type="button" onClick={() => setOpenNew(true)}>
+          + Ny kunde
+        </button>
+      </div>
 
       <div className="grid3">
         <div className="statCard">
@@ -93,7 +129,7 @@ export default function Kunder() {
 
         <div className="statCard">
           <div className="statLabel">Totalt utestående</div>
-          <div className="statValue">{fmtKr(totalOutstanding)}</div>
+          <div className="statValue debtText">{fmtKr(totalOutstanding)}</div>
         </div>
       </div>
 
@@ -142,7 +178,15 @@ export default function Kunder() {
                     key={customer.id}
                     type="button"
                     onClick={() => setSelectedId(customer.id)}
-                    className={isSelected ? "customerButton active" : "customerButton"}
+                    className={
+                      isSelected
+                        ? outstanding > 0
+                          ? "customerButton active customerButtonDebt"
+                          : "customerButton active"
+                        : outstanding > 0
+                        ? "customerButton customerButtonDebt"
+                        : "customerButton"
+                    }
                   >
                     <div className="customerButtonTop">
                       <div className="customerMain">
@@ -152,7 +196,7 @@ export default function Kunder() {
                         </div>
                       </div>
 
-                      <div className={outstanding > 0 ? "badge badgeGold" : "badge"}>
+                      <div className={outstanding > 0 ? "badge badgeDebt" : "badge"}>
                         {fmtKr(outstanding)}
                       </div>
                     </div>
@@ -183,7 +227,7 @@ export default function Kunder() {
                 <div
                   className={
                     customerTotalRemaining(selectedCustomer.id) > 0
-                      ? "badge badgeGold"
+                      ? "badge badgeDebt"
                       : "badge badgeSuccess"
                   }
                 >
@@ -194,14 +238,12 @@ export default function Kunder() {
               <div className="grid3" style={{ marginBottom: 18 }}>
                 <div className="infoCard">
                   <div className="infoLabel">Totalt kjøpt</div>
-                  <div className="infoValue">
-                    {fmtKr(customerTotalBought(selectedCustomer.id))}
-                  </div>
+                  <div className="infoValue">{fmtKr(customerTotalBought(selectedCustomer.id))}</div>
                 </div>
 
                 <div className="infoCard">
                   <div className="infoLabel">Utestående</div>
-                  <div className="infoValue">
+                  <div className="infoValue debtText">
                     {fmtKr(customerTotalRemaining(selectedCustomer.id))}
                   </div>
                 </div>
@@ -218,6 +260,20 @@ export default function Kunder() {
                   <div>{selectedCustomer.note}</div>
                 </div>
               ) : null}
+
+              <div className="cardActions" style={{ marginTop: 0, marginBottom: 18 }}>
+                <button
+                  className="btn"
+                  type="button"
+                  onClick={() => setEditingCustomer(selectedCustomer)}
+                >
+                  Rediger kunde
+                </button>
+
+                <button className="btn btnDanger" type="button" onClick={handleDeleteSelected}>
+                  Slett kunde
+                </button>
+              </div>
 
               <h3 className="sectionTitle">Historikk</h3>
 
@@ -252,6 +308,22 @@ export default function Kunder() {
           )}
         </div>
       </div>
+
+      <NewCustomerModal
+        open={openNew}
+        onClose={() => setOpenNew(false)}
+        onCreated={() => refresh()}
+      />
+
+      <NewCustomerModal
+        open={Boolean(editingCustomer)}
+        customer={editingCustomer}
+        onClose={() => setEditingCustomer(null)}
+        onCreated={() => {
+          setEditingCustomer(null);
+          refresh();
+        }}
+      />
     </div>
   );
 }
