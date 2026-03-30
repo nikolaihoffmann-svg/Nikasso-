@@ -1,26 +1,28 @@
 import { useEffect, useState } from "react";
-import type { InventoryItem, ItemCategory, ItemUnit } from "../types";
-import { createItem } from "../app/storage";
+import type { InventoryItem, ItemCategory } from "../types";
+import { createItem, updateItem } from "../app/storage";
 
 type Props = {
   open: boolean;
   initialName?: string;
+  item?: InventoryItem | null;
   onClose: () => void;
   onCreated: (item: InventoryItem) => void;
 };
 
-const categories: ItemCategory[] = ["Deler", "Olje", "Forbruk", "Utstyr", "Annet"];
-const units: ItemUnit[] = ["stk", "liter", "sett", "pakke", "tube", "boks"];
+const categories: ItemCategory[] = ["Deler", "Forbruk", "Utstyr", "Annet"];
 
 export default function NewItemModal({
   open,
   initialName = "",
+  item = null,
   onClose,
   onCreated,
 }: Props) {
+  const isEdit = Boolean(item);
+
   const [name, setName] = useState(initialName);
   const [category, setCategory] = useState<ItemCategory>("Annet");
-  const [unit, setUnit] = useState<ItemUnit>("stk");
   const [salePrice, setSalePrice] = useState("0");
   const [costPrice, setCostPrice] = useState("0");
   const [stock, setStock] = useState("0");
@@ -31,22 +33,31 @@ export default function NewItemModal({
   useEffect(() => {
     if (!open) return;
 
+    if (item) {
+      setName(item.name);
+      setCategory(item.category);
+      setSalePrice(String(item.salePrice ?? 0));
+      setCostPrice(String(item.costPrice ?? 0));
+      setStock(String(item.stock ?? 0));
+      setMinStock(String(item.minStock ?? 0));
+      setNote(item.note ?? "");
+      setError("");
+      return;
+    }
+
     setName(initialName || "");
     setCategory("Annet");
-    setUnit("stk");
     setSalePrice("0");
     setCostPrice("0");
     setStock("0");
     setMinStock("0");
     setNote("");
     setError("");
-  }, [open, initialName]);
+  }, [open, initialName, item]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent): void {
-      if (event.key === "Escape") {
-        onClose();
-      }
+      if (event.key === "Escape") onClose();
     }
 
     if (open) {
@@ -62,21 +73,35 @@ export default function NewItemModal({
 
   function handleSave(): void {
     try {
-      const item = createItem({
-        name,
-        category,
-        unit,
-        salePrice: Number(salePrice || 0),
-        costPrice: Number(costPrice || 0),
-        stock: Number(stock || 0),
-        minStock: Number(minStock || 0),
-        note,
-      });
+      if (item) {
+        const updated = updateItem(item.id, {
+          name,
+          category,
+          unit: "stk",
+          salePrice: Number(salePrice || 0),
+          costPrice: Number(costPrice || 0),
+          stock: Number(stock || 0),
+          minStock: Number(minStock || 0),
+          note,
+        });
+        onCreated(updated);
+      } else {
+        const created = createItem({
+          name,
+          category,
+          unit: "stk",
+          salePrice: Number(salePrice || 0),
+          costPrice: Number(costPrice || 0),
+          stock: Number(stock || 0),
+          minStock: Number(minStock || 0),
+          note,
+        });
+        onCreated(created);
+      }
 
-      onCreated(item);
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunne ikke opprette vare");
+      setError(err instanceof Error ? err.message : "Kunne ikke lagre vare");
     }
   }
 
@@ -87,12 +112,18 @@ export default function NewItemModal({
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
-        aria-label="Ny vare"
+        aria-label={isEdit ? "Rediger vare" : "Ny vare"}
       >
         <div className="rowBetween modalHeader">
           <div>
-            <h2 className="sectionTitle" style={{ marginBottom: 6 }}>Ny vare</h2>
-            <div className="muted">Opprett vare for lager, salg og innkjøp.</div>
+            <h2 className="sectionTitle" style={{ marginBottom: 6 }}>
+              {isEdit ? "Rediger vare" : "Ny vare"}
+            </h2>
+            <div className="muted">
+              {isEdit
+                ? "Oppdater navn, priser, lager og notat."
+                : "Opprett vare for lager, salg og innkjøp."}
+            </div>
           </div>
 
           <button className="btn" type="button" onClick={onClose}>
@@ -103,7 +134,11 @@ export default function NewItemModal({
         <div className="grid2">
           <label className="label">
             <span>Varenavn</span>
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="F.eks. Bremseklosser" />
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="F.eks. Bremseklosser"
+            />
           </label>
 
           <label className="label">
@@ -119,13 +154,7 @@ export default function NewItemModal({
 
           <label className="label">
             <span>Enhet</span>
-            <select value={unit} onChange={(e) => setUnit(e.target.value as ItemUnit)}>
-              {units.map((x) => (
-                <option key={x} value={x}>
-                  {x}
-                </option>
-              ))}
-            </select>
+            <input value="stk" disabled />
           </label>
 
           <label className="label">
@@ -151,15 +180,23 @@ export default function NewItemModal({
 
         <label className="label" style={{ marginTop: 14 }}>
           <span>Notat</span>
-          <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Valgfritt notat..." />
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="Valgfritt notat..."
+          />
         </label>
 
         {error ? <div className="modalError">{error}</div> : null}
 
         <div className="cardActions">
-          <div className="muted">Varen kan også opprettes direkte fra salg og innkjøp.</div>
+          <div className="muted">
+            {isEdit
+              ? "Endringer lagres direkte på varen."
+              : "Varen kan også opprettes direkte fra salg og innkjøp."}
+          </div>
           <button className="btn btnPrimary" type="button" onClick={handleSave}>
-            Lagre vare
+            {isEdit ? "Lagre endringer" : "Lagre vare"}
           </button>
         </div>
       </div>
