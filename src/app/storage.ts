@@ -47,6 +47,63 @@ function clampNumber(value: unknown, fallback = 0): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function normalizeCategory(value: unknown): ItemCategory {
+  const v = String(value ?? "").trim();
+  if (v === "Deler" || v === "Forbruk" || v === "Utstyr" || v === "Annet") return v;
+  if (v === "Olje") return "Forbruk";
+  return "Annet";
+}
+
+function normalizeUnit(_value: unknown): ItemUnit {
+  return "stk";
+}
+
+function normalizeItem(input: Partial<InventoryItem> & Record<string, unknown>): InventoryItem {
+  return {
+    id: String(input.id ?? uid("item")),
+    name: String(input.name ?? "Uten navn"),
+    sku: input.sku ? String(input.sku) : undefined,
+    category: normalizeCategory(input.category),
+    unit: normalizeUnit(input.unit),
+    salePrice: round2(clampNumber(input.salePrice ?? input.price, 0)),
+    costPrice: round2(clampNumber(input.costPrice ?? input.cost, 0)),
+    price: undefined,
+    cost: undefined,
+    stock: clampNumber(input.stock, 0),
+    minStock: clampNumber(input.minStock, 0),
+    note: input.note ? String(input.note) : undefined,
+    isActive: input.isActive !== false,
+    createdAt: String(input.createdAt ?? nowIso()),
+    updatedAt: String(input.updatedAt ?? nowIso()),
+  };
+}
+
+function normalizeCustomer(input: Partial<Customer>): Customer {
+  return {
+    id: String(input.id ?? uid("cust")),
+    name: String(input.name ?? "Uten navn"),
+    phone: input.phone?.trim() || undefined,
+    address: input.address?.trim() || undefined,
+    note: input.note?.trim() || undefined,
+    createdAt: String(input.createdAt ?? nowIso()),
+    updatedAt: String(input.updatedAt ?? nowIso()),
+  };
+}
+
+function getAllItemsRaw(): InventoryItem[] {
+  return readJson<Array<Partial<InventoryItem> & Record<string, unknown>>>(ITEMS_KEY, [])
+    .map(normalizeItem)
+    .sort((a, b) => a.name.localeCompare(b.name, "no"));
+}
+
+function writeItems(items: InventoryItem[]): void {
+  writeJson(ITEMS_KEY, items);
+}
+
+function writeCustomers(customers: Customer[]): void {
+  writeJson(CUSTOMERS_KEY, customers);
+}
+
 export function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
@@ -76,15 +133,15 @@ export function setSaldo(value: number): void {
 }
 
 export function getItems(): InventoryItem[] {
-  return readJson<InventoryItem[]>(ITEMS_KEY, [])
+  return getAllItemsRaw()
     .filter((x) => x.isActive !== false)
     .sort((a, b) => a.name.localeCompare(b.name, "no"));
 }
 
 export function getCustomers(): Customer[] {
-  return readJson<Customer[]>(CUSTOMERS_KEY, []).sort((a, b) =>
-    a.name.localeCompare(b.name, "no")
-  );
+  return readJson<Partial<Customer>[]>(CUSTOMERS_KEY, [])
+    .map(normalizeCustomer)
+    .sort((a, b) => a.name.localeCompare(b.name, "no"));
 }
 
 export function getSales(): SaleRecord[] {
@@ -112,7 +169,7 @@ export type CreateItemInput = {
 };
 
 export function createItem(input: CreateItemInput): InventoryItem {
-  const items = readJson<InventoryItem[]>(ITEMS_KEY, []);
+  const items = getAllItemsRaw();
   const trimmedName = input.name.trim();
 
   if (!trimmedName) {
@@ -122,14 +179,26 @@ export function createItem(input: CreateItemInput): InventoryItem {
   const existing = items.find(
     (x) => x.name.trim().toLowerCase() === trimmedName.toLowerCase()
   );
-  if (existing) return existing;
+
+  if (existing) {
+    if (existing.isActive === false) {
+      const revived = {
+        ...existing,
+        isActive: true,
+        updatedAt: nowIso(),
+      };
+      writeItems(items.map((x) => (x.id === revived.id ? revived : x)));
+      return revived;
+    }
+    return existing;
+  }
 
   const item: InventoryItem = {
     id: uid("item"),
     name: trimmedName,
     sku: input.sku?.trim() || undefined,
-    category: input.category ?? "Annet",
-    unit: input.unit ?? "stk",
+    category: normalizeCategory(input.category),
+    unit: "stk",
     salePrice: round2(clampNumber(input.salePrice, 0)),
     costPrice: round2(clampNumber(input.costPrice, 0)),
     stock: clampNumber(input.stock, 0),
@@ -141,27 +210,62 @@ export function createItem(input: CreateItemInput): InventoryItem {
   };
 
   items.push(item);
-  writeJson(ITEMS_KEY, items);
+  writeItems(items);
   return item;
 }
 
 export function updateItem(itemId: string, patch: Partial<InventoryItem>): InventoryItem {
-  const items = readJson<InventoryItem[]>(ITEMS_KEY, []);
+  const items = getAllItemsRaw();
   const index = items.findIndex((x) => x.id === itemId);
-  if (index === -1) {
-    throw new Error("Fant ikke varen");
-  }
+  if (index === -1) throw new Error("Fant ikke varen");
+
+  const current = items[index];
+
+  const updated: InventoryItem = {
+    ...current,
+    ...patch,
+    category: normalizeCategory(patch.category ?? current.category),
+    unit: "stk",
+    salePrice: round2(clampNumber(patch.salePrice ?? current.salePrice, 0)),
+    costPrice: round2(clampNumber(patch.costPrice ?? current.costPrice, 0)),
+    stock: clampNumber(patch.stock ?? current.stock, 0),
+    minStock: clampNumber(patch.minStock ?? current.minStock, 0),
+    name: String((patch.name ?? current.name) || "").trim(),
+    note: patch.note === "" ? undefined : (patch.note ?? current.note),
+    updatedAt: nowIso(),
+  };
+
+  if (!updated.name) throw new Error("Varen må ha navn");
+
+  items[index] = updated;
+  writeItems(items);
+  return updated;
+}
+
+export function setItemStock(itemId: string, stock: number): InventoryItem {
+  return updateItem(itemId, { stock: clampNumber(stock, 0) });
+}
+
+export function adjustItemStock(itemId: string, delta: number): InventoryItem {
+  const items = getAllItemsRaw();
+  const index = items.findIndex((x) => x.id === itemId);
+  if (index === -1) throw new Error("Fant ikke varen");
 
   const current = items[index];
   const updated: InventoryItem = {
     ...current,
-    ...patch,
+    stock: round2(current.stock + clampNumber(delta, 0)),
     updatedAt: nowIso(),
   };
 
   items[index] = updated;
-  writeJson(ITEMS_KEY, items);
+  writeItems(items);
   return updated;
+}
+
+export function deleteItem(itemId: string): void {
+  const items = getAllItemsRaw();
+  writeItems(items.filter((x) => x.id !== itemId));
 }
 
 export type CreateCustomerInput = {
@@ -172,12 +276,10 @@ export type CreateCustomerInput = {
 };
 
 export function createCustomer(input: CreateCustomerInput): Customer {
-  const customers = readJson<Customer[]>(CUSTOMERS_KEY, []);
+  const customers = getCustomers();
   const trimmedName = input.name.trim();
 
-  if (!trimmedName) {
-    throw new Error("Kunden må ha navn");
-  }
+  if (!trimmedName) throw new Error("Kunden må ha navn");
 
   const existing = customers.find(
     (x) => x.name.trim().toLowerCase() === trimmedName.toLowerCase()
@@ -195,8 +297,41 @@ export function createCustomer(input: CreateCustomerInput): Customer {
   };
 
   customers.push(customer);
-  writeJson(CUSTOMERS_KEY, customers);
+  writeCustomers(customers);
   return customer;
+}
+
+export function updateCustomer(customerId: string, patch: Partial<Customer>): Customer {
+  const customers = getCustomers();
+  const index = customers.findIndex((x) => x.id === customerId);
+  if (index === -1) throw new Error("Fant ikke kunden");
+
+  const current = customers[index];
+  const updated: Customer = {
+    ...current,
+    ...patch,
+    name: String((patch.name ?? current.name) || "").trim(),
+    phone: patch.phone === "" ? undefined : (patch.phone ?? current.phone),
+    address: patch.address === "" ? undefined : (patch.address ?? current.address),
+    note: patch.note === "" ? undefined : (patch.note ?? current.note),
+    updatedAt: nowIso(),
+  };
+
+  if (!updated.name) throw new Error("Kunden må ha navn");
+
+  customers[index] = updated;
+  writeCustomers(customers);
+  return updated;
+}
+
+export function deleteCustomer(customerId: string): void {
+  const sales = getSales().filter((sale) => sale.customerId === customerId);
+  if (sales.length > 0) {
+    throw new Error("Kunden kan ikke slettes fordi den er brukt i salg");
+  }
+
+  const customers = getCustomers();
+  writeCustomers(customers.filter((x) => x.id !== customerId));
 }
 
 export function createEmptySale(): SaleDraft {
@@ -260,7 +395,7 @@ function calcWeightedAverage(
 }
 
 export function savePurchase(draft: PurchaseDraft): PurchaseRecord {
-  const items = readJson<InventoryItem[]>(ITEMS_KEY, []);
+  const items = getAllItemsRaw();
   const purchases = readJson<PurchaseRecord[]>(PURCHASES_KEY, []);
 
   const total = round2(
@@ -298,7 +433,7 @@ export function savePurchase(draft: PurchaseDraft): PurchaseRecord {
     total,
   };
 
-  writeJson(ITEMS_KEY, items);
+  writeItems(items);
   purchases.unshift(record);
   writeJson(PURCHASES_KEY, purchases);
 
@@ -312,7 +447,7 @@ export function saveSale(
     paymentNote?: string;
   }
 ): SaleRecord {
-  const items = readJson<InventoryItem[]>(ITEMS_KEY, []);
+  const items = getAllItemsRaw();
   const sales = readJson<SaleRecord[]>(SALES_KEY, []);
 
   const total = round2(
@@ -321,6 +456,7 @@ export function saveSale(
 
   const payments: Payment[] = [];
   const paymentAmount = round2(clampNumber(options?.paymentAmount, 0));
+
   if (paymentAmount > 0) {
     payments.push({
       id: uid("pay"),
@@ -357,7 +493,7 @@ export function saveSale(
     createdAt: draft.createdAt,
   };
 
-  writeJson(ITEMS_KEY, items);
+  writeItems(items);
   sales.unshift(record);
   writeJson(SALES_KEY, sales);
 
@@ -367,9 +503,7 @@ export function saveSale(
 export function addPaymentToSale(saleId: string, amount: number, note?: string): SaleRecord {
   const sales = readJson<SaleRecord[]>(SALES_KEY, []);
   const index = sales.findIndex((x) => x.id === saleId);
-  if (index === -1) {
-    throw new Error("Fant ikke salget");
-  }
+  if (index === -1) throw new Error("Fant ikke salget");
 
   const sale = sales[index];
   const payment: Payment = {
@@ -382,10 +516,11 @@ export function addPaymentToSale(saleId: string, amount: number, note?: string):
   const updated: SaleRecord = {
     ...sale,
     payments: [...sale.payments, payment],
-    paid: salePaidSum({
-      ...sale,
-      payments: [...sale.payments, payment],
-    }) >= sale.total,
+    paid:
+      salePaidSum({
+        ...sale,
+        payments: [...sale.payments, payment],
+      }) >= sale.total,
   };
 
   sales[index] = updated;
@@ -470,35 +605,25 @@ export function importBackupObject(input: unknown): void {
       costPrice?: number;
       stock?: number;
       minStock?: number;
+      note?: string;
+      category?: string;
       createdAt?: string;
       updatedAt?: string;
     }>;
   };
 
   const mappedItems: InventoryItem[] = Array.isArray(data.items)
-    ? data.items.map((item) => ({
-        id: item.id ?? uid("item"),
-        name: item.name ?? "Uten navn",
-        sku: undefined,
-        category: "Annet",
-        unit: "stk",
-        salePrice: round2(clampNumber(item.salePrice ?? item.price, 0)),
-        costPrice: round2(clampNumber(item.costPrice ?? item.cost, 0)),
-        stock: clampNumber(item.stock, 0),
-        minStock: clampNumber(item.minStock, 0),
-        note: undefined,
-        isActive: true,
-        createdAt: item.createdAt ?? nowIso(),
-        updatedAt: item.updatedAt ?? nowIso(),
-      }))
+    ? data.items.map((item) =>
+        normalizeItem({
+          ...item,
+          category: item.category,
+          note: item.note,
+        })
+      )
     : [];
 
   const mappedCustomers: Customer[] = Array.isArray(data.customers)
-    ? data.customers.map((customer: Customer) => ({
-        ...customer,
-        createdAt: customer.createdAt ?? nowIso(),
-        updatedAt: customer.updatedAt ?? nowIso(),
-      }))
+    ? data.customers.map((customer) => normalizeCustomer(customer))
     : [];
 
   const mappedSales: SaleRecord[] = Array.isArray(data.sales)
@@ -545,7 +670,9 @@ export function importBackupObject(input: unknown): void {
           lines,
           total,
           payments,
-          paid: sale.paid ?? salePaidSum({ ...sale, lines, total, payments } as SaleRecord) >= total,
+          paid:
+            sale.paid ??
+            salePaidSum({ ...sale, lines, total, payments } as SaleRecord) >= total,
           createdAt: sale.createdAt ?? nowIso(),
         };
       })
@@ -555,8 +682,8 @@ export function importBackupObject(input: unknown): void {
     ? data.purchases
     : [];
 
-  writeJson(ITEMS_KEY, mappedItems);
-  writeJson(CUSTOMERS_KEY, mappedCustomers);
+  writeItems(mappedItems);
+  writeCustomers(mappedCustomers);
   writeJson(SALES_KEY, mappedSales);
   writeJson(PURCHASES_KEY, mappedPurchases);
   setSaldo(clampNumber(data.saldo, 0));
@@ -573,27 +700,13 @@ export async function importBackupFile(file: File): Promise<void> {
 }
 
 export function ensureSeedData(): void {
-  if (getItems().length === 0) {
+  if (getAllItemsRaw().length === 0) {
     const seedItems: InventoryItem[] = [
-      {
-        id: uid("item"),
-        name: "Motorolje 5W-30",
-        category: "Olje",
-        unit: "liter",
-        salePrice: 149,
-        costPrice: 89,
-        stock: 12,
-        minStock: 4,
-        note: "",
-        isActive: true,
-        createdAt: nowIso(),
-        updatedAt: nowIso(),
-      },
       {
         id: uid("item"),
         name: "Bremserens",
         category: "Forbruk",
-        unit: "boks",
+        unit: "stk",
         salePrice: 79,
         costPrice: 45,
         stock: 8,
@@ -603,8 +716,22 @@ export function ensureSeedData(): void {
         createdAt: nowIso(),
         updatedAt: nowIso(),
       },
+      {
+        id: uid("item"),
+        name: "Motorolje 5W-30",
+        category: "Forbruk",
+        unit: "stk",
+        salePrice: 149,
+        costPrice: 89,
+        stock: 12,
+        minStock: 4,
+        note: "",
+        isActive: true,
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
+      },
     ];
-    writeJson(ITEMS_KEY, seedItems);
+    writeItems(seedItems);
   }
 
   if (!localStorage.getItem(SALDO_KEY)) {
