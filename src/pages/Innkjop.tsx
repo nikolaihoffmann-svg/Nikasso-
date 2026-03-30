@@ -1,11 +1,18 @@
 import { useMemo, useState } from "react";
 import ItemPickerWithCreate from "../components/ItemPickerWithCreate";
-import { createEmptyPurchase, fmtKr, makePurchaseLine, savePurchase } from "../app/storage";
-import type { PurchaseDraft, PurchaseLine } from "../types";
+import {
+  createEmptyPurchase,
+  fmtKr,
+  getPurchases,
+  makePurchaseLine,
+  savePurchase,
+} from "../app/storage";
+import type { PurchaseDraft, PurchaseLine, PurchaseRecord } from "../types";
 
 export default function Innkjop() {
   const [draft, setDraft] = useState<PurchaseDraft>(createEmptyPurchase());
   const [message, setMessage] = useState("");
+  const [historyQuery, setHistoryQuery] = useState("");
 
   function updateLine(lineId: string, patch: Partial<PurchaseLine>): void {
     setDraft((prev) => {
@@ -34,6 +41,29 @@ export default function Innkjop() {
     savePurchase(draft);
     setMessage("Innkjøp lagret");
     setDraft(createEmptyPurchase());
+  }
+
+  const purchases = useMemo(() => getPurchases(), [message]);
+
+  const filteredPurchases = useMemo(() => {
+    const q = historyQuery.trim().toLowerCase();
+    if (!q) return purchases;
+
+    return purchases.filter((purchase) => {
+      const supplierHit = (purchase.supplier || "").toLowerCase().includes(q);
+      const noteHit = (purchase.note || "").toLowerCase().includes(q);
+      const statusHit = (purchase.status || "").toLowerCase().includes(q);
+      const lineHit = purchase.lines.some((line) =>
+        (line.itemName || "").toLowerCase().includes(q)
+      );
+
+      return supplierHit || noteHit || statusHit || lineHit;
+    });
+  }, [purchases, historyQuery]);
+
+  function purchaseTitle(purchase: PurchaseRecord): string {
+    if (purchase.supplier?.trim()) return purchase.supplier.trim();
+    return "Innkjøp uten leverandør";
   }
 
   return (
@@ -166,6 +196,84 @@ export default function Innkjop() {
         </div>
 
         {message ? <div style={{ marginTop: 12, color: "#86efac" }}>{message}</div> : null}
+      </div>
+
+      <div className="card" style={{ marginTop: 16 }}>
+        <div className="rowBetween" style={{ marginBottom: 14 }}>
+          <h2 className="sectionTitle" style={{ marginBottom: 0 }}>Innkjøpshistorikk</h2>
+          <span className="badge">{filteredPurchases.length} vises</span>
+        </div>
+
+        <label className="label" style={{ marginBottom: 14 }}>
+          <span>Søk i innkjøp</span>
+          <input
+            value={historyQuery}
+            onChange={(e) => setHistoryQuery(e.target.value)}
+            placeholder="Søk leverandør, vare, notat eller status..."
+          />
+        </label>
+
+        <div className="featureList">
+          {filteredPurchases.length === 0 ? (
+            <div className="emptyText">Ingen innkjøp funnet.</div>
+          ) : (
+            filteredPurchases.map((purchase) => (
+              <div key={purchase.id} className="card">
+                <div className="rowBetween" style={{ marginBottom: 12 }}>
+                  <div className="customerMain">
+                    <div className="featureRowTitle">{purchaseTitle(purchase)}</div>
+                    <div className="featureRowSub">
+                      {new Date(purchase.createdAt).toLocaleString("no-NO")}
+                    </div>
+                  </div>
+
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontWeight: 800 }}>{fmtKr(purchase.total)}</div>
+                    <div className="featureRowSub">{purchase.lines.length} linjer</div>
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+                  <span className={purchase.status === "betalt" ? "badge badgeSuccess" : "badge badgeDanger"}>
+                    {purchase.status === "betalt" ? "Betalt" : "Ikke betalt"}
+                  </span>
+
+                  <span className="badge">
+                    {purchase.updateCostMode === "weighted_average"
+                      ? "Vektet snitt"
+                      : purchase.updateCostMode === "last_price"
+                      ? "Siste pris"
+                      : "Ingen kost-endring"}
+                  </span>
+                </div>
+
+                <div className="featureList">
+                  {purchase.lines.map((line) => (
+                    <div key={line.id} className="featureRow">
+                      <div className="customerMain">
+                        <div className="featureRowTitle">{line.itemName || "Uten varenavn"}</div>
+                        <div className="featureRowSub">
+                          {line.kind} • Antall: {line.qty}
+                        </div>
+                      </div>
+
+                      <div className="featureRowRight">
+                        <div>{fmtKr(line.lineTotal)}</div>
+                        <div className="featureRowSub">Kost: {fmtKr(line.unitCost)}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {purchase.note ? (
+                  <div className="featureRowSub" style={{ marginTop: 12 }}>
+                    Notat: {purchase.note}
+                  </div>
+                ) : null}
+              </div>
+            ))
+          )}
+        </div>
       </div>
     </div>
   );
