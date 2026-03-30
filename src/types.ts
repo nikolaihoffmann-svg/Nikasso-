@@ -1,10 +1,9 @@
 export type Theme = "dark" | "light";
 
-export type ItemUnit = "stk" | "liter" | "sett" | "pakke" | "tube" | "boks";
+export type ItemUnit = "stk";
 
 export type ItemCategory =
   | "Deler"
-  | "Olje"
   | "Forbruk"
   | "Utstyr"
   | "Annet";
@@ -15,13 +14,10 @@ export type InventoryItem = {
   sku?: string;
   category: ItemCategory;
   unit: ItemUnit;
-
-  // gamle + nye prisfelt
   salePrice: number;
   costPrice: number;
   price?: number;
   cost?: number;
-
   stock: number;
   minStock: number;
   note?: string;
