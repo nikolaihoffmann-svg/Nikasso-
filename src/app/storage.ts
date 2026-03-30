@@ -220,7 +220,6 @@ export function updateItem(itemId: string, patch: Partial<InventoryItem>): Inven
   if (index === -1) throw new Error("Fant ikke varen");
 
   const current = items[index];
-
   const updated: InventoryItem = {
     ...current,
     ...patch,
@@ -264,6 +263,24 @@ export function adjustItemStock(itemId: string, delta: number): InventoryItem {
 }
 
 export function deleteItem(itemId: string): void {
+  const salesUsingItem = getSales().some((sale) =>
+    sale.lines.some((line) => line.itemId === itemId)
+  );
+
+  if (salesUsingItem) {
+    const items = getAllItemsRaw();
+    const index = items.findIndex((x) => x.id === itemId);
+    if (index === -1) return;
+
+    items[index] = {
+      ...items[index],
+      isActive: false,
+      updatedAt: nowIso(),
+    };
+    writeItems(items);
+    return;
+  }
+
   const items = getAllItemsRaw();
   writeItems(items.filter((x) => x.id !== itemId));
 }
