@@ -33,6 +33,16 @@ export default function Innkjop() {
     }));
   }
 
+  function removeLine(lineId: string): void {
+    setDraft((prev) => {
+      if (prev.lines.length <= 1) return prev;
+      return {
+        ...prev,
+        lines: prev.lines.filter((line) => line.id !== lineId),
+      };
+    });
+  }
+
   const total = useMemo(() => {
     return draft.lines.reduce((sum, line) => sum + Number(line.lineTotal || 0), 0);
   }, [draft.lines]);
@@ -119,7 +129,14 @@ export default function Innkjop() {
         <div className="list" style={{ marginTop: 18 }}>
           {draft.lines.map((line, index) => (
             <div key={line.id} className="lineCard">
-              <div style={{ fontWeight: 800, fontSize: 22 }}>Linje {index + 1}</div>
+              <div className="rowBetween">
+                <div style={{ fontWeight: 800, fontSize: 22 }}>Linje {index + 1}</div>
+                {draft.lines.length > 1 ? (
+                  <button className="btn btnDanger" type="button" onClick={() => removeLine(line.id)}>
+                    Fjern linje
+                  </button>
+                ) : null}
+              </div>
 
               <label className="label">
                 <span>Type</span>
