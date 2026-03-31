@@ -8,18 +8,29 @@ import {
   fmtKr,
   getSales,
   makeSaleLine,
+  paymentMethodLabel,
+  saveSale,
   salePaidSum,
   saleRemaining,
-  saveSale,
-  updateSale,
+  updateSaleMeta,
 } from "../app/storage";
-import type { SaleDraft, SaleLine, SaleRecord } from "../types";
+import type { PaymentMethod, SaleDraft, SaleLine, SaleRecord } from "../types";
+
+const QUICK_METHODS: PaymentMethod[] = [
+  "vipps",
+  "revolut",
+  "kontant",
+  "bytte",
+  "bankoverforing",
+];
 
 export default function Salg() {
   const [draft, setDraft] = useState<SaleDraft>(createEmptySale());
   const [message, setMessage] = useState("");
   const [paymentAmount, setPaymentAmount] = useState("0");
   const [paymentNote, setPaymentNote] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("vipps");
+  const [manualMethodLabel, setManualMethodLabel] = useState("");
 
   const [historyQuery, setHistoryQuery] = useState("");
   const [expandedId, setExpandedId] = useState<string>("");
@@ -29,6 +40,8 @@ export default function Salg() {
   const [editNote, setEditNote] = useState("");
   const [laterPaymentAmount, setLaterPaymentAmount] = useState<Record<string, string>>({});
   const [laterPaymentNote, setLaterPaymentNote] = useState<Record<string, string>>({});
+  const [laterPaymentMethod, setLaterPaymentMethod] = useState<Record<string, PaymentMethod>>({});
+  const [laterManualMethodLabel, setLaterManualMethodLabel] = useState<Record<string, string>>({});
 
   function refreshMessage(text: string): void {
     setMessage(`${text} ${Date.now()}`);
@@ -77,12 +90,16 @@ export default function Salg() {
     saveSale(draft, {
       paymentAmount: Number(paymentAmount || 0),
       paymentNote,
+      paymentMethod,
+      paymentMethodLabel: paymentMethod === "annet" ? manualMethodLabel : undefined,
     });
 
     setMessage("Salg lagret");
     setDraft(createEmptySale());
     setPaymentAmount("0");
     setPaymentNote("");
+    setPaymentMethod("vipps");
+    setManualMethodLabel("");
   }
 
   const sales = useMemo(() => getSales(), [message]);
@@ -110,7 +127,7 @@ export default function Salg() {
 
   function saveEdit(): void {
     if (!editId) return;
-    updateSale(editId, {
+    updateSaleMeta(editId, {
       customerId: editCustomerId,
       customerName: editCustomerName,
       note: editNote,
@@ -131,9 +148,20 @@ export default function Salg() {
     const amount = Number(laterPaymentAmount[saleId] || 0);
     if (amount <= 0) return;
 
-    addPaymentToSale(saleId, amount, laterPaymentNote[saleId] || "Registrert senere");
+    const method = laterPaymentMethod[saleId] ?? "vipps";
+
+    addPaymentToSale(
+      saleId,
+      amount,
+      laterPaymentNote[saleId] || "Registrert senere",
+      method,
+      method === "annet" ? laterManualMethodLabel[saleId] : undefined
+    );
+
     setLaterPaymentAmount((prev) => ({ ...prev, [saleId]: "" }));
     setLaterPaymentNote((prev) => ({ ...prev, [saleId]: "" }));
+    setLaterPaymentMethod((prev) => ({ ...prev, [saleId]: "vipps" }));
+    setLaterManualMethodLabel((prev) => ({ ...prev, [saleId]: "" }));
     refreshMessage("Betaling registrert");
   }
 
@@ -255,10 +283,44 @@ export default function Salg() {
             <input
               value={paymentNote}
               onChange={(e) => setPaymentNote(e.target.value)}
-              placeholder="Vipps, kontant, bank..."
+              placeholder="Valgfritt notat..."
             />
           </label>
         </div>
+
+        <div style={{ marginTop: 14 }}>
+          <div className="muted" style={{ marginBottom: 8 }}>Hurtigvalg betalingsmåte</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {QUICK_METHODS.map((method) => (
+              <button
+                key={method}
+                type="button"
+                className={paymentMethod === method ? "btn btnPrimary" : "btn"}
+                onClick={() => setPaymentMethod(method)}
+              >
+                {paymentMethodLabel(method)}
+              </button>
+            ))}
+            <button
+              type="button"
+              className={paymentMethod === "annet" ? "btn btnPrimary" : "btn"}
+              onClick={() => setPaymentMethod("annet")}
+            >
+              Annet
+            </button>
+          </div>
+        </div>
+
+        {paymentMethod === "annet" ? (
+          <label className="label" style={{ marginTop: 14 }}>
+            <span>Manuell betalingsmåte</span>
+            <input
+              value={manualMethodLabel}
+              onChange={(e) => setManualMethodLabel(e.target.value)}
+              placeholder="F.eks. Stripe, PayPal..."
+            />
+          </label>
+        ) : null}
 
         <div className="cardActions">
           <div className="saleSummary">
@@ -271,7 +333,7 @@ export default function Salg() {
           </button>
         </div>
 
-        {message ? <div style={{ marginTop: 12, color: "#86efac" }}>{message.replace(/\s\d+$/, "")}</div> : null}
+        {message ? <div style={{ marginTop: 12, color: "#86efac" }}>{message}</div> : null}
       </div>
 
       <div className="card" style={{ marginTop: 16 }}>
@@ -325,15 +387,6 @@ export default function Salg() {
                       {remaining > 0 ? "Utestående" : "Ferdig betalt"}
                     </span>
                     <span className="badge">{sale.lines.length} linjer</span>
-                    <span className="badge badgeGold">
-                      Fortjeneste: {fmtKr(
-                        sale.lines.reduce(
-                          (sum, line) =>
-                            sum + (Number(line.unitPrice || 0) - Number(line.unitCost || 0)) * Number(line.qty || 0),
-                          0
-                        )
-                      )}
-                    </span>
                   </div>
 
                   <div className="cardActions" style={{ marginTop: 0 }}>
@@ -347,7 +400,7 @@ export default function Salg() {
                       </button>
 
                       <button className="btn" type="button" onClick={() => startEdit(sale)}>
-                        Rediger salg
+                        Rediger meta
                       </button>
                     </div>
 
@@ -415,6 +468,32 @@ export default function Salg() {
                         </div>
                       ) : null}
 
+                      <div style={{ marginTop: 12 }}>
+                        <div className="featureRowSub" style={{ marginBottom: 8 }}>
+                          Betalinger:
+                        </div>
+
+                        <div className="featureList">
+                          {sale.payments.length === 0 ? (
+                            <div className="emptyText">Ingen betalinger registrert enda.</div>
+                          ) : (
+                            sale.payments.map((payment) => (
+                              <div key={payment.id} className="featureRow">
+                                <div className="customerMain">
+                                  <div className="featureRowTitle">{paymentMethodLabel(payment.method, payment.methodLabel)}</div>
+                                  <div className="featureRowSub">
+                                    {new Date(payment.createdAt).toLocaleString("no-NO")}
+                                    {payment.note ? ` • ${payment.note}` : ""}
+                                  </div>
+                                </div>
+
+                                <div className="featureRowRight">{fmtKr(payment.amount)}</div>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+
                       <div className="grid2" style={{ marginTop: 12 }}>
                         <label className="label">
                           <span>Registrer betaling senere</span>
@@ -435,10 +514,51 @@ export default function Salg() {
                             onChange={(e) =>
                               setLaterPaymentNote((prev) => ({ ...prev, [sale.id]: e.target.value }))
                             }
-                            placeholder="Vipps, bank, kontant..."
+                            placeholder="Valgfritt notat..."
                           />
                         </label>
                       </div>
+
+                      <div style={{ marginTop: 14 }}>
+                        <div className="muted" style={{ marginBottom: 8 }}>Betalingsmåte</div>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          {QUICK_METHODS.map((method) => (
+                            <button
+                              key={method}
+                              type="button"
+                              className={(laterPaymentMethod[sale.id] ?? "vipps") === method ? "btn btnPrimary" : "btn"}
+                              onClick={() =>
+                                setLaterPaymentMethod((prev) => ({ ...prev, [sale.id]: method }))
+                              }
+                            >
+                              {paymentMethodLabel(method)}
+                            </button>
+                          ))}
+
+                          <button
+                            type="button"
+                            className={(laterPaymentMethod[sale.id] ?? "vipps") === "annet" ? "btn btnPrimary" : "btn"}
+                            onClick={() =>
+                              setLaterPaymentMethod((prev) => ({ ...prev, [sale.id]: "annet" }))
+                            }
+                          >
+                            Annet
+                          </button>
+                        </div>
+                      </div>
+
+                      {(laterPaymentMethod[sale.id] ?? "vipps") === "annet" ? (
+                        <label className="label" style={{ marginTop: 12 }}>
+                          <span>Manuell betalingsmåte</span>
+                          <input
+                            value={laterManualMethodLabel[sale.id] ?? ""}
+                            onChange={(e) =>
+                              setLaterManualMethodLabel((prev) => ({ ...prev, [sale.id]: e.target.value }))
+                            }
+                            placeholder="F.eks. Stripe, PayPal..."
+                          />
+                        </label>
+                      ) : null}
 
                       <div className="cardActions">
                         <div className="muted">Bruk dette kun for restbetaling etter salget.</div>
