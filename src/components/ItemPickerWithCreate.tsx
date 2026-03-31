@@ -112,7 +112,11 @@ export default function ItemPickerWithCreate({
             <>
               <div className="pickerHint">Ingen varer funnet.</div>
               <div className="pickerFooter">
-                <button className="btn btnPrimary" type="button" onClick={() => setOpenNew(true)}>
+                <button
+                  className="btn btnPrimary"
+                  type="button"
+                  onClick={() => setOpenNew(true)}
+                >
                   + Opprett “{query.trim() || "ny vare"}”
                 </button>
               </div>
@@ -145,7 +149,7 @@ export default function ItemPickerWithCreate({
         open={openNew}
         initialName={query}
         onClose={() => setOpenNew(false)}
-        onSaved={(item: InventoryItem) => {
+        onCreated={(item: InventoryItem) => {
           const next = getItems();
           setItems(next);
           onChange(item);
