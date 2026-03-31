@@ -1,15 +1,22 @@
 import { useMemo } from "react";
 import {
+  customerDebtRemaining,
   customerTotalRemaining,
   fmtKr,
   getCustomers,
+  getDebts,
   getItems,
   getPurchases,
   getSaldo,
   getSales,
+  inventoryValue,
+  projectedTotalValue,
   salePaidSum,
-  saleRemaining,
   saleProfit,
+  saleRemaining,
+  totalDebtOutstanding,
+  totalReceivables,
+  totalSalesOutstanding,
 } from "../app/storage";
 import type { InventoryItem, SaleRecord } from "../types";
 
@@ -27,11 +34,8 @@ function median(values: number[]): number {
     : sorted[mid];
 }
 
-function inventoryValue(items: InventoryItem[]): number {
-  return items.reduce((sum, item) => {
-    const cost = Number(item.costPrice ?? item.cost ?? 0);
-    return sum + cost * Number(item.stock || 0);
-  }, 0);
+function roundSafe(value: number): number {
+  return Math.round(value * 100) / 100;
 }
 
 function sumByMonth<T extends { createdAt: string }>(
@@ -48,7 +52,7 @@ function sumByMonth<T extends { createdAt: string }>(
       const key = `${String(d.getMonth() + 1).padStart(2, "0")}.${String(
         d.getFullYear()
       ).slice(-2)}`;
-      map.set(key, (map.get(key) || 0) + valueGetter(row));
+      map.set(key, roundSafe((map.get(key) || 0) + valueGetter(row)));
     });
 
   return [...map.entries()].slice(-6);
@@ -77,14 +81,18 @@ export default function Oversikt() {
   const items = useMemo(() => getItems(), []);
   const sales = useMemo(() => getSales(), []);
   const purchases = useMemo(() => getPurchases(), []);
+  const debts = useMemo(() => getDebts(), []);
   const saldo = useMemo(() => getSaldo(), []);
 
   const totalRevenue = sales.reduce((sum, sale) => sum + Number(sale.total || 0), 0);
   const totalPaid = sales.reduce((sum, sale) => sum + salePaidSum(sale), 0);
-  const totalOpen = sales.reduce((sum, sale) => sum + saleRemaining(sale), 0);
+  const salesOpen = totalSalesOutstanding();
+  const debtsOpen = totalDebtOutstanding();
+  const totalOpen = totalReceivables();
   const purchaseTotal = purchases.reduce((sum, purchase) => sum + Number(purchase.total || 0), 0);
   const stockValue = inventoryValue(items);
   const grossProfit = sales.reduce((sum, sale) => sum + saleProfit(sale), 0);
+  const potentialTotal = projectedTotalValue();
 
   const saleTotals = sales.map((sale) => Number(sale.total || 0));
   const avgSale = average(saleTotals);
@@ -99,7 +107,7 @@ export default function Oversikt() {
     .map((customer) => ({
       id: customer.id,
       name: customer.name,
-      remaining: customerTotalRemaining(customer.id),
+      remaining: customerTotalRemaining(customer.id) + customerDebtRemaining(customer.id),
     }))
     .filter((x) => x.remaining > 0)
     .sort((a, b) => b.remaining - a.remaining)
@@ -110,12 +118,14 @@ export default function Oversikt() {
     .slice(0, 6);
 
   const paidRatio = totalRevenue > 0 ? (totalPaid / totalRevenue) * 100 : 0;
-  const debtRatio = totalRevenue > 0 ? (totalOpen / totalRevenue) * 100 : 0;
+  const salesDebtRatio = totalRevenue > 0 ? (salesOpen / totalRevenue) * 100 : 0;
   const marginRatio = totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0;
 
   const activeItems = items.filter((item) => item.isActive !== false).length;
   const outOfStock = items.filter((item) => Number(item.stock || 0) <= 0).length;
-  const customerCountWithDebt = customers.filter((x) => customerTotalRemaining(x.id) > 0).length;
+  const customerCountWithDebt = customers.filter(
+    (x) => customerTotalRemaining(x.id) + customerDebtRemaining(x.id) > 0
+  ).length;
   const monthSales = salesThisMonth(sales);
   const sales30 = salesLast30Days(sales);
 
@@ -127,37 +137,13 @@ export default function Oversikt() {
   const maxPaymentsMonth = Math.max(...paymentsByMonth.map(([, value]) => value), 1);
   const maxProfitMonth = Math.max(...profitByMonth.map(([, value]) => value), 1);
 
-  const debtAging = [
-    {
-      label: "0–7 dager",
-      value: sales
-        .filter((sale) => {
-          const days = (Date.now() - new Date(sale.createdAt).getTime()) / (1000 * 60 * 60 * 24);
-          return saleRemaining(sale) > 0 && days <= 7;
-        })
-        .reduce((sum, sale) => sum + saleRemaining(sale), 0),
-    },
-    {
-      label: "8–30 dager",
-      value: sales
-        .filter((sale) => {
-          const days = (Date.now() - new Date(sale.createdAt).getTime()) / (1000 * 60 * 60 * 24);
-          return saleRemaining(sale) > 0 && days > 7 && days <= 30;
-        })
-        .reduce((sum, sale) => sum + saleRemaining(sale), 0),
-    },
-    {
-      label: "31+ dager",
-      value: sales
-        .filter((sale) => {
-          const days = (Date.now() - new Date(sale.createdAt).getTime()) / (1000 * 60 * 60 * 24);
-          return saleRemaining(sale) > 0 && days > 30;
-        })
-        .reduce((sum, sale) => sum + saleRemaining(sale), 0),
-    },
+  const debtBars = [
+    { label: "Utestående salg", value: salesOpen },
+    { label: "Gjeld / lån", value: debtsOpen },
+    { label: "Totalt til gode", value: totalOpen },
   ];
 
-  const maxDebtAging = Math.max(...debtAging.map((x) => x.value), 1);
+  const maxDebtBars = Math.max(...debtBars.map((x) => x.value), 1);
   const bestSale = saleTotals.length ? Math.max(...saleTotals) : 0;
   const lowestSale = saleTotals.length ? Math.min(...saleTotals) : 0;
 
@@ -165,32 +151,52 @@ export default function Oversikt() {
     <div>
       <h1 className="pageTitle">Oversikt</h1>
       <p className="pageLead">
-        Nerdete driftstall, lager, cashflow og utestående — men lett å lese.
+        Saldo, lager, utestående salg, egen gjeld og samlet potensiell totalverdi.
       </p>
 
       <div className="statsGrid">
         <div className="statCard">
-          <div className="statLabel">Saldo</div>
+          <div className="statLabel">Saldo nå</div>
           <div className="statValue">{fmtKr(Number(saldo || 0))}</div>
         </div>
 
         <div className="statCard">
-          <div className="statLabel">Totalt omsatt</div>
-          <div className="statValue">{fmtKr(totalRevenue)}</div>
+          <div className="statLabel">Utestående salg</div>
+          <div className="statValue debtText">{fmtKr(salesOpen)}</div>
         </div>
 
         <div className="statCard">
-          <div className="statLabel">Totalt utestående</div>
-          <div className="statValue debtText">{fmtKr(totalOpen)}</div>
+          <div className="statLabel">Gjeld / lån til gode</div>
+          <div className="statValue debtText">{fmtKr(debtsOpen)}</div>
         </div>
 
         <div className="statCard">
-          <div className="statLabel">Lagerverdi</div>
-          <div className="statValue">{fmtKr(stockValue)}</div>
+          <div className="statLabel">Potensiell totalverdi</div>
+          <div className="statValue">{fmtKr(potentialTotal)}</div>
         </div>
       </div>
 
       <div className="statsGridSmall" style={{ marginTop: 14 }}>
+        <div className="infoCard">
+          <div className="infoLabel">Totalt til gode</div>
+          <div className="statMiniValue">{fmtKr(totalOpen)}</div>
+        </div>
+
+        <div className="infoCard">
+          <div className="infoLabel">Lagerverdi</div>
+          <div className="statMiniValue">{fmtKr(stockValue)}</div>
+        </div>
+
+        <div className="infoCard">
+          <div className="infoLabel">Totalt omsatt</div>
+          <div className="statMiniValue">{fmtKr(totalRevenue)}</div>
+        </div>
+
+        <div className="infoCard">
+          <div className="infoLabel">Brutto fortjeneste</div>
+          <div className="statMiniValue">{fmtKr(grossProfit)}</div>
+        </div>
+
         <div className="infoCard">
           <div className="infoLabel">Snittsalg</div>
           <div className="statMiniValue">{fmtKr(avgSale)}</div>
@@ -207,8 +213,8 @@ export default function Oversikt() {
         </div>
 
         <div className="infoCard">
-          <div className="infoLabel">Utestående andel</div>
-          <div className="statMiniValue debtText">{debtRatio.toFixed(0)}%</div>
+          <div className="infoLabel">Utestående salg andel</div>
+          <div className="statMiniValue debtText">{salesDebtRatio.toFixed(0)}%</div>
         </div>
 
         <div className="infoCard">
@@ -227,7 +233,7 @@ export default function Oversikt() {
         </div>
 
         <div className="infoCard">
-          <div className="infoLabel">Kunder med gjeld</div>
+          <div className="infoLabel">Kunder med åpne beløp</div>
           <div className="statMiniValue">{customerCountWithDebt}</div>
         </div>
 
@@ -242,13 +248,13 @@ export default function Oversikt() {
         </div>
 
         <div className="infoCard">
-          <div className="infoLabel">Totalt innbetalt</div>
-          <div className="statMiniValue">{fmtKr(totalPaid)}</div>
+          <div className="infoLabel">Innkjøp totalt</div>
+          <div className="statMiniValue">{fmtKr(purchaseTotal)}</div>
         </div>
 
         <div className="infoCard">
-          <div className="infoLabel">Brutto fortjeneste</div>
-          <div className="statMiniValue">{fmtKr(grossProfit)}</div>
+          <div className="infoLabel">Brutto differanse</div>
+          <div className="statMiniValue">{fmtKr(totalRevenue - purchaseTotal)}</div>
         </div>
       </div>
 
@@ -270,18 +276,18 @@ export default function Oversikt() {
               <div className="featureRowRight">{sales.length}</div>
             </div>
             <div className="featureRow">
-              <div className="featureRowTitle">Antall varer</div>
-              <div className="featureRowRight">{items.length}</div>
+              <div className="featureRowTitle">Antall gjeldsposter</div>
+              <div className="featureRowRight">{debts.length}</div>
             </div>
           </div>
         </div>
 
         <div className="card">
-          <h2 className="sectionTitle">Kunder som skylder mest</h2>
+          <h2 className="sectionTitle">Mest til gode per kunde</h2>
 
           <div className="featureList">
             {topDebtors.length === 0 ? (
-              <div className="emptyText">Ingen utestående kunder akkurat nå.</div>
+              <div className="emptyText">Ingen åpne poster akkurat nå.</div>
             ) : (
               topDebtors.map((customer) => (
                 <div key={customer.id} className="featureRow">
@@ -366,15 +372,15 @@ export default function Oversikt() {
         </div>
 
         <div className="card">
-          <h2 className="sectionTitle">Aldring på utestående</h2>
+          <h2 className="sectionTitle">Åpne beløp</h2>
           <div className="miniChart">
-            {debtAging.map((row) => (
+            {debtBars.map((row) => (
               <div key={row.label} className="chartRow">
                 <div className="chartLabel">{row.label}</div>
                 <div className="chartBarTrack">
                   <div
                     className="chartBarFill chartBarRed"
-                    style={{ width: `${(row.value / maxDebtAging) * 100}%` }}
+                    style={{ width: `${(row.value / maxDebtBars) * 100}%` }}
                   />
                 </div>
                 <div className="chartValue debtText">{fmtKr(row.value)}</div>
@@ -391,7 +397,7 @@ export default function Oversikt() {
           {lowStockItems.length === 0 ? (
             <div className="emptyText">Ingen varer under minimum.</div>
           ) : (
-            lowStockItems.map((item) => (
+            lowStockItems.map((item: InventoryItem) => (
               <div key={item.id} className="featureRow">
                 <div className="customerMain">
                   <div className="featureRowTitle">{item.name}</div>
@@ -433,18 +439,6 @@ export default function Oversikt() {
               </div>
             ))
           )}
-        </div>
-      </div>
-
-      <div className="grid2" style={{ marginTop: 16 }}>
-        <div className="infoCard">
-          <div className="infoLabel">Innkjøp totalt</div>
-          <div className="statMiniValue">{fmtKr(purchaseTotal)}</div>
-        </div>
-
-        <div className="infoCard">
-          <div className="infoLabel">Brutto differanse</div>
-          <div className="statMiniValue">{fmtKr(totalRevenue - purchaseTotal)}</div>
         </div>
       </div>
     </div>
