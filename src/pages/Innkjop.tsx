@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import ItemPickerWithCreate from "../components/ItemPickerWithCreate";
 import {
   createEmptyPurchase,
+  deletePurchase,
   fmtKr,
   getPurchases,
   makePurchaseLine,
@@ -49,7 +50,7 @@ export default function Innkjop() {
 
   function handleSave(): void {
     savePurchase(draft);
-    setMessage("Innkjøp lagret");
+    setMessage(`Innkjøp lagret ${Date.now()}`);
     setDraft(createEmptyPurchase());
   }
 
@@ -74,6 +75,15 @@ export default function Innkjop() {
   function purchaseTitle(purchase: PurchaseRecord): string {
     if (purchase.supplier?.trim()) return purchase.supplier.trim();
     return "Innkjøp uten leverandør";
+  }
+
+  function handleDeletePurchase(purchase: PurchaseRecord): void {
+    if (!confirm(`Slette innkjøpet fra "${purchaseTitle(purchase)}"? Lager trekkes tilbake.`)) {
+      return;
+    }
+
+    deletePurchase(purchase.id);
+    setMessage(`Innkjøp slettet ${Date.now()}`);
   }
 
   return (
@@ -212,7 +222,9 @@ export default function Innkjop() {
           </button>
         </div>
 
-        {message ? <div style={{ marginTop: 12, color: "#86efac" }}>{message}</div> : null}
+        {message ? (
+          <div style={{ marginTop: 12, color: "#86efac" }}>{message.replace(/\s\d+$/, "")}</div>
+        ) : null}
       </div>
 
       <div className="card" style={{ marginTop: 16 }}>
@@ -287,6 +299,13 @@ export default function Innkjop() {
                     Notat: {purchase.note}
                   </div>
                 ) : null}
+
+                <div className="cardActions">
+                  <div className="muted">Ved sletting trekkes lager tilbake for varekjøp.</div>
+                  <button className="btn btnDanger" type="button" onClick={() => handleDeletePurchase(purchase)}>
+                    Slett innkjøp
+                  </button>
+                </div>
               </div>
             ))
           )}
