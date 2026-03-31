@@ -7,7 +7,7 @@ type Props = {
   initialName?: string;
   item?: InventoryItem | null;
   onClose: () => void;
-  onSaved: (item: InventoryItem) => void;
+  onCreated: (item: InventoryItem) => void;
 };
 
 const categories: ItemCategory[] = ["Deler", "Forbruk", "Utstyr", "Annet"];
@@ -15,10 +15,12 @@ const categories: ItemCategory[] = ["Deler", "Forbruk", "Utstyr", "Annet"];
 export default function NewItemModal({
   open,
   initialName = "",
-  item,
+  item = null,
   onClose,
-  onSaved,
+  onCreated,
 }: Props) {
+  const isEdit = Boolean(item);
+
   const [name, setName] = useState(initialName);
   const [category, setCategory] = useState<ItemCategory>("Annet");
   const [salePrice, setSalePrice] = useState("0");
@@ -83,7 +85,7 @@ export default function NewItemModal({
             note,
           });
 
-      onSaved(saved);
+      onCreated(saved);
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Kunne ikke lagre vare");
@@ -97,15 +99,15 @@ export default function NewItemModal({
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
-        aria-label={item ? "Rediger vare" : "Ny vare"}
+        aria-label={isEdit ? "Rediger vare" : "Ny vare"}
       >
         <div className="rowBetween modalHeader">
           <div>
             <h2 className="sectionTitle" style={{ marginBottom: 6 }}>
-              {item ? "Rediger vare" : "Ny vare"}
+              {isEdit ? "Rediger vare" : "Ny vare"}
             </h2>
             <div className="muted">
-              {item
+              {isEdit
                 ? "Endre varedata, lager og priser."
                 : "Opprett vare for lager, salg og innkjøp."}
             </div>
@@ -128,7 +130,10 @@ export default function NewItemModal({
 
           <label className="label">
             <span>Kategori</span>
-            <select value={category} onChange={(e) => setCategory(e.target.value as ItemCategory)}>
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value as ItemCategory)}
+            >
               {categories.map((x) => (
                 <option key={x} value={x}>
                   {x}
@@ -139,22 +144,38 @@ export default function NewItemModal({
 
           <label className="label">
             <span>Salgspris</span>
-            <input type="number" value={salePrice} onChange={(e) => setSalePrice(e.target.value)} />
+            <input
+              type="number"
+              value={salePrice}
+              onChange={(e) => setSalePrice(e.target.value)}
+            />
           </label>
 
           <label className="label">
             <span>Kostpris</span>
-            <input type="number" value={costPrice} onChange={(e) => setCostPrice(e.target.value)} />
+            <input
+              type="number"
+              value={costPrice}
+              onChange={(e) => setCostPrice(e.target.value)}
+            />
           </label>
 
           <label className="label">
             <span>Lager</span>
-            <input type="number" value={stock} onChange={(e) => setStock(e.target.value)} />
+            <input
+              type="number"
+              value={stock}
+              onChange={(e) => setStock(e.target.value)}
+            />
           </label>
 
           <label className="label">
             <span>Min. lager</span>
-            <input type="number" value={minStock} onChange={(e) => setMinStock(e.target.value)} />
+            <input
+              type="number"
+              value={minStock}
+              onChange={(e) => setMinStock(e.target.value)}
+            />
           </label>
         </div>
 
@@ -172,7 +193,7 @@ export default function NewItemModal({
         <div className="cardActions">
           <div className="muted">Enhet er nå låst til stk for å holde det enkelt.</div>
           <button className="btn btnPrimary" type="button" onClick={handleSave}>
-            {item ? "Lagre endringer" : "Lagre vare"}
+            {isEdit ? "Lagre endringer" : "Lagre vare"}
           </button>
         </div>
       </div>
