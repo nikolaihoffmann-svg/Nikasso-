@@ -1,6 +1,9 @@
 import type {
   AppBackup,
   Customer,
+  DebtDraft,
+  DebtPayment,
+  DebtRecord,
   InventoryItem,
   ItemCategory,
   ItemUnit,
@@ -17,6 +20,7 @@ const ITEMS_KEY = "nikasso_items_v2";
 const CUSTOMERS_KEY = "nikasso_customers_v2";
 const SALES_KEY = "nikasso_sales_v2";
 const PURCHASES_KEY = "nikasso_purchases_v2";
+const DEBTS_KEY = "nikasso_debts_v1";
 const SALDO_KEY = "nikasso_saldo_v2";
 const THEME_KEY = "nikasso_theme_v2";
 
@@ -60,9 +64,7 @@ export function fmtKr(n: number): string {
 
 function normalizeCategory(value: unknown): ItemCategory {
   const v = String(value ?? "").trim();
-  if (v === "Deler" || v === "Forbruk" || v === "Utstyr" || v === "Annet") {
-    return v;
-  }
+  if (v === "Deler" || v === "Forbruk" || v === "Utstyr" || v === "Annet") return v;
   if (v === "Olje") return "Forbruk";
   return "Annet";
 }
@@ -117,6 +119,10 @@ function writeCustomers(customers: Customer[]): void {
   writeJson(CUSTOMERS_KEY, customers);
 }
 
+function writeDebts(debts: DebtRecord[]): void {
+  writeJson(DEBTS_KEY, debts);
+}
+
 export function getTheme(): "dark" | "light" {
   const theme = localStorage.getItem(THEME_KEY);
   return theme === "light" ? "light" : "dark";
@@ -132,6 +138,12 @@ export function getSaldo(): number {
 
 export function setSaldo(value: number): void {
   localStorage.setItem(SALDO_KEY, String(round2(value)));
+}
+
+export function adjustSaldo(delta: number): number {
+  const next = round2(getSaldo() + clampNumber(delta, 0));
+  setSaldo(next);
+  return next;
 }
 
 export function getItems(): InventoryItem[] {
@@ -154,6 +166,12 @@ export function getSales(): SaleRecord[] {
 
 export function getPurchases(): PurchaseRecord[] {
   return readJson<PurchaseRecord[]>(PURCHASES_KEY, []).sort((a, b) =>
+    b.createdAt.localeCompare(a.createdAt)
+  );
+}
+
+export function getDebts(): DebtRecord[] {
+  return readJson<DebtRecord[]>(DEBTS_KEY, []).sort((a, b) =>
     b.createdAt.localeCompare(a.createdAt)
   );
 }
@@ -219,9 +237,7 @@ export function createItem(input: CreateItemInput): InventoryItem {
 export function updateItem(itemId: string, patch: Partial<InventoryItem>): InventoryItem {
   const items = getAllItemsRaw();
   const index = items.findIndex((x) => x.id === itemId);
-  if (index === -1) {
-    throw new Error("Fant ikke varen");
-  }
+  if (index === -1) throw new Error("Fant ikke varen");
 
   const current = items[index];
   const updated: InventoryItem = {
@@ -238,9 +254,7 @@ export function updateItem(itemId: string, patch: Partial<InventoryItem>): Inven
     updatedAt: nowIso(),
   };
 
-  if (!updated.name) {
-    throw new Error("Varen må ha navn");
-  }
+  if (!updated.name) throw new Error("Varen må ha navn");
 
   items[index] = updated;
   writeItems(items);
@@ -254,9 +268,7 @@ export function setItemStock(itemId: string, stock: number): InventoryItem {
 export function adjustItemStock(itemId: string, delta: number): InventoryItem {
   const items = getAllItemsRaw();
   const index = items.findIndex((x) => x.id === itemId);
-  if (index === -1) {
-    throw new Error("Fant ikke varen");
-  }
+  if (index === -1) throw new Error("Fant ikke varen");
 
   const current = items[index];
   const updated: InventoryItem = {
@@ -304,9 +316,7 @@ export function createCustomer(input: CreateCustomerInput): Customer {
   const customers = getCustomers();
   const trimmedName = input.name.trim();
 
-  if (!trimmedName) {
-    throw new Error("Kunden må ha navn");
-  }
+  if (!trimmedName) throw new Error("Kunden må ha navn");
 
   const existing = customers.find(
     (x) => x.name.trim().toLowerCase() === trimmedName.toLowerCase()
@@ -331,9 +341,7 @@ export function createCustomer(input: CreateCustomerInput): Customer {
 export function updateCustomer(customerId: string, patch: Partial<Customer>): Customer {
   const customers = getCustomers();
   const index = customers.findIndex((x) => x.id === customerId);
-  if (index === -1) {
-    throw new Error("Fant ikke kunden");
-  }
+  if (index === -1) throw new Error("Fant ikke kunden");
 
   const current = customers[index];
   const updated: Customer = {
@@ -346,9 +354,7 @@ export function updateCustomer(customerId: string, patch: Partial<Customer>): Cu
     updatedAt: nowIso(),
   };
 
-  if (!updated.name) {
-    throw new Error("Kunden må ha navn");
-  }
+  if (!updated.name) throw new Error("Kunden må ha navn");
 
   customers[index] = updated;
   writeCustomers(customers);
@@ -357,8 +363,10 @@ export function updateCustomer(customerId: string, patch: Partial<Customer>): Cu
 
 export function deleteCustomer(customerId: string): void {
   const sales = getSales().filter((sale) => sale.customerId === customerId);
-  if (sales.length > 0) {
-    throw new Error("Kunden kan ikke slettes fordi den er brukt i salg");
+  const debts = getDebts().filter((debt) => debt.customerId === customerId);
+
+  if (sales.length > 0 || debts.length > 0) {
+    throw new Error("Kunden kan ikke slettes fordi den er brukt i salg eller gjeld");
   }
 
   const customers = getCustomers();
@@ -385,6 +393,18 @@ export function createEmptyPurchase(): PurchaseDraft {
     note: "",
     updateCostMode: "weighted_average",
     lines: [makePurchaseLine()],
+    createdAt: nowIso(),
+  };
+}
+
+export function createEmptyDebt(): DebtDraft {
+  return {
+    id: uid("debt"),
+    customerId: undefined,
+    customerName: "",
+    title: "",
+    note: "",
+    total: 0,
     createdAt: nowIso(),
   };
 }
@@ -531,12 +551,43 @@ export function saveSale(
   return record;
 }
 
+export function updateSale(
+  saleId: string,
+  patch: {
+    customerId?: string;
+    customerName?: string;
+    note?: string;
+  }
+): SaleRecord {
+  const sales = getSales();
+  const index = sales.findIndex((x) => x.id === saleId);
+  if (index === -1) throw new Error("Fant ikke salget");
+
+  const current = sales[index];
+  const updated: SaleRecord = {
+    ...current,
+    customerId: patch.customerId,
+    customerName: patch.customerName,
+    note: patch.note,
+  };
+
+  sales[index] = updated;
+  writeJson(SALES_KEY, sales);
+  return updated;
+}
+
+export function deleteSale(saleId: string): void {
+  const sales = getSales();
+  writeJson(
+    SALES_KEY,
+    sales.filter((sale) => sale.id !== saleId)
+  );
+}
+
 export function addPaymentToSale(saleId: string, amount: number, note?: string): SaleRecord {
   const sales = readJson<SaleRecord[]>(SALES_KEY, []);
   const index = sales.findIndex((x) => x.id === saleId);
-  if (index === -1) {
-    throw new Error("Fant ikke salget");
-  }
+  if (index === -1) throw new Error("Fant ikke salget");
 
   const sale = sales[index];
   const payment: Payment = {
@@ -577,12 +628,127 @@ export function saleProfit(sale: SaleRecord): number {
   return round2(sale.total - cost);
 }
 
+export function saveDebt(
+  draft: DebtDraft,
+  options?: {
+    paymentAmount?: number;
+    paymentNote?: string;
+  }
+): DebtRecord {
+  const debts = getDebts();
+  const initialPayment = round2(clampNumber(options?.paymentAmount, 0));
+
+  const payments: DebtPayment[] =
+    initialPayment > 0
+      ? [
+          {
+            id: uid("dpay"),
+            amount: initialPayment,
+            createdAt: nowIso(),
+            note: options?.paymentNote?.trim() || undefined,
+          },
+        ]
+      : [];
+
+  const total = round2(clampNumber(draft.total, 0));
+
+  const record: DebtRecord = {
+    id: draft.id,
+    customerId: draft.customerId,
+    customerName: draft.customerName,
+    title: draft.title.trim() || "Gjeldspost",
+    note: draft.note?.trim() || undefined,
+    total,
+    payments,
+    paid: debtPaidSum({ total, payments } as DebtRecord) >= total && total > 0,
+    createdAt: draft.createdAt,
+  };
+
+  debts.unshift(record);
+  writeDebts(debts);
+  return record;
+}
+
+export function updateDebt(
+  debtId: string,
+  patch: {
+    customerId?: string;
+    customerName?: string;
+    title?: string;
+    note?: string;
+    total?: number;
+  }
+): DebtRecord {
+  const debts = getDebts();
+  const index = debts.findIndex((x) => x.id === debtId);
+  if (index === -1) throw new Error("Fant ikke gjeldsposten");
+
+  const current = debts[index];
+  const total = round2(clampNumber(patch.total ?? current.total, 0));
+
+  const updated: DebtRecord = {
+    ...current,
+    customerId: patch.customerId,
+    customerName: patch.customerName,
+    title: (patch.title ?? current.title).trim() || "Gjeldspost",
+    note: patch.note === "" ? undefined : (patch.note ?? current.note),
+    total,
+    paid: debtPaidSum({ ...current, total }) >= total && total > 0,
+  };
+
+  debts[index] = updated;
+  writeDebts(debts);
+  return updated;
+}
+
+export function deleteDebt(debtId: string): void {
+  const debts = getDebts();
+  writeDebts(debts.filter((debt) => debt.id !== debtId));
+}
+
+export function addPaymentToDebt(debtId: string, amount: number, note?: string): DebtRecord {
+  const debts = getDebts();
+  const index = debts.findIndex((x) => x.id === debtId);
+  if (index === -1) throw new Error("Fant ikke gjeldsposten");
+
+  const debt = debts[index];
+  const payment: DebtPayment = {
+    id: uid("dpay"),
+    amount: round2(clampNumber(amount, 0)),
+    createdAt: nowIso(),
+    note: note?.trim() || undefined,
+  };
+
+  const payments = [...debt.payments, payment];
+  const updated: DebtRecord = {
+    ...debt,
+    payments,
+    paid: debtPaidSum({ ...debt, payments }) >= debt.total,
+  };
+
+  debts[index] = updated;
+  writeDebts(debts);
+  return updated;
+}
+
+export function debtPaidSum(debt: DebtRecord): number {
+  return round2(debt.payments.reduce((sum, p) => sum + Number(p.amount || 0), 0));
+}
+
+export function debtRemaining(debt: DebtRecord): number {
+  return Math.max(0, round2(debt.total - debtPaidSum(debt)));
+}
+
 export function lowStockItems(): InventoryItem[] {
   return getItems().filter((item) => item.stock <= item.minStock);
 }
 
 export function customerSales(customerId: string): SaleRecord[] {
   return getSales().filter((sale) => sale.customerId === customerId);
+}
+
+export function customerDebts(customerId: string): DebtRecord[] {
+  return getDebts().filter((debt) => debt.customerId === customerId);
 }
 
 export function customerTotalBought(customerId: string): number {
@@ -593,9 +759,35 @@ export function customerTotalRemaining(customerId: string): number {
   return round2(customerSales(customerId).reduce((sum, sale) => sum + saleRemaining(sale), 0));
 }
 
+export function customerDebtRemaining(customerId: string): number {
+  return round2(customerDebts(customerId).reduce((sum, debt) => sum + debtRemaining(debt), 0));
+}
+
+export function totalSalesOutstanding(): number {
+  return round2(getSales().reduce((sum, sale) => sum + saleRemaining(sale), 0));
+}
+
+export function totalDebtOutstanding(): number {
+  return round2(getDebts().reduce((sum, debt) => sum + debtRemaining(debt), 0));
+}
+
+export function totalReceivables(): number {
+  return round2(totalSalesOutstanding() + totalDebtOutstanding());
+}
+
+export function inventoryValue(items: InventoryItem[] = getItems()): number {
+  return round2(
+    items.reduce((sum, item) => sum + Number(item.costPrice || 0) * Number(item.stock || 0), 0)
+  );
+}
+
+export function projectedTotalValue(): number {
+  return round2(getSaldo() + totalReceivables() + inventoryValue());
+}
+
 export function exportAllData(): AppBackup {
   return {
-    version: 2,
+    version: 3,
     exportedAt: nowIso(),
     theme: getTheme(),
     saldo: getSaldo(),
@@ -603,6 +795,7 @@ export function exportAllData(): AppBackup {
     customers: getCustomers(),
     sales: getSales(),
     purchases: getPurchases(),
+    debts: getDebts(),
   };
 }
 
@@ -624,6 +817,7 @@ export function clearAllData(): void {
   localStorage.removeItem(CUSTOMERS_KEY);
   localStorage.removeItem(SALES_KEY);
   localStorage.removeItem(PURCHASES_KEY);
+  localStorage.removeItem(DEBTS_KEY);
   localStorage.removeItem(SALDO_KEY);
 }
 
@@ -715,10 +909,32 @@ export function importBackupObject(input: unknown): void {
     ? data.purchases
     : [];
 
+  const mappedDebts: DebtRecord[] = Array.isArray(data.debts)
+    ? data.debts.map((debt) => ({
+        id: debt.id ?? uid("debt"),
+        customerId: debt.customerId,
+        customerName: debt.customerName,
+        title: debt.title ?? "Gjeldspost",
+        note: debt.note,
+        total: round2(clampNumber(debt.total, 0)),
+        payments: Array.isArray(debt.payments)
+          ? debt.payments.map((p) => ({
+              id: p.id ?? uid("dpay"),
+              amount: round2(clampNumber(p.amount, 0)),
+              createdAt: p.createdAt ?? nowIso(),
+              note: p.note,
+            }))
+          : [],
+        paid: Boolean(debt.paid),
+        createdAt: debt.createdAt ?? nowIso(),
+      }))
+    : [];
+
   writeItems(mappedItems);
   writeCustomers(mappedCustomers);
   writeJson(SALES_KEY, mappedSales);
   writeJson(PURCHASES_KEY, mappedPurchases);
+  writeDebts(mappedDebts);
   setSaldo(clampNumber(data.saldo, 0));
 
   if (data.theme === "dark" || data.theme === "light") {
@@ -769,5 +985,9 @@ export function ensureSeedData(): void {
 
   if (!localStorage.getItem(SALDO_KEY)) {
     setSaldo(0);
+  }
+
+  if (!localStorage.getItem(DEBTS_KEY)) {
+    writeDebts([]);
   }
 }
