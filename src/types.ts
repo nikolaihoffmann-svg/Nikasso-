@@ -36,11 +36,21 @@ export type Customer = {
   updatedAt: string;
 };
 
+export type PaymentMethod =
+  | "vipps"
+  | "revolut"
+  | "kontant"
+  | "bytte"
+  | "bankoverforing"
+  | "annet";
+
 export type Payment = {
   id: string;
   amount: number;
   createdAt: string;
   note?: string;
+  method?: PaymentMethod;
+  methodLabel?: string;
 };
 
 export type SaleLine = {
@@ -116,6 +126,8 @@ export type DebtPayment = {
   amount: number;
   createdAt: string;
   note?: string;
+  method?: PaymentMethod;
+  methodLabel?: string;
 };
 
 export type DebtRecord = {
@@ -140,6 +152,13 @@ export type DebtDraft = {
   createdAt: string;
 };
 
+export type PaymentMethodStat = {
+  key: PaymentMethod;
+  label: string;
+  amount: number;
+  count: number;
+};
+
 export type AppBackup = {
   version: number;
   exportedAt: string;
@@ -149,5 +168,5 @@ export type AppBackup = {
   customers: Customer[];
   sales: SaleRecord[];
   purchases: PurchaseRecord[];
-  debts?: DebtRecord[];
+  debts: DebtRecord[];
 };
