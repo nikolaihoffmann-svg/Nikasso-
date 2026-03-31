@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import NewCustomerModal from "../components/NewCustomerModal";
 import {
+  customerDebtRemaining,
+  customerDebts,
   customerSales,
   customerTotalBought,
   customerTotalRemaining,
+  debtRemaining,
   deleteCustomer,
   fmtKr,
   getCustomers,
@@ -19,7 +22,6 @@ export default function Kunder() {
   const [selectedId, setSelectedId] = useState<string>("");
   const [query, setQuery] = useState("");
   const [filterMode, setFilterMode] = useState<FilterMode>("skyldig");
-  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [openNew, setOpenNew] = useState(false);
 
   function refresh(): void {
@@ -27,11 +29,12 @@ export default function Kunder() {
     setCustomers(all);
 
     if (!selectedId && all.length > 0) {
-      const sorted = [...all].sort(
-        (a, b) => customerTotalRemaining(b.id) - customerTotalRemaining(a.id)
-      );
-      const firstWithDebt = sorted.find((x) => customerTotalRemaining(x.id) > 0);
-      setSelectedId(firstWithDebt?.id ?? sorted[0]?.id ?? "");
+      const sorted = [...all].sort((a, b) => {
+        const aTotal = customerTotalRemaining(a.id) + customerDebtRemaining(a.id);
+        const bTotal = customerTotalRemaining(b.id) + customerDebtRemaining(b.id);
+        return bTotal - aTotal;
+      });
+      setSelectedId(sorted[0]?.id ?? "");
       return;
     }
 
@@ -47,12 +50,17 @@ export default function Kunder() {
   const filteredCustomers = useMemo(() => {
     const q = query.trim().toLowerCase();
 
-    let base = [...customers].sort(
-      (a, b) => customerTotalRemaining(b.id) - customerTotalRemaining(a.id)
-    );
+    let base = [...customers].sort((a, b) => {
+      const aTotal = customerTotalRemaining(a.id) + customerDebtRemaining(a.id);
+      const bTotal = customerTotalRemaining(b.id) + customerDebtRemaining(b.id);
+      return bTotal - aTotal;
+    });
 
     if (filterMode === "skyldig") {
-      base = base.filter((customer) => customerTotalRemaining(customer.id) > 0);
+      base = base.filter(
+        (customer) =>
+          customerTotalRemaining(customer.id) > 0 || customerDebtRemaining(customer.id) > 0
+      );
     }
 
     return base.filter((customer) => {
@@ -80,12 +88,19 @@ export default function Kunder() {
     return customerSales(selectedCustomer.id);
   }, [selectedCustomer]);
 
+  const selectedDebts = useMemo(() => {
+    if (!selectedCustomer) return [];
+    return customerDebts(selectedCustomer.id);
+  }, [selectedCustomer]);
+
   const totalCustomers = customers.length;
-  const customersWithDebt = customers.filter(
-    (customer) => customerTotalRemaining(customer.id) > 0
+  const customersWithOpen = customers.filter(
+    (customer) =>
+      customerTotalRemaining(customer.id) > 0 || customerDebtRemaining(customer.id) > 0
   ).length;
   const totalOutstanding = customers.reduce(
-    (sum, customer) => sum + customerTotalRemaining(customer.id),
+    (sum, customer) =>
+      sum + customerTotalRemaining(customer.id) + customerDebtRemaining(customer.id),
     0
   );
 
@@ -108,7 +123,7 @@ export default function Kunder() {
       <div className="rowBetween" style={{ marginBottom: 18 }}>
         <div>
           <h1 className="pageTitle">Kunder</h1>
-          <p className="pageLead">Viser skyldige kunder først, så du slipper rot.</p>
+          <p className="pageLead">Viser åpne beløp først, både salg og egen gjeld.</p>
         </div>
 
         <button className="btn btnPrimary" type="button" onClick={() => setOpenNew(true)}>
@@ -123,12 +138,12 @@ export default function Kunder() {
         </div>
 
         <div className="statCard">
-          <div className="statLabel">Kunder med utestående</div>
-          <div className="statValue">{customersWithDebt}</div>
+          <div className="statLabel">Kunder med åpne beløp</div>
+          <div className="statValue">{customersWithOpen}</div>
         </div>
 
         <div className="statCard">
-          <div className="statLabel">Totalt utestående</div>
+          <div className="statLabel">Totalt til gode</div>
           <div className="statValue debtText">{fmtKr(totalOutstanding)}</div>
         </div>
       </div>
@@ -144,7 +159,7 @@ export default function Kunder() {
                 className={filterMode === "skyldig" ? "btn btnPrimary" : "btn"}
                 onClick={() => setFilterMode("skyldig")}
               >
-                Skyldig
+                Åpne beløp
               </button>
               <button
                 type="button"
@@ -170,7 +185,9 @@ export default function Kunder() {
               <div className="emptyText">Ingen kunder funnet.</div>
             ) : (
               filteredCustomers.map((customer) => {
-                const outstanding = customerTotalRemaining(customer.id);
+                const salesOpen = customerTotalRemaining(customer.id);
+                const debtOpen = customerDebtRemaining(customer.id);
+                const totalOpen = salesOpen + debtOpen;
                 const isSelected = selectedId === customer.id;
 
                 return (
@@ -180,10 +197,10 @@ export default function Kunder() {
                     onClick={() => setSelectedId(customer.id)}
                     className={
                       isSelected
-                        ? outstanding > 0
+                        ? totalOpen > 0
                           ? "customerButton active customerButtonDebt"
                           : "customerButton active"
-                        : outstanding > 0
+                        : totalOpen > 0
                         ? "customerButton customerButtonDebt"
                         : "customerButton"
                     }
@@ -194,10 +211,15 @@ export default function Kunder() {
                         <div className="customerMeta">
                           {customer.phone || customer.address || "Ingen ekstra info"}
                         </div>
+                        {totalOpen > 0 ? (
+                          <div className="featureRowSub" style={{ marginTop: 6 }}>
+                            Salg: {fmtKr(salesOpen)} • Gjeld: {fmtKr(debtOpen)}
+                          </div>
+                        ) : null}
                       </div>
 
-                      <div className={outstanding > 0 ? "badge badgeDebt" : "badge"}>
-                        {fmtKr(outstanding)}
+                      <div className={totalOpen > 0 ? "badge badgeDebt" : "badge"}>
+                        {fmtKr(totalOpen)}
                       </div>
                     </div>
                   </button>
@@ -226,12 +248,14 @@ export default function Kunder() {
 
                 <div
                   className={
-                    customerTotalRemaining(selectedCustomer.id) > 0
+                    customerTotalRemaining(selectedCustomer.id) + customerDebtRemaining(selectedCustomer.id) > 0
                       ? "badge badgeDebt"
                       : "badge badgeSuccess"
                   }
                 >
-                  {customerTotalRemaining(selectedCustomer.id) > 0 ? "Utestående" : "Ajour"}
+                  {customerTotalRemaining(selectedCustomer.id) + customerDebtRemaining(selectedCustomer.id) > 0
+                    ? "Åpne beløp"
+                    : "Ajour"}
                 </div>
               </div>
 
@@ -242,15 +266,17 @@ export default function Kunder() {
                 </div>
 
                 <div className="infoCard">
-                  <div className="infoLabel">Utestående</div>
+                  <div className="infoLabel">Utestående salg</div>
                   <div className="infoValue debtText">
                     {fmtKr(customerTotalRemaining(selectedCustomer.id))}
                   </div>
                 </div>
 
                 <div className="infoCard">
-                  <div className="infoLabel">Antall salg</div>
-                  <div className="infoValue">{selectedSales.length}</div>
+                  <div className="infoLabel">Gjeld / lån</div>
+                  <div className="infoValue debtText">
+                    {fmtKr(customerDebtRemaining(selectedCustomer.id))}
+                  </div>
                 </div>
               </div>
 
@@ -262,22 +288,14 @@ export default function Kunder() {
               ) : null}
 
               <div className="cardActions" style={{ marginTop: 0, marginBottom: 18 }}>
-                <button
-                  className="btn"
-                  type="button"
-                  onClick={() => setEditingCustomer(selectedCustomer)}
-                >
-                  Rediger kunde
-                </button>
-
                 <button className="btn btnDanger" type="button" onClick={handleDeleteSelected}>
                   Slett kunde
                 </button>
               </div>
 
-              <h3 className="sectionTitle">Historikk</h3>
+              <h3 className="sectionTitle">Utestående fra salg</h3>
 
-              <div className="historyList">
+              <div className="historyList" style={{ marginBottom: 18 }}>
                 {selectedSales.length === 0 ? (
                   <div className="emptyText">Ingen salg på denne kunden enda.</div>
                 ) : (
@@ -304,6 +322,34 @@ export default function Kunder() {
                   ))
                 )}
               </div>
+
+              <h3 className="sectionTitle">Gjeld / lån</h3>
+
+              <div className="historyList">
+                {selectedDebts.length === 0 ? (
+                  <div className="emptyText">Ingen gjeldsposter på denne kunden.</div>
+                ) : (
+                  selectedDebts.map((debt) => (
+                    <div key={debt.id} className="infoCard">
+                      <div className="rowBetween">
+                        <div className="customerMain">
+                          <div style={{ fontWeight: 700 }}>{debt.title}</div>
+                          <div className="muted" style={{ marginTop: 6 }}>
+                            {new Date(debt.createdAt).toLocaleString("no-NO")} • Rest: {fmtKr(debtRemaining(debt))}
+                          </div>
+                        </div>
+
+                        <div style={{ textAlign: "right" }}>
+                          <div style={{ fontWeight: 800 }}>{fmtKr(debt.total)}</div>
+                          <div className="muted" style={{ marginTop: 6 }}>
+                            {debt.note || "Ingen notat"}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
             </>
           )}
         </div>
@@ -313,16 +359,6 @@ export default function Kunder() {
         open={openNew}
         onClose={() => setOpenNew(false)}
         onCreated={() => refresh()}
-      />
-
-      <NewCustomerModal
-        open={Boolean(editingCustomer)}
-        customer={editingCustomer}
-        onClose={() => setEditingCustomer(null)}
-        onCreated={() => {
-          setEditingCustomer(null);
-          refresh();
-        }}
       />
     </div>
   );
