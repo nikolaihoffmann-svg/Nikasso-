@@ -8,16 +8,27 @@ import {
   deleteDebt,
   fmtKr,
   getDebts,
+  paymentMethodLabel,
   saveDebt,
   updateDebt,
 } from "../app/storage";
-import type { DebtDraft, DebtRecord } from "../types";
+import type { DebtDraft, DebtRecord, PaymentMethod } from "../types";
+
+const QUICK_METHODS: PaymentMethod[] = [
+  "vipps",
+  "revolut",
+  "kontant",
+  "bytte",
+  "bankoverforing",
+];
 
 export default function Gjeld() {
   const [draft, setDraft] = useState<DebtDraft>(createEmptyDebt());
   const [message, setMessage] = useState("");
   const [paymentAmount, setPaymentAmount] = useState("0");
   const [paymentNote, setPaymentNote] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("vipps");
+  const [manualMethodLabel, setManualMethodLabel] = useState("");
 
   const [debts, setDebts] = useState<DebtRecord[]>([]);
   const [query, setQuery] = useState("");
@@ -30,6 +41,8 @@ export default function Gjeld() {
   const [editNote, setEditNote] = useState("");
   const [amounts, setAmounts] = useState<Record<string, string>>({});
   const [notes, setNotes] = useState<Record<string, string>>({});
+  const [methods, setMethods] = useState<Record<string, PaymentMethod>>({});
+  const [manualLabels, setManualLabels] = useState<Record<string, string>>({});
 
   function refresh(text?: string): void {
     setDebts(getDebts());
@@ -44,11 +57,15 @@ export default function Gjeld() {
     saveDebt(draft, {
       paymentAmount: Number(paymentAmount || 0),
       paymentNote,
+      paymentMethod,
+      paymentMethodLabel: paymentMethod === "annet" ? manualMethodLabel : undefined,
     });
 
     setDraft(createEmptyDebt());
     setPaymentAmount("0");
     setPaymentNote("");
+    setPaymentMethod("vipps");
+    setManualMethodLabel("");
     refresh("Gjeld lagret");
   }
 
@@ -72,9 +89,20 @@ export default function Gjeld() {
     const amount = Number(amounts[debtId] || 0);
     if (amount <= 0) return;
 
-    addPaymentToDebt(debtId, amount, notes[debtId] || "Registrert betaling");
+    const method = methods[debtId] ?? "vipps";
+
+    addPaymentToDebt(
+      debtId,
+      amount,
+      notes[debtId] || "Registrert betaling",
+      method,
+      method === "annet" ? manualLabels[debtId] : undefined
+    );
+
     setAmounts((prev) => ({ ...prev, [debtId]: "" }));
     setNotes((prev) => ({ ...prev, [debtId]: "" }));
+    setMethods((prev) => ({ ...prev, [debtId]: "vipps" }));
+    setManualLabels((prev) => ({ ...prev, [debtId]: "" }));
     refresh("Betaling registrert");
   }
 
@@ -136,7 +164,7 @@ export default function Gjeld() {
             <input
               value={draft.title}
               onChange={(e) => setDraft((prev) => ({ ...prev, title: e.target.value }))}
-              placeholder="F.eks. Lån / forskudd / privat utlegg"
+              placeholder="F.eks. lån, forskudd, privat utlegg"
             />
           </label>
 
@@ -176,10 +204,44 @@ export default function Gjeld() {
             <input
               value={paymentNote}
               onChange={(e) => setPaymentNote(e.target.value)}
-              placeholder="Vipps, kontant, bank..."
+              placeholder="Valgfritt notat..."
             />
           </label>
         </div>
+
+        <div style={{ marginTop: 14 }}>
+          <div className="muted" style={{ marginBottom: 8 }}>Hurtigvalg betalingsmåte</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {QUICK_METHODS.map((method) => (
+              <button
+                key={method}
+                type="button"
+                className={paymentMethod === method ? "btn btnPrimary" : "btn"}
+                onClick={() => setPaymentMethod(method)}
+              >
+                {paymentMethodLabel(method)}
+              </button>
+            ))}
+            <button
+              type="button"
+              className={paymentMethod === "annet" ? "btn btnPrimary" : "btn"}
+              onClick={() => setPaymentMethod("annet")}
+            >
+              Annet
+            </button>
+          </div>
+        </div>
+
+        {paymentMethod === "annet" ? (
+          <label className="label" style={{ marginTop: 14 }}>
+            <span>Manuell betalingsmåte</span>
+            <input
+              value={manualMethodLabel}
+              onChange={(e) => setManualMethodLabel(e.target.value)}
+              placeholder="F.eks. Stripe, PayPal..."
+            />
+          </label>
+        ) : null}
 
         <div className="cardActions">
           <div className="saleSummary">
@@ -330,6 +392,34 @@ export default function Gjeld() {
                       </div>
                     ) : null}
 
+                    <div style={{ marginBottom: 12 }}>
+                      <div className="featureRowSub" style={{ marginBottom: 8 }}>
+                        Betalinger:
+                      </div>
+
+                      <div className="featureList">
+                        {debt.payments.length === 0 ? (
+                          <div className="emptyText">Ingen betalinger registrert enda.</div>
+                        ) : (
+                          debt.payments.map((payment) => (
+                            <div key={payment.id} className="featureRow">
+                              <div className="customerMain">
+                                <div className="featureRowTitle">
+                                  {paymentMethodLabel(payment.method, payment.methodLabel)}
+                                </div>
+                                <div className="featureRowSub">
+                                  {new Date(payment.createdAt).toLocaleString("no-NO")}
+                                  {payment.note ? ` • ${payment.note}` : ""}
+                                </div>
+                              </div>
+
+                              <div className="featureRowRight">{fmtKr(payment.amount)}</div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+
                     <div className="grid2">
                       <label className="label">
                         <span>Registrer betaling</span>
@@ -350,10 +440,46 @@ export default function Gjeld() {
                           onChange={(e) =>
                             setNotes((prev) => ({ ...prev, [debt.id]: e.target.value }))
                           }
-                          placeholder="Vipps, bank, kontant..."
+                          placeholder="Valgfritt notat..."
                         />
                       </label>
                     </div>
+
+                    <div style={{ marginTop: 14 }}>
+                      <div className="muted" style={{ marginBottom: 8 }}>Betalingsmåte</div>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        {QUICK_METHODS.map((method) => (
+                          <button
+                            key={method}
+                            type="button"
+                            className={(methods[debt.id] ?? "vipps") === method ? "btn btnPrimary" : "btn"}
+                            onClick={() => setMethods((prev) => ({ ...prev, [debt.id]: method }))}
+                          >
+                            {paymentMethodLabel(method)}
+                          </button>
+                        ))}
+                        <button
+                          type="button"
+                          className={(methods[debt.id] ?? "vipps") === "annet" ? "btn btnPrimary" : "btn"}
+                          onClick={() => setMethods((prev) => ({ ...prev, [debt.id]: "annet" }))}
+                        >
+                          Annet
+                        </button>
+                      </div>
+                    </div>
+
+                    {(methods[debt.id] ?? "vipps") === "annet" ? (
+                      <label className="label" style={{ marginTop: 12 }}>
+                        <span>Manuell betalingsmåte</span>
+                        <input
+                          value={manualLabels[debt.id] ?? ""}
+                          onChange={(e) =>
+                            setManualLabels((prev) => ({ ...prev, [debt.id]: e.target.value }))
+                          }
+                          placeholder="F.eks. Stripe, PayPal..."
+                        />
+                      </label>
+                    ) : null}
 
                     <div className="cardActions">
                       <div className="muted">Bruk dette for avdrag eller full nedbetaling.</div>
