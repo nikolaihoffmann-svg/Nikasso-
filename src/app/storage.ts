@@ -47,9 +47,22 @@ function clampNumber(value: unknown, fallback = 0): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
+export function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+export function fmtKr(n: number): string {
+  return `${round2(n).toLocaleString("no-NO", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })} kr`;
+}
+
 function normalizeCategory(value: unknown): ItemCategory {
   const v = String(value ?? "").trim();
-  if (v === "Deler" || v === "Forbruk" || v === "Utstyr" || v === "Annet") return v;
+  if (v === "Deler" || v === "Forbruk" || v === "Utstyr" || v === "Annet") {
+    return v;
+  }
   if (v === "Olje") return "Forbruk";
   return "Annet";
 }
@@ -102,17 +115,6 @@ function writeItems(items: InventoryItem[]): void {
 
 function writeCustomers(customers: Customer[]): void {
   writeJson(CUSTOMERS_KEY, customers);
-}
-
-export function round2(n: number): number {
-  return Math.round(n * 100) / 100;
-}
-
-export function fmtKr(n: number): string {
-  return `${round2(n).toLocaleString("no-NO", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })} kr`;
 }
 
 export function getTheme(): "dark" | "light" {
@@ -217,7 +219,9 @@ export function createItem(input: CreateItemInput): InventoryItem {
 export function updateItem(itemId: string, patch: Partial<InventoryItem>): InventoryItem {
   const items = getAllItemsRaw();
   const index = items.findIndex((x) => x.id === itemId);
-  if (index === -1) throw new Error("Fant ikke varen");
+  if (index === -1) {
+    throw new Error("Fant ikke varen");
+  }
 
   const current = items[index];
   const updated: InventoryItem = {
@@ -234,7 +238,9 @@ export function updateItem(itemId: string, patch: Partial<InventoryItem>): Inven
     updatedAt: nowIso(),
   };
 
-  if (!updated.name) throw new Error("Varen må ha navn");
+  if (!updated.name) {
+    throw new Error("Varen må ha navn");
+  }
 
   items[index] = updated;
   writeItems(items);
@@ -248,7 +254,9 @@ export function setItemStock(itemId: string, stock: number): InventoryItem {
 export function adjustItemStock(itemId: string, delta: number): InventoryItem {
   const items = getAllItemsRaw();
   const index = items.findIndex((x) => x.id === itemId);
-  if (index === -1) throw new Error("Fant ikke varen");
+  if (index === -1) {
+    throw new Error("Fant ikke varen");
+  }
 
   const current = items[index];
   const updated: InventoryItem = {
@@ -296,7 +304,9 @@ export function createCustomer(input: CreateCustomerInput): Customer {
   const customers = getCustomers();
   const trimmedName = input.name.trim();
 
-  if (!trimmedName) throw new Error("Kunden må ha navn");
+  if (!trimmedName) {
+    throw new Error("Kunden må ha navn");
+  }
 
   const existing = customers.find(
     (x) => x.name.trim().toLowerCase() === trimmedName.toLowerCase()
@@ -321,7 +331,9 @@ export function createCustomer(input: CreateCustomerInput): Customer {
 export function updateCustomer(customerId: string, patch: Partial<Customer>): Customer {
   const customers = getCustomers();
   const index = customers.findIndex((x) => x.id === customerId);
-  if (index === -1) throw new Error("Fant ikke kunden");
+  if (index === -1) {
+    throw new Error("Fant ikke kunden");
+  }
 
   const current = customers[index];
   const updated: Customer = {
@@ -334,7 +346,9 @@ export function updateCustomer(customerId: string, patch: Partial<Customer>): Cu
     updatedAt: nowIso(),
   };
 
-  if (!updated.name) throw new Error("Kunden må ha navn");
+  if (!updated.name) {
+    throw new Error("Kunden må ha navn");
+  }
 
   customers[index] = updated;
   writeCustomers(customers);
@@ -520,7 +534,9 @@ export function saveSale(
 export function addPaymentToSale(saleId: string, amount: number, note?: string): SaleRecord {
   const sales = readJson<SaleRecord[]>(SALES_KEY, []);
   const index = sales.findIndex((x) => x.id === saleId);
-  if (index === -1) throw new Error("Fant ikke salget");
+  if (index === -1) {
+    throw new Error("Fant ikke salget");
+  }
 
   const sale = sales[index];
   const payment: Payment = {
