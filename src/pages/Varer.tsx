@@ -238,14 +238,14 @@ export default function Varer() {
       <NewItemModal
         open={openNew}
         onClose={() => setOpenNew(false)}
-        onSaved={() => refresh()}
+        onCreated={() => refresh()}
       />
 
       <NewItemModal
         open={Boolean(editingItem)}
         item={editingItem}
         onClose={() => setEditingItem(null)}
-        onSaved={() => {
+        onCreated={() => {
           setEditingItem(null);
           refresh();
         }}
