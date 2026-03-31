@@ -6,10 +6,12 @@ import {
   getCustomers,
   getDebts,
   getItems,
+  getPaymentMethodStats,
   getPurchases,
   getSaldo,
   getSales,
   inventoryValue,
+  paymentMethodLabel,
   projectedTotalValue,
   salePaidSum,
   saleProfit,
@@ -82,6 +84,7 @@ export default function Oversikt() {
   const sales = useMemo(() => getSales(), []);
   const purchases = useMemo(() => getPurchases(), []);
   const debts = useMemo(() => getDebts(), []);
+  const paymentStats = useMemo(() => getPaymentMethodStats(), []);
   const saldo = useMemo(() => getSaldo(), []);
 
   const totalRevenue = sales.reduce((sum, sale) => sum + Number(sale.total || 0), 0);
@@ -146,6 +149,8 @@ export default function Oversikt() {
   const maxDebtBars = Math.max(...debtBars.map((x) => x.value), 1);
   const bestSale = saleTotals.length ? Math.max(...saleTotals) : 0;
   const lowestSale = saleTotals.length ? Math.min(...saleTotals) : 0;
+
+  const maxPaymentMethodAmount = Math.max(...paymentStats.map((x) => x.amount), 1);
 
   return (
     <div>
@@ -387,6 +392,33 @@ export default function Oversikt() {
               </div>
             ))}
           </div>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 16 }}>
+        <h2 className="sectionTitle">Betalingsmåter</h2>
+
+        <div className="miniChart">
+          {paymentStats.filter((x) => x.count > 0).length === 0 ? (
+            <div className="emptyText">Ingen betalinger registrert enda.</div>
+          ) : (
+            paymentStats
+              .filter((x) => x.count > 0)
+              .map((row) => (
+                <div key={row.key} className="chartRow">
+                  <div className="chartLabel">
+                    {paymentMethodLabel(row.key)} ({row.count})
+                  </div>
+                  <div className="chartBarTrack">
+                    <div
+                      className="chartBarFill chartBarBlue"
+                      style={{ width: `${(row.amount / maxPaymentMethodAmount) * 100}%` }}
+                    />
+                  </div>
+                  <div className="chartValue">{fmtKr(row.amount)}</div>
+                </div>
+              ))
+          )}
         </div>
       </div>
 
