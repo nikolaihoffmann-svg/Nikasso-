@@ -1,64 +1,208 @@
 import { useEffect, useMemo, useState } from "react";
-import { addPaymentToSale, fmtKr, getSales, saleRemaining } from "../app/storage";
-import type { SaleRecord } from "../types";
+import CustomerPickerWithCreate from "../components/CustomerPickerWithCreate";
+import {
+  addPaymentToDebt,
+  createEmptyDebt,
+  debtPaidSum,
+  debtRemaining,
+  deleteDebt,
+  fmtKr,
+  getDebts,
+  saveDebt,
+  updateDebt,
+} from "../app/storage";
+import type { DebtDraft, DebtRecord } from "../types";
 
 export default function Gjeld() {
-  const [sales, setSales] = useState<SaleRecord[]>([]);
-  const [amounts, setAmounts] = useState<Record<string, string>>({});
-  const [query, setQuery] = useState("");
+  const [draft, setDraft] = useState<DebtDraft>(createEmptyDebt());
+  const [message, setMessage] = useState("");
+  const [paymentAmount, setPaymentAmount] = useState("0");
+  const [paymentNote, setPaymentNote] = useState("");
 
-  function refresh(): void {
-    setSales(getSales());
+  const [debts, setDebts] = useState<DebtRecord[]>([]);
+  const [query, setQuery] = useState("");
+  const [expandedId, setExpandedId] = useState("");
+  const [editId, setEditId] = useState("");
+  const [editTitle, setEditTitle] = useState("");
+  const [editCustomerId, setEditCustomerId] = useState<string | undefined>(undefined);
+  const [editCustomerName, setEditCustomerName] = useState("");
+  const [editTotal, setEditTotal] = useState("0");
+  const [editNote, setEditNote] = useState("");
+  const [amounts, setAmounts] = useState<Record<string, string>>({});
+  const [notes, setNotes] = useState<Record<string, string>>({});
+
+  function refresh(text?: string): void {
+    setDebts(getDebts());
+    if (text) setMessage(`${text} ${Date.now()}`);
   }
 
   useEffect(() => {
     refresh();
   }, []);
 
-  const receivables = useMemo(() => {
+  function handleSaveDebt(): void {
+    saveDebt(draft, {
+      paymentAmount: Number(paymentAmount || 0),
+      paymentNote,
+    });
+
+    setDraft(createEmptyDebt());
+    setPaymentAmount("0");
+    setPaymentNote("");
+    refresh("Gjeld lagret");
+  }
+
+  const filteredDebts = useMemo(() => {
     const q = query.trim().toLowerCase();
+    if (!q) return debts;
 
-    return sales
-      .map((sale) => ({
-        sale,
-        remaining: saleRemaining(sale),
-      }))
-      .filter((x) => x.remaining > 0)
-      .filter((x) => {
-        if (!q) return true;
-        return (x.sale.customerName || "kontantsalg").toLowerCase().includes(q);
-      })
-      .sort((a, b) => b.remaining - a.remaining);
-  }, [sales, query]);
+    return debts.filter((debt) => {
+      const customerHit = (debt.customerName || "").toLowerCase().includes(q);
+      const titleHit = (debt.title || "").toLowerCase().includes(q);
+      const noteHit = (debt.note || "").toLowerCase().includes(q);
+      return customerHit || titleHit || noteHit;
+    });
+  }, [debts, query]);
 
-  const totalOpen = receivables.reduce((sum, x) => sum + x.remaining, 0);
-  const totalCount = receivables.length;
-  const biggestOpen = receivables[0]?.remaining ?? 0;
+  const totalOpen = filteredDebts.reduce((sum, debt) => sum + debtRemaining(debt), 0);
+  const totalCount = filteredDebts.filter((debt) => debtRemaining(debt) > 0).length;
+  const biggestOpen = filteredDebts.reduce((max, debt) => Math.max(max, debtRemaining(debt)), 0);
 
-  function handlePay(saleId: string): void {
-    const amount = Number(amounts[saleId] || 0);
+  function handlePay(debtId: string): void {
+    const amount = Number(amounts[debtId] || 0);
     if (amount <= 0) return;
 
-    addPaymentToSale(saleId, amount, "Registrert fra Gjeld");
-    setAmounts((prev) => ({ ...prev, [saleId]: "" }));
-    refresh();
+    addPaymentToDebt(debtId, amount, notes[debtId] || "Registrert betaling");
+    setAmounts((prev) => ({ ...prev, [debtId]: "" }));
+    setNotes((prev) => ({ ...prev, [debtId]: "" }));
+    refresh("Betaling registrert");
+  }
+
+  function startEdit(debt: DebtRecord): void {
+    setEditId(debt.id);
+    setEditTitle(debt.title);
+    setEditCustomerId(debt.customerId);
+    setEditCustomerName(debt.customerName || "");
+    setEditTotal(String(debt.total));
+    setEditNote(debt.note || "");
+  }
+
+  function saveEdit(): void {
+    if (!editId) return;
+    updateDebt(editId, {
+      title: editTitle,
+      customerId: editCustomerId,
+      customerName: editCustomerName,
+      total: Number(editTotal || 0),
+      note: editNote,
+    });
+    setEditId("");
+    refresh("Gjeld oppdatert");
+  }
+
+  function handleDelete(debt: DebtRecord): void {
+    if (!confirm(`Slette gjeldsposten "${debt.title}"?`)) return;
+    deleteDebt(debt.id);
+    if (expandedId === debt.id) setExpandedId("");
+    if (editId === debt.id) setEditId("");
+    refresh("Gjeld slettet");
   }
 
   return (
     <div>
       <h1 className="pageTitle">Gjeld</h1>
       <p className="pageLead">
-        Åpne poster og registrering av betaling. Ny gjeld lages fra <strong>Salg</strong>.
+        Egen gjeld og lån til gode. Dette er fraskilt fra utestående salg.
       </p>
 
-      <div className="grid3">
+      <div className="card">
+        <div className="grid2">
+          <label className="label">
+            <span>Kunde</span>
+            <CustomerPickerWithCreate
+              value={draft.customerId}
+              onChange={(customer) =>
+                setDraft((prev) => ({
+                  ...prev,
+                  customerId: customer?.id,
+                  customerName: customer?.name ?? "",
+                }))
+              }
+            />
+          </label>
+
+          <label className="label">
+            <span>Tittel</span>
+            <input
+              value={draft.title}
+              onChange={(e) => setDraft((prev) => ({ ...prev, title: e.target.value }))}
+              placeholder="F.eks. Lån / forskudd / privat utlegg"
+            />
+          </label>
+
+          <label className="label">
+            <span>Beløp</span>
+            <input
+              type="number"
+              value={draft.total}
+              onChange={(e) =>
+                setDraft((prev) => ({ ...prev, total: Number(e.target.value || 0) }))
+              }
+            />
+          </label>
+
+          <label className="label">
+            <span>Notat</span>
+            <input
+              value={draft.note ?? ""}
+              onChange={(e) => setDraft((prev) => ({ ...prev, note: e.target.value }))}
+              placeholder="Valgfritt notat..."
+            />
+          </label>
+        </div>
+
+        <div className="grid2" style={{ marginTop: 18 }}>
+          <label className="label">
+            <span>Betalt nå</span>
+            <input
+              type="number"
+              value={paymentAmount}
+              onChange={(e) => setPaymentAmount(e.target.value)}
+            />
+          </label>
+
+          <label className="label">
+            <span>Betalingsnotat</span>
+            <input
+              value={paymentNote}
+              onChange={(e) => setPaymentNote(e.target.value)}
+              placeholder="Vipps, kontant, bank..."
+            />
+          </label>
+        </div>
+
+        <div className="cardActions">
+          <div className="saleSummary">
+            <div className="muted">Totalt gjeldsbeløp</div>
+            <div className="saleSummaryValue">{fmtKr(draft.total)}</div>
+          </div>
+
+          <button className="btn btnPrimary" type="button" onClick={handleSaveDebt}>
+            Lagre gjeld
+          </button>
+        </div>
+
+        {message ? <div style={{ marginTop: 12, color: "#86efac" }}>{message.replace(/\s\d+$/, "")}</div> : null}
+      </div>
+
+      <div className="grid3" style={{ marginTop: 16 }}>
         <div className="statCard">
-          <div className="statLabel">Totalt utestående</div>
+          <div className="statLabel">Totalt gjeld til gode</div>
           <div className="statValue">{fmtKr(totalOpen)}</div>
         </div>
 
         <div className="statCard">
-          <div className="statLabel">Åpne poster</div>
+          <div className="statLabel">Åpne gjeldsposter</div>
           <div className="statValue">{totalCount}</div>
         </div>
 
@@ -69,59 +213,159 @@ export default function Gjeld() {
       </div>
 
       <div className="card" style={{ marginTop: 16 }}>
-        <input
-          type="text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Søk kunde..."
-        />
+        <label className="label">
+          <span>Søk i gjeld</span>
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Søk kunde, tittel eller notat..."
+          />
+        </label>
       </div>
 
       <div className="receivableList" style={{ marginTop: 16 }}>
-        {receivables.length === 0 ? (
-          <div className="card emptyText">Ingen åpne poster.</div>
+        {filteredDebts.length === 0 ? (
+          <div className="card emptyText">Ingen gjeldsposter.</div>
         ) : (
-          receivables.map(({ sale, remaining }) => (
-            <div key={sale.id} className="card">
-              <div className="rowBetween" style={{ marginBottom: 14 }}>
-                <div className="customerMain">
-                  <div style={{ fontSize: 20, fontWeight: 800 }}>
-                    {sale.customerName || "Kontantsalg"}
+          filteredDebts.map((debt) => {
+            const isExpanded = expandedId === debt.id;
+            const isEditing = editId === debt.id;
+            const remaining = debtRemaining(debt);
+
+            return (
+              <div key={debt.id} className="card">
+                <div className="rowBetween" style={{ marginBottom: 14 }}>
+                  <div className="customerMain">
+                    <div style={{ fontSize: 20, fontWeight: 800 }}>{debt.title}</div>
+                    <div className="muted" style={{ marginTop: 6 }}>
+                      {debt.customerName || "Uten kunde"} • {new Date(debt.createdAt).toLocaleString("no-NO")}
+                    </div>
                   </div>
-                  <div className="muted" style={{ marginTop: 6 }}>
-                    {new Date(sale.createdAt).toLocaleString("no-NO")}
+
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontSize: 24, fontWeight: 800 }}>{fmtKr(remaining)}</div>
+                    <div className="muted" style={{ marginTop: 6 }}>
+                      Total: {fmtKr(debt.total)}
+                    </div>
                   </div>
                 </div>
 
-                <div style={{ textAlign: "right" }}>
-                  <div style={{ fontSize: 24, fontWeight: 800 }}>{fmtKr(remaining)}</div>
-                  <div className="muted" style={{ marginTop: 6 }}>
-                    Total: {fmtKr(sale.total)}
-                  </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+                  <span className={remaining > 0 ? "badge badgeDebt" : "badge badgeSuccess"}>
+                    {remaining > 0 ? "Åpen gjeld" : "Ferdig betalt"}
+                  </span>
+                  <span className="badge">Betalt: {fmtKr(debtPaidSum(debt))}</span>
                 </div>
-              </div>
-
-              <div className="grid2">
-                <label className="label">
-                  <span>Registrer betaling</span>
-                  <input
-                    type="number"
-                    value={amounts[sale.id] ?? ""}
-                    onChange={(e) =>
-                      setAmounts((prev) => ({ ...prev, [sale.id]: e.target.value }))
-                    }
-                    placeholder="Beløp"
-                  />
-                </label>
 
                 <div className="cardActions" style={{ marginTop: 0 }}>
-                  <button className="btn btnSuccess" type="button" onClick={() => handlePay(sale.id)}>
-                    Registrer betaling
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <button
+                      className="btn"
+                      type="button"
+                      onClick={() => setExpandedId(isExpanded ? "" : debt.id)}
+                    >
+                      {isExpanded ? "Skjul detaljer" : "Vis detaljer"}
+                    </button>
+                    <button className="btn" type="button" onClick={() => startEdit(debt)}>
+                      Rediger gjeld
+                    </button>
+                  </div>
+
+                  <button className="btn btnDanger" type="button" onClick={() => handleDelete(debt)}>
+                    Slett gjeld
                   </button>
                 </div>
+
+                {isEditing ? (
+                  <div className="card" style={{ marginTop: 12 }}>
+                    <div className="grid2">
+                      <label className="label">
+                        <span>Kunde</span>
+                        <CustomerPickerWithCreate
+                          value={editCustomerId}
+                          onChange={(customer) => {
+                            setEditCustomerId(customer?.id);
+                            setEditCustomerName(customer?.name ?? "");
+                          }}
+                        />
+                      </label>
+
+                      <label className="label">
+                        <span>Tittel</span>
+                        <input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} />
+                      </label>
+
+                      <label className="label">
+                        <span>Beløp</span>
+                        <input
+                          type="number"
+                          value={editTotal}
+                          onChange={(e) => setEditTotal(e.target.value)}
+                        />
+                      </label>
+
+                      <label className="label">
+                        <span>Notat</span>
+                        <input value={editNote} onChange={(e) => setEditNote(e.target.value)} />
+                      </label>
+                    </div>
+
+                    <div className="cardActions">
+                      <button className="btn" type="button" onClick={() => setEditId("")}>
+                        Avbryt
+                      </button>
+                      <button className="btn btnPrimary" type="button" onClick={saveEdit}>
+                        Lagre endringer
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+
+                {isExpanded ? (
+                  <div style={{ marginTop: 12 }}>
+                    {debt.note ? (
+                      <div className="featureRowSub" style={{ marginBottom: 12 }}>
+                        Notat: {debt.note}
+                      </div>
+                    ) : null}
+
+                    <div className="grid2">
+                      <label className="label">
+                        <span>Registrer betaling</span>
+                        <input
+                          type="number"
+                          value={amounts[debt.id] ?? ""}
+                          onChange={(e) =>
+                            setAmounts((prev) => ({ ...prev, [debt.id]: e.target.value }))
+                          }
+                          placeholder="Beløp"
+                        />
+                      </label>
+
+                      <label className="label">
+                        <span>Betalingsnotat</span>
+                        <input
+                          value={notes[debt.id] ?? ""}
+                          onChange={(e) =>
+                            setNotes((prev) => ({ ...prev, [debt.id]: e.target.value }))
+                          }
+                          placeholder="Vipps, bank, kontant..."
+                        />
+                      </label>
+                    </div>
+
+                    <div className="cardActions">
+                      <div className="muted">Bruk dette for avdrag eller full nedbetaling.</div>
+                      <button className="btn btnSuccess" type="button" onClick={() => handlePay(debt.id)}>
+                        Registrer betaling
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
               </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
     </div>
