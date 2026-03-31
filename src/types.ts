@@ -111,6 +111,35 @@ export type PurchaseDraft = {
   createdAt: string;
 };
 
+export type DebtPayment = {
+  id: string;
+  amount: number;
+  createdAt: string;
+  note?: string;
+};
+
+export type DebtRecord = {
+  id: string;
+  customerId?: string;
+  customerName?: string;
+  title: string;
+  note?: string;
+  total: number;
+  payments: DebtPayment[];
+  paid: boolean;
+  createdAt: string;
+};
+
+export type DebtDraft = {
+  id: string;
+  customerId?: string;
+  customerName?: string;
+  title: string;
+  note?: string;
+  total: number;
+  createdAt: string;
+};
+
 export type AppBackup = {
   version: number;
   exportedAt: string;
@@ -120,4 +149,5 @@ export type AppBackup = {
   customers: Customer[];
   sales: SaleRecord[];
   purchases: PurchaseRecord[];
+  debts?: DebtRecord[];
 };
