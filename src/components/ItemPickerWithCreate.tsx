@@ -122,6 +122,7 @@ export default function ItemPickerWithCreate({
               <button className="btn" type="button" onClick={() => setOpenNew(true)}>
                 + Ny vare
               </button>
+
               {selected ? (
                 <button
                   className="btn"
@@ -144,12 +145,13 @@ export default function ItemPickerWithCreate({
         open={openNew}
         initialName={query}
         onClose={() => setOpenNew(false)}
-        onCreated={(item) => {
+        onSaved={(item: InventoryItem) => {
           const next = getItems();
           setItems(next);
           onChange(item);
           setQuery(item.name);
           setOpenList(false);
+          setOpenNew(false);
         }}
       />
     </div>
