@@ -8,6 +8,8 @@ import type {
   ItemCategory,
   ItemUnit,
   Payment,
+  PaymentMethod,
+  PaymentMethodStat,
   PurchaseDraft,
   PurchaseLine,
   PurchaseRecord,
@@ -64,13 +66,34 @@ export function fmtKr(n: number): string {
 
 function normalizeCategory(value: unknown): ItemCategory {
   const v = String(value ?? "").trim();
-  if (v === "Deler" || v === "Forbruk" || v === "Utstyr" || v === "Annet") return v;
+  if (v === "Deler" || v === "Forbruk" || v === "Utstyr" || v === "Annet") {
+    return v;
+  }
   if (v === "Olje") return "Forbruk";
   return "Annet";
 }
 
 function normalizeUnit(_value: unknown): ItemUnit {
   return "stk";
+}
+
+export function paymentMethodLabel(method?: PaymentMethod, methodLabel?: string): string {
+  if (method === "vipps") return "Vipps";
+  if (method === "revolut") return "Revolut";
+  if (method === "kontant") return "Kontant";
+  if (method === "bytte") return "Bytte";
+  if (method === "bankoverforing") return "Bankoverføring";
+  return methodLabel?.trim() || "Annet";
+}
+
+function normalizePaymentMethod(value: unknown): PaymentMethod {
+  const v = String(value ?? "").trim().toLowerCase();
+  if (v === "vipps") return "vipps";
+  if (v === "revolut") return "revolut";
+  if (v === "kontant") return "kontant";
+  if (v === "bytte") return "bytte";
+  if (v === "bankoverforing") return "bankoverforing";
+  return "annet";
 }
 
 function normalizeItem(input: Partial<InventoryItem> & Record<string, unknown>): InventoryItem {
@@ -102,6 +125,50 @@ function normalizeCustomer(input: Partial<Customer>): Customer {
     note: input.note?.trim() || undefined,
     createdAt: String(input.createdAt ?? nowIso()),
     updatedAt: String(input.updatedAt ?? nowIso()),
+  };
+}
+
+function normalizePayment(input: Partial<Payment>): Payment {
+  const method = normalizePaymentMethod(input.method);
+  return {
+    id: input.id ?? uid("pay"),
+    amount: round2(clampNumber(input.amount, 0)),
+    createdAt: input.createdAt ?? nowIso(),
+    note: input.note,
+    method,
+    methodLabel: paymentMethodLabel(method, input.methodLabel),
+  };
+}
+
+function normalizeDebtPayment(input: Partial<DebtPayment>): DebtPayment {
+  const method = normalizePaymentMethod(input.method);
+  return {
+    id: input.id ?? uid("dpay"),
+    amount: round2(clampNumber(input.amount, 0)),
+    createdAt: input.createdAt ?? nowIso(),
+    note: input.note,
+    method,
+    methodLabel: paymentMethodLabel(method, input.methodLabel),
+  };
+}
+
+function normalizeDebt(input: Partial<DebtRecord>): DebtRecord {
+  const payments: DebtPayment[] = Array.isArray(input.payments)
+    ? input.payments.map((p) => normalizeDebtPayment(p))
+    : [];
+
+  const total = round2(clampNumber(input.total, 0));
+
+  return {
+    id: String(input.id ?? uid("debt")),
+    customerId: input.customerId,
+    customerName: input.customerName,
+    title: String(input.title ?? "Gjeldspost"),
+    note: input.note,
+    total,
+    payments,
+    paid: debtPaidSum({ total, payments } as DebtRecord) >= total && total > 0,
+    createdAt: String(input.createdAt ?? nowIso()),
   };
 }
 
@@ -159,9 +226,12 @@ export function getCustomers(): Customer[] {
 }
 
 export function getSales(): SaleRecord[] {
-  return readJson<SaleRecord[]>(SALES_KEY, []).sort((a, b) =>
-    b.createdAt.localeCompare(a.createdAt)
-  );
+  return readJson<SaleRecord[]>(SALES_KEY, [])
+    .map((sale) => ({
+      ...sale,
+      payments: Array.isArray(sale.payments) ? sale.payments.map((p) => normalizePayment(p)) : [],
+    }))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 export function getPurchases(): PurchaseRecord[] {
@@ -171,9 +241,9 @@ export function getPurchases(): PurchaseRecord[] {
 }
 
 export function getDebts(): DebtRecord[] {
-  return readJson<DebtRecord[]>(DEBTS_KEY, []).sort((a, b) =>
-    b.createdAt.localeCompare(a.createdAt)
-  );
+  return readJson<Partial<DebtRecord>[]>(DEBTS_KEY, [])
+    .map(normalizeDebt)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 export type CreateItemInput = {
@@ -338,29 +408,6 @@ export function createCustomer(input: CreateCustomerInput): Customer {
   return customer;
 }
 
-export function updateCustomer(customerId: string, patch: Partial<Customer>): Customer {
-  const customers = getCustomers();
-  const index = customers.findIndex((x) => x.id === customerId);
-  if (index === -1) throw new Error("Fant ikke kunden");
-
-  const current = customers[index];
-  const updated: Customer = {
-    ...current,
-    ...patch,
-    name: String((patch.name ?? current.name) || "").trim(),
-    phone: patch.phone === "" ? undefined : (patch.phone ?? current.phone),
-    address: patch.address === "" ? undefined : (patch.address ?? current.address),
-    note: patch.note === "" ? undefined : (patch.note ?? current.note),
-    updatedAt: nowIso(),
-  };
-
-  if (!updated.name) throw new Error("Kunden må ha navn");
-
-  customers[index] = updated;
-  writeCustomers(customers);
-  return updated;
-}
-
 export function deleteCustomer(customerId: string): void {
   const sales = getSales().filter((sale) => sale.customerId === customerId);
   const debts = getDebts().filter((debt) => debt.customerId === customerId);
@@ -491,11 +538,42 @@ export function savePurchase(draft: PurchaseDraft): PurchaseRecord {
   return record;
 }
 
+export function deletePurchase(purchaseId: string): void {
+  const purchases = getPurchases();
+  const purchase = purchases.find((x) => x.id === purchaseId);
+  if (!purchase) return;
+
+  const items = getAllItemsRaw();
+
+  for (const line of purchase.lines) {
+    if (line.kind !== "varekjop") continue;
+    if (!line.itemId) continue;
+
+    const index = items.findIndex((x) => x.id === line.itemId);
+    if (index === -1) continue;
+
+    const current = items[index];
+    items[index] = {
+      ...current,
+      stock: Math.max(0, current.stock - clampNumber(line.qty, 0)),
+      updatedAt: nowIso(),
+    };
+  }
+
+  writeItems(items);
+  writeJson(
+    PURCHASES_KEY,
+    purchases.filter((x) => x.id !== purchaseId)
+  );
+}
+
 export function saveSale(
   draft: SaleDraft,
   options?: {
     paymentAmount?: number;
     paymentNote?: string;
+    paymentMethod?: PaymentMethod;
+    paymentMethodLabel?: string;
   }
 ): SaleRecord {
   const items = getAllItemsRaw();
@@ -509,11 +587,14 @@ export function saveSale(
   const paymentAmount = round2(clampNumber(options?.paymentAmount, 0));
 
   if (paymentAmount > 0) {
+    const method = normalizePaymentMethod(options?.paymentMethod);
     payments.push({
       id: uid("pay"),
       amount: paymentAmount,
       createdAt: nowIso(),
       note: options?.paymentNote?.trim() || undefined,
+      method,
+      methodLabel: paymentMethodLabel(method, options?.paymentMethodLabel),
     });
   }
 
@@ -551,7 +632,7 @@ export function saveSale(
   return record;
 }
 
-export function updateSale(
+export function updateSaleMeta(
   saleId: string,
   patch: {
     customerId?: string;
@@ -584,27 +665,34 @@ export function deleteSale(saleId: string): void {
   );
 }
 
-export function addPaymentToSale(saleId: string, amount: number, note?: string): SaleRecord {
+export function addPaymentToSale(
+  saleId: string,
+  amount: number,
+  note?: string,
+  method?: PaymentMethod,
+  methodLabel?: string
+): SaleRecord {
   const sales = readJson<SaleRecord[]>(SALES_KEY, []);
   const index = sales.findIndex((x) => x.id === saleId);
   if (index === -1) throw new Error("Fant ikke salget");
 
   const sale = sales[index];
+  const normalizedMethod = normalizePaymentMethod(method);
   const payment: Payment = {
     id: uid("pay"),
     amount: round2(clampNumber(amount, 0)),
     createdAt: nowIso(),
     note: note?.trim() || undefined,
+    method: normalizedMethod,
+    methodLabel: paymentMethodLabel(normalizedMethod, methodLabel),
   };
+
+  const updatedPayments = [...sale.payments, payment];
 
   const updated: SaleRecord = {
     ...sale,
-    payments: [...sale.payments, payment],
-    paid:
-      salePaidSum({
-        ...sale,
-        payments: [...sale.payments, payment],
-      }) >= sale.total,
+    payments: updatedPayments,
+    paid: salePaidSum({ ...sale, payments: updatedPayments }) >= sale.total,
   };
 
   sales[index] = updated;
@@ -633,6 +721,8 @@ export function saveDebt(
   options?: {
     paymentAmount?: number;
     paymentNote?: string;
+    paymentMethod?: PaymentMethod;
+    paymentMethodLabel?: string;
   }
 ): DebtRecord {
   const debts = getDebts();
@@ -646,6 +736,11 @@ export function saveDebt(
             amount: initialPayment,
             createdAt: nowIso(),
             note: options?.paymentNote?.trim() || undefined,
+            method: normalizePaymentMethod(options?.paymentMethod),
+            methodLabel: paymentMethodLabel(
+              normalizePaymentMethod(options?.paymentMethod),
+              options?.paymentMethodLabel
+            ),
           },
         ]
       : [];
@@ -706,20 +801,30 @@ export function deleteDebt(debtId: string): void {
   writeDebts(debts.filter((debt) => debt.id !== debtId));
 }
 
-export function addPaymentToDebt(debtId: string, amount: number, note?: string): DebtRecord {
+export function addPaymentToDebt(
+  debtId: string,
+  amount: number,
+  note?: string,
+  method?: PaymentMethod,
+  methodLabel?: string
+): DebtRecord {
   const debts = getDebts();
   const index = debts.findIndex((x) => x.id === debtId);
   if (index === -1) throw new Error("Fant ikke gjeldsposten");
 
   const debt = debts[index];
+  const normalizedMethod = normalizePaymentMethod(method);
   const payment: DebtPayment = {
     id: uid("dpay"),
     amount: round2(clampNumber(amount, 0)),
     createdAt: nowIso(),
     note: note?.trim() || undefined,
+    method: normalizedMethod,
+    methodLabel: paymentMethodLabel(normalizedMethod, methodLabel),
   };
 
   const payments = [...debt.payments, payment];
+
   const updated: DebtRecord = {
     ...debt,
     payments,
@@ -737,10 +842,6 @@ export function debtPaidSum(debt: DebtRecord): number {
 
 export function debtRemaining(debt: DebtRecord): number {
   return Math.max(0, round2(debt.total - debtPaidSum(debt)));
-}
-
-export function lowStockItems(): InventoryItem[] {
-  return getItems().filter((item) => item.stock <= item.minStock);
 }
 
 export function customerSales(customerId: string): SaleRecord[] {
@@ -761,6 +862,10 @@ export function customerTotalRemaining(customerId: string): number {
 
 export function customerDebtRemaining(customerId: string): number {
   return round2(customerDebts(customerId).reduce((sum, debt) => sum + debtRemaining(debt), 0));
+}
+
+export function lowStockItems(): InventoryItem[] {
+  return getItems().filter((item) => item.stock <= item.minStock);
 }
 
 export function totalSalesOutstanding(): number {
@@ -785,9 +890,38 @@ export function projectedTotalValue(): number {
   return round2(getSaldo() + totalReceivables() + inventoryValue());
 }
 
+export function getPaymentMethodStats(): PaymentMethodStat[] {
+  const bucket: Record<PaymentMethod, PaymentMethodStat> = {
+    vipps: { key: "vipps", label: "Vipps", amount: 0, count: 0 },
+    revolut: { key: "revolut", label: "Revolut", amount: 0, count: 0 },
+    kontant: { key: "kontant", label: "Kontant", amount: 0, count: 0 },
+    bytte: { key: "bytte", label: "Bytte", amount: 0, count: 0 },
+    bankoverforing: { key: "bankoverforing", label: "Bankoverføring", amount: 0, count: 0 },
+    annet: { key: "annet", label: "Annet", amount: 0, count: 0 },
+  };
+
+  for (const sale of getSales()) {
+    for (const payment of sale.payments) {
+      const key = normalizePaymentMethod(payment.method);
+      bucket[key].amount += round2(payment.amount || 0);
+      bucket[key].count += 1;
+    }
+  }
+
+  for (const debt of getDebts()) {
+    for (const payment of debt.payments) {
+      const key = normalizePaymentMethod(payment.method);
+      bucket[key].amount += round2(payment.amount || 0);
+      bucket[key].count += 1;
+    }
+  }
+
+  return Object.values(bucket).sort((a, b) => b.amount - a.amount);
+}
+
 export function exportAllData(): AppBackup {
   return {
-    version: 3,
+    version: 4,
     exportedAt: nowIso(),
     theme: getTheme(),
     saldo: getSaldo(),
@@ -881,12 +1015,7 @@ export function importBackupObject(input: unknown): void {
           round2(lines.reduce((sum, line) => sum + line.lineTotal, 0));
 
         const payments: Payment[] = Array.isArray(sale.payments)
-          ? sale.payments.map((p) => ({
-              id: p.id ?? uid("pay"),
-              amount: round2(clampNumber(p.amount, 0)),
-              createdAt: p.createdAt ?? nowIso(),
-              note: p.note,
-            }))
+          ? sale.payments.map((p) => normalizePayment(p))
           : [];
 
         return {
@@ -910,24 +1039,7 @@ export function importBackupObject(input: unknown): void {
     : [];
 
   const mappedDebts: DebtRecord[] = Array.isArray(data.debts)
-    ? data.debts.map((debt) => ({
-        id: debt.id ?? uid("debt"),
-        customerId: debt.customerId,
-        customerName: debt.customerName,
-        title: debt.title ?? "Gjeldspost",
-        note: debt.note,
-        total: round2(clampNumber(debt.total, 0)),
-        payments: Array.isArray(debt.payments)
-          ? debt.payments.map((p) => ({
-              id: p.id ?? uid("dpay"),
-              amount: round2(clampNumber(p.amount, 0)),
-              createdAt: p.createdAt ?? nowIso(),
-              note: p.note,
-            }))
-          : [],
-        paid: Boolean(debt.paid),
-        createdAt: debt.createdAt ?? nowIso(),
-      }))
+    ? data.debts.map((debt) => normalizeDebt(debt))
     : [];
 
   writeItems(mappedItems);
