@@ -26,6 +26,10 @@ const DEBTS_KEY = "nikasso_debts_v1";
 const SALDO_KEY = "nikasso_saldo_v2";
 const THEME_KEY = "nikasso_theme_v2";
 
+/* =========================
+   BASIC HELPERS
+========================= */
+
 function nowIso(): string {
   return new Date().toISOString();
 }
@@ -64,6 +68,10 @@ export function fmtKr(n: number): string {
   })} kr`;
 }
 
+/* =========================
+   NORMALIZERS
+========================= */
+
 function normalizeCategory(value: unknown): ItemCategory {
   const v = String(value ?? "").trim();
   if (v === "Deler" || v === "Forbruk" || v === "Utstyr" || v === "Annet") {
@@ -77,15 +85,6 @@ function normalizeUnit(_value: unknown): ItemUnit {
   return "stk";
 }
 
-export function paymentMethodLabel(method?: PaymentMethod, methodLabel?: string): string {
-  if (method === "vipps") return "Vipps";
-  if (method === "revolut") return "Revolut";
-  if (method === "kontant") return "Kontant";
-  if (method === "bytte") return "Bytte";
-  if (method === "bankoverforing") return "Bankoverføring";
-  return methodLabel?.trim() || "Annet";
-}
-
 function normalizePaymentMethod(value: unknown): PaymentMethod {
   const v = String(value ?? "").trim().toLowerCase();
   if (v === "vipps") return "vipps";
@@ -96,7 +95,21 @@ function normalizePaymentMethod(value: unknown): PaymentMethod {
   return "annet";
 }
 
-function normalizeItem(input: Partial<InventoryItem> & Record<string, unknown>): InventoryItem {
+export function paymentMethodLabel(
+  method?: PaymentMethod,
+  methodLabel?: string
+): string {
+  if (method === "vipps") return "Vipps";
+  if (method === "revolut") return "Revolut";
+  if (method === "kontant") return "Kontant";
+  if (method === "bytte") return "Bytte";
+  if (method === "bankoverforing") return "Bankoverføring";
+  return methodLabel?.trim() || "Annet";
+}
+
+function normalizeItem(
+  input: Partial<InventoryItem> & Record<string, unknown>
+): InventoryItem {
   return {
     id: String(input.id ?? uid("item")),
     name: String(input.name ?? "Uten navn"),
@@ -172,6 +185,10 @@ function normalizeDebt(input: Partial<DebtRecord>): DebtRecord {
   };
 }
 
+/* =========================
+   RAW ACCESSORS
+========================= */
+
 function getAllItemsRaw(): InventoryItem[] {
   return readJson<Array<Partial<InventoryItem> & Record<string, unknown>>>(ITEMS_KEY, [])
     .map(normalizeItem)
@@ -189,6 +206,10 @@ function writeCustomers(customers: Customer[]): void {
 function writeDebts(debts: DebtRecord[]): void {
   writeJson(DEBTS_KEY, debts);
 }
+
+/* =========================
+   THEME / SALDO
+========================= */
 
 export function getTheme(): "dark" | "light" {
   const theme = localStorage.getItem(THEME_KEY);
@@ -213,6 +234,10 @@ export function adjustSaldo(delta: number): number {
   return next;
 }
 
+/* =========================
+   GETTERS
+========================= */
+
 export function getItems(): InventoryItem[] {
   return getAllItemsRaw()
     .filter((x) => x.isActive !== false)
@@ -229,7 +254,9 @@ export function getSales(): SaleRecord[] {
   return readJson<SaleRecord[]>(SALES_KEY, [])
     .map((sale) => ({
       ...sale,
-      payments: Array.isArray(sale.payments) ? sale.payments.map((p) => normalizePayment(p)) : [],
+      payments: Array.isArray(sale.payments)
+        ? sale.payments.map((p) => normalizePayment(p))
+        : [],
     }))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
@@ -245,6 +272,10 @@ export function getDebts(): DebtRecord[] {
     .map(normalizeDebt)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
+
+/* =========================
+   ITEMS
+========================= */
 
 export type CreateItemInput = {
   name: string;
@@ -375,6 +406,10 @@ export function deleteItem(itemId: string): void {
   writeItems(items.filter((x) => x.id !== itemId));
 }
 
+/* =========================
+   CUSTOMERS
+========================= */
+
 export type CreateCustomerInput = {
   name: string;
   phone?: string;
@@ -408,6 +443,48 @@ export function createCustomer(input: CreateCustomerInput): Customer {
   return customer;
 }
 
+export function updateCustomer(
+  customerId: string,
+  patch: Partial<Customer>
+): Customer {
+  const customers = getCustomers();
+  const index = customers.findIndex((x) => x.id === customerId);
+
+  if (index === -1) {
+    throw new Error("Fant ikke kunden");
+  }
+
+  const current = customers[index];
+
+  const updated: Customer = {
+    ...current,
+    ...patch,
+    name: String(patch.name ?? current.name).trim(),
+    phone:
+      patch.phone === ""
+        ? undefined
+        : (patch.phone ?? current.phone)?.trim() || undefined,
+    address:
+      patch.address === ""
+        ? undefined
+        : (patch.address ?? current.address)?.trim() || undefined,
+    note:
+      patch.note === ""
+        ? undefined
+        : (patch.note ?? current.note)?.trim() || undefined,
+    updatedAt: nowIso(),
+  };
+
+  if (!updated.name) {
+    throw new Error("Kunden må ha navn");
+  }
+
+  customers[index] = updated;
+  writeCustomers(customers);
+
+  return updated;
+}
+
 export function deleteCustomer(customerId: string): void {
   const sales = getSales().filter((sale) => sale.customerId === customerId);
   const debts = getDebts().filter((debt) => debt.customerId === customerId);
@@ -419,6 +496,10 @@ export function deleteCustomer(customerId: string): void {
   const customers = getCustomers();
   writeCustomers(customers.filter((x) => x.id !== customerId));
 }
+
+/* =========================
+   DRAFT CREATORS
+========================= */
 
 export function createEmptySale(): SaleDraft {
   return {
@@ -479,6 +560,10 @@ export function makePurchaseLine(): PurchaseLine {
     lineTotal: 0,
   };
 }
+
+/* =========================
+   PURCHASES
+========================= */
 
 function calcWeightedAverage(
   currentStock: number,
@@ -566,6 +651,10 @@ export function deletePurchase(purchaseId: string): void {
     purchases.filter((x) => x.id !== purchaseId)
   );
 }
+
+/* =========================
+   SALES
+========================= */
 
 export function saveSale(
   draft: SaleDraft,
@@ -716,6 +805,10 @@ export function saleProfit(sale: SaleRecord): number {
   return round2(sale.total - cost);
 }
 
+/* =========================
+   DEBTS
+========================= */
+
 export function saveDebt(
   draft: DebtDraft,
   options?: {
@@ -844,6 +937,10 @@ export function debtRemaining(debt: DebtRecord): number {
   return Math.max(0, round2(debt.total - debtPaidSum(debt)));
 }
 
+/* =========================
+   CUSTOMER SUMS
+========================= */
+
 export function customerSales(customerId: string): SaleRecord[] {
   return getSales().filter((sale) => sale.customerId === customerId);
 }
@@ -863,6 +960,10 @@ export function customerTotalRemaining(customerId: string): number {
 export function customerDebtRemaining(customerId: string): number {
   return round2(customerDebts(customerId).reduce((sum, debt) => sum + debtRemaining(debt), 0));
 }
+
+/* =========================
+   TOTALS / STATS
+========================= */
 
 export function lowStockItems(): InventoryItem[] {
   return getItems().filter((item) => item.stock <= item.minStock);
@@ -918,6 +1019,10 @@ export function getPaymentMethodStats(): PaymentMethodStat[] {
 
   return Object.values(bucket).sort((a, b) => b.amount - a.amount);
 }
+
+/* =========================
+   BACKUP / IMPORT / RESET
+========================= */
 
 export function exportAllData(): AppBackup {
   return {
@@ -1059,6 +1164,10 @@ export async function importBackupFile(file: File): Promise<void> {
   const parsed = JSON.parse(raw);
   importBackupObject(parsed);
 }
+
+/* =========================
+   SEED
+========================= */
 
 export function ensureSeedData(): void {
   if (getAllItemsRaw().length === 0) {
