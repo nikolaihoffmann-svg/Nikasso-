@@ -7,7 +7,7 @@ type Props = {
   initialName?: string;
   item?: InventoryItem | null;
   onClose: () => void;
-  onCreated: (item: InventoryItem) => void;
+  onSaved: (item: InventoryItem) => void;
 };
 
 const categories: ItemCategory[] = ["Deler", "Forbruk", "Utstyr", "Annet"];
@@ -15,12 +15,10 @@ const categories: ItemCategory[] = ["Deler", "Forbruk", "Utstyr", "Annet"];
 export default function NewItemModal({
   open,
   initialName = "",
-  item = null,
+  item,
   onClose,
-  onCreated,
+  onSaved,
 }: Props) {
-  const isEdit = Boolean(item);
-
   const [name, setName] = useState(initialName);
   const [category, setCategory] = useState<ItemCategory>("Annet");
   const [salePrice, setSalePrice] = useState("0");
@@ -33,31 +31,21 @@ export default function NewItemModal({
   useEffect(() => {
     if (!open) return;
 
-    if (item) {
-      setName(item.name);
-      setCategory(item.category);
-      setSalePrice(String(item.salePrice ?? 0));
-      setCostPrice(String(item.costPrice ?? 0));
-      setStock(String(item.stock ?? 0));
-      setMinStock(String(item.minStock ?? 0));
-      setNote(item.note ?? "");
-      setError("");
-      return;
-    }
-
-    setName(initialName || "");
-    setCategory("Annet");
-    setSalePrice("0");
-    setCostPrice("0");
-    setStock("0");
-    setMinStock("0");
-    setNote("");
+    setName(item?.name ?? initialName ?? "");
+    setCategory(item?.category ?? "Annet");
+    setSalePrice(String(item?.salePrice ?? 0));
+    setCostPrice(String(item?.costPrice ?? 0));
+    setStock(String(item?.stock ?? 0));
+    setMinStock(String(item?.minStock ?? 0));
+    setNote(item?.note ?? "");
     setError("");
   }, [open, initialName, item]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent): void {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") {
+        onClose();
+      }
     }
 
     if (open) {
@@ -73,32 +61,29 @@ export default function NewItemModal({
 
   function handleSave(): void {
     try {
-      if (item) {
-        const updated = updateItem(item.id, {
-          name,
-          category,
-          unit: "stk",
-          salePrice: Number(salePrice || 0),
-          costPrice: Number(costPrice || 0),
-          stock: Number(stock || 0),
-          minStock: Number(minStock || 0),
-          note,
-        });
-        onCreated(updated);
-      } else {
-        const created = createItem({
-          name,
-          category,
-          unit: "stk",
-          salePrice: Number(salePrice || 0),
-          costPrice: Number(costPrice || 0),
-          stock: Number(stock || 0),
-          minStock: Number(minStock || 0),
-          note,
-        });
-        onCreated(created);
-      }
+      const saved = item
+        ? updateItem(item.id, {
+            name,
+            category,
+            unit: "stk",
+            salePrice: Number(salePrice || 0),
+            costPrice: Number(costPrice || 0),
+            stock: Number(stock || 0),
+            minStock: Number(minStock || 0),
+            note,
+          })
+        : createItem({
+            name,
+            category,
+            unit: "stk",
+            salePrice: Number(salePrice || 0),
+            costPrice: Number(costPrice || 0),
+            stock: Number(stock || 0),
+            minStock: Number(minStock || 0),
+            note,
+          });
 
+      onSaved(saved);
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Kunne ikke lagre vare");
@@ -112,16 +97,16 @@ export default function NewItemModal({
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
-        aria-label={isEdit ? "Rediger vare" : "Ny vare"}
+        aria-label={item ? "Rediger vare" : "Ny vare"}
       >
         <div className="rowBetween modalHeader">
           <div>
             <h2 className="sectionTitle" style={{ marginBottom: 6 }}>
-              {isEdit ? "Rediger vare" : "Ny vare"}
+              {item ? "Rediger vare" : "Ny vare"}
             </h2>
             <div className="muted">
-              {isEdit
-                ? "Oppdater navn, priser, lager og notat."
+              {item
+                ? "Endre varedata, lager og priser."
                 : "Opprett vare for lager, salg og innkjøp."}
             </div>
           </div>
@@ -150,11 +135,6 @@ export default function NewItemModal({
                 </option>
               ))}
             </select>
-          </label>
-
-          <label className="label">
-            <span>Enhet</span>
-            <input value="stk" disabled />
           </label>
 
           <label className="label">
@@ -190,13 +170,9 @@ export default function NewItemModal({
         {error ? <div className="modalError">{error}</div> : null}
 
         <div className="cardActions">
-          <div className="muted">
-            {isEdit
-              ? "Endringer lagres direkte på varen."
-              : "Varen kan også opprettes direkte fra salg og innkjøp."}
-          </div>
+          <div className="muted">Enhet er nå låst til stk for å holde det enkelt.</div>
           <button className="btn btnPrimary" type="button" onClick={handleSave}>
-            {isEdit ? "Lagre endringer" : "Lagre vare"}
+            {item ? "Lagre endringer" : "Lagre vare"}
           </button>
         </div>
       </div>
