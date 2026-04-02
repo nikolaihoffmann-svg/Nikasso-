@@ -1,202 +1,177 @@
-import { useEffect, useState } from "react";
-import type { InventoryItem, ItemCategory } from "../types";
-import { createItem, updateItem } from "../app/storage";
+export type Theme = "dark" | "light";
 
-type Props = {
-  open: boolean;
-  initialName?: string;
-  item?: InventoryItem | null;
-  onClose: () => void;
-  onCreated: (item: InventoryItem) => void;
+export type ItemUnit = "stk";
+
+export type ItemCategory =
+  | "Deler"
+  | "Forbruk"
+  | "Utstyr"
+  | "Annet";
+
+export type InventoryItem = {
+  id: string;
+  name: string;
+  sku?: string;
+  category: ItemCategory;
+  unit: ItemUnit;
+  salePrice: number;
+  costPrice: number;
+  price?: number;
+  cost?: number;
+  stock: number;
+  minStock: number;
+  note?: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
 };
 
-const categories: ItemCategory[] = ["Deler", "Forbruk", "Utstyr", "Annet"];
+export type Customer = {
+  id: string;
+  name: string;
+  phone?: string;
+  address?: string;
+  note?: string;
+  createdAt: string;
+  updatedAt: string;
+};
 
-export default function NewItemModal({
-  open,
-  initialName = "",
-  item = null,
-  onClose,
-  onCreated,
-}: Props) {
-  const isEdit = Boolean(item);
+export type PaymentMethod =
+  | "vipps"
+  | "revolut"
+  | "kontant"
+  | "bytte"
+  | "bankoverforing"
+  | "annet";
 
-  const [name, setName] = useState(initialName);
-  const [category, setCategory] = useState<ItemCategory>("Annet");
-  const [salePrice, setSalePrice] = useState("0");
-  const [costPrice, setCostPrice] = useState("0");
-  const [stock, setStock] = useState("0");
-  const [minStock, setMinStock] = useState("0");
-  const [note, setNote] = useState("");
-  const [error, setError] = useState("");
+export type Payment = {
+  id: string;
+  amount: number;
+  createdAt: string;
+  note?: string;
+  method?: PaymentMethod;
+  methodLabel?: string;
+};
 
-  useEffect(() => {
-    if (!open) return;
+export type SalePricingMode = "unit" | "fixed_total";
 
-    setName(item?.name ?? initialName ?? "");
-    setCategory(item?.category ?? "Annet");
-    setSalePrice(String(item?.salePrice ?? 0));
-    setCostPrice(String(item?.costPrice ?? 0));
-    setStock(String(item?.stock ?? 0));
-    setMinStock(String(item?.minStock ?? 0));
-    setNote(item?.note ?? "");
-    setError("");
-  }, [open, initialName, item]);
+export type SaleLine = {
+  id: string;
+  itemId?: string;
+  itemName?: string;
+  qty: number;
+  unitPrice: number;
+  unitCost: number;
+  lineTotal: number;
+  pricingMode?: SalePricingMode;
+};
 
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent): void {
-      if (event.key === "Escape") {
-        onClose();
-      }
-    }
+export type SaleRecord = {
+  id: string;
+  customerId?: string;
+  customerName?: string;
+  note?: string;
+  lines: SaleLine[];
+  total: number;
+  payments: Payment[];
+  paid: boolean;
+  createdAt: string;
+};
 
-    if (open) {
-      document.addEventListener("keydown", handleKeyDown);
-    }
+export type SaleDraft = {
+  id: string;
+  customerId?: string;
+  customerName?: string;
+  note?: string;
+  lines: SaleLine[];
+  createdAt: string;
+};
 
-    return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [open, onClose]);
+export type PurchaseLineKind = "varekjop" | "forbruk" | "utstyr";
 
-  if (!open) return null;
+export type PurchaseLine = {
+  id: string;
+  kind: PurchaseLineKind;
+  itemId?: string;
+  itemName?: string;
+  qty: number;
+  unitCost: number;
+  lineTotal: number;
+};
 
-  function handleSave(): void {
-    try {
-      const saved = item
-        ? updateItem(item.id, {
-            name,
-            category,
-            unit: "stk",
-            salePrice: Number(salePrice || 0),
-            costPrice: Number(costPrice || 0),
-            stock: Number(stock || 0),
-            minStock: Number(minStock || 0),
-            note,
-          })
-        : createItem({
-            name,
-            category,
-            unit: "stk",
-            salePrice: Number(salePrice || 0),
-            costPrice: Number(costPrice || 0),
-            stock: Number(stock || 0),
-            minStock: Number(minStock || 0),
-            note,
-          });
+export type PurchaseStatus = "betalt" | "ikke_betalt";
 
-      onCreated(saved);
-      onClose();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunne ikke lagre vare");
-    }
-  }
+export type PurchaseCostMode = "last_price" | "no_change";
 
-  return (
-    <div className="modalOverlay" onClick={onClose}>
-      <div
-        className="modalCard"
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-label={isEdit ? "Rediger vare" : "Ny vare"}
-      >
-        <div className="rowBetween modalHeader">
-          <div>
-            <h2 className="sectionTitle" style={{ marginBottom: 6 }}>
-              {isEdit ? "Rediger vare" : "Ny vare"}
-            </h2>
-            <div className="muted">
-              {isEdit
-                ? "Endre varedata, lager og priser."
-                : "Opprett vare for lager, salg og innkjøp."}
-            </div>
-          </div>
+export type PurchaseRecord = {
+  id: string;
+  supplier: string;
+  status: PurchaseStatus;
+  dueDate?: string;
+  note?: string;
+  updateCostMode: PurchaseCostMode;
+  lines: PurchaseLine[];
+  total: number;
+  createdAt: string;
+};
 
-          <button className="btn" type="button" onClick={onClose}>
-            Lukk
-          </button>
-        </div>
+export type PurchaseDraft = {
+  id: string;
+  supplier: string;
+  status: PurchaseStatus;
+  dueDate?: string;
+  note?: string;
+  updateCostMode: PurchaseCostMode;
+  lines: PurchaseLine[];
+  createdAt: string;
+};
 
-        <div className="grid2">
-          <label className="label">
-            <span>Varenavn</span>
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="F.eks. Bremseklosser"
-            />
-          </label>
+export type DebtPayment = {
+  id: string;
+  amount: number;
+  createdAt: string;
+  note?: string;
+  method?: PaymentMethod;
+  methodLabel?: string;
+};
 
-          <label className="label">
-            <span>Kategori</span>
-            <select
-              value={category}
-              onChange={(e) => setCategory(e.target.value as ItemCategory)}
-            >
-              {categories.map((x) => (
-                <option key={x} value={x}>
-                  {x}
-                </option>
-              ))}
-            </select>
-          </label>
+export type DebtRecord = {
+  id: string;
+  customerId?: string;
+  customerName?: string;
+  title: string;
+  note?: string;
+  total: number;
+  payments: DebtPayment[];
+  paid: boolean;
+  createdAt: string;
+};
 
-          <label className="label">
-            <span>Salgspris</span>
-            <input
-              type="number"
-              value={salePrice}
-              onChange={(e) => setSalePrice(e.target.value)}
-            />
-          </label>
+export type DebtDraft = {
+  id: string;
+  customerId?: string;
+  customerName?: string;
+  title: string;
+  note?: string;
+  total: number;
+  createdAt: string;
+};
 
-          <label className="label">
-            <span>Kostpris</span>
-            <input
-              type="number"
-              value={costPrice}
-              onChange={(e) => setCostPrice(e.target.value)}
-            />
-          </label>
+export type PaymentMethodStat = {
+  key: PaymentMethod;
+  label: string;
+  amount: number;
+  count: number;
+};
 
-          <label className="label">
-            <span>Lager</span>
-            <input
-              type="number"
-              value={stock}
-              onChange={(e) => setStock(e.target.value)}
-            />
-          </label>
-
-          <label className="label">
-            <span>Min. lager</span>
-            <input
-              type="number"
-              value={minStock}
-              onChange={(e) => setMinStock(e.target.value)}
-            />
-          </label>
-        </div>
-
-        <label className="label" style={{ marginTop: 14 }}>
-          <span>Notat</span>
-          <textarea
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            placeholder="Valgfritt notat..."
-          />
-        </label>
-
-        {error ? <div className="modalError">{error}</div> : null}
-
-        <div className="cardActions">
-          <div className="muted">Enhet er nå låst til stk for å holde det enkelt.</div>
-          <button className="btn btnPrimary" type="button" onClick={handleSave}>
-            {isEdit ? "Lagre endringer" : "Lagre vare"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
+export type AppBackup = {
+  version: number;
+  exportedAt: string;
+  theme?: Theme;
+  saldo: number;
+  items: InventoryItem[];
+  customers: Customer[];
+  sales: SaleRecord[];
+  purchases: PurchaseRecord[];
+  debts: DebtRecord[];
+};
