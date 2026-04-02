@@ -16,6 +16,7 @@ import type {
   SaleDraft,
   SaleLine,
   SaleRecord,
+  SalePricingMode,
 } from "../types";
 
 const ITEMS_KEY = "nikasso_items_v2";
@@ -85,6 +86,10 @@ function normalizePaymentMethod(value: unknown): PaymentMethod {
   if (v === "bytte") return "bytte";
   if (v === "bankoverforing") return "bankoverforing";
   return "annet";
+}
+
+function normalizePricingMode(value: unknown): SalePricingMode {
+  return value === "fixed_total" ? "fixed_total" : "unit";
 }
 
 export function paymentMethodLabel(
@@ -211,6 +216,54 @@ function normalizePurchaseRecord(input: Partial<PurchaseRecord>): PurchaseRecord
   };
 }
 
+function normalizeSaleRecord(input: Partial<SaleRecord>): SaleRecord {
+  const lines: SaleLine[] = Array.isArray(input.lines)
+    ? input.lines.map((line) => {
+        const qty = clampNumber(line.qty, 0);
+        const unitPrice = round2(clampNumber(line.unitPrice, 0));
+        const unitCost = round2(clampNumber(line.unitCost, 0));
+        const pricingMode = normalizePricingMode((line as SaleLine).pricingMode);
+
+        const lineTotal =
+          pricingMode === "fixed_total"
+            ? round2(clampNumber(line.lineTotal, 0))
+            : round2(
+                clampNumber(line.lineTotal, 0) ||
+                  qty * unitPrice
+              );
+
+        return {
+          id: line.id ?? uid("sline"),
+          itemId: line.itemId,
+          itemName: line.itemName,
+          qty,
+          unitPrice,
+          unitCost,
+          lineTotal,
+          pricingMode,
+        };
+      })
+    : [];
+
+  const total =
+    round2(clampNumber(input.total, 0)) ||
+    round2(lines.reduce((sum, line) => sum + line.lineTotal, 0));
+
+  return {
+    id: input.id ?? uid("sale"),
+    customerId: input.customerId,
+    customerName: input.customerName,
+    note: input.note,
+    lines,
+    total,
+    payments: Array.isArray(input.payments)
+      ? input.payments.map((p) => normalizePayment(p))
+      : [],
+    paid: Boolean(input.paid),
+    createdAt: input.createdAt ?? nowIso(),
+  };
+}
+
 function getAllItemsRaw(): InventoryItem[] {
   return readJson<Array<Partial<InventoryItem> & Record<string, unknown>>>(ITEMS_KEY, [])
     .map(normalizeItem)
@@ -265,13 +318,14 @@ export function getCustomers(): Customer[] {
 }
 
 export function getSales(): SaleRecord[] {
-  return readJson<SaleRecord[]>(SALES_KEY, [])
-    .map((sale) => ({
-      ...sale,
-      payments: Array.isArray(sale.payments)
-        ? sale.payments.map((p) => normalizePayment(p))
-        : [],
-    }))
+  return readJson<Partial<SaleRecord>[]>(SALES_KEY, [])
+    .map((sale) => {
+      const normalized = normalizeSaleRecord(sale);
+      return {
+        ...normalized,
+        paid: salePaidSum(normalized) >= normalized.total && normalized.total > 0,
+      };
+    })
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
@@ -548,6 +602,7 @@ export function makeSaleLine(): SaleLine {
     unitPrice: 0,
     unitCost: 0,
     lineTotal: 0,
+    pricingMode: "unit",
   };
 }
 
@@ -642,10 +697,30 @@ export function saveSale(
   }
 ): SaleRecord {
   const items = getAllItemsRaw();
-  const sales = readJson<SaleRecord[]>(SALES_KEY, []);
+  const sales = getSales();
+
+  const normalizedLines: SaleLine[] = draft.lines.map((line) => {
+    const pricingMode = normalizePricingMode(line.pricingMode);
+    const qty = clampNumber(line.qty, 0);
+    const unitPrice = round2(clampNumber(line.unitPrice, 0));
+    const unitCost = round2(clampNumber(line.unitCost, 0));
+    const lineTotal =
+      pricingMode === "fixed_total"
+        ? round2(clampNumber(line.lineTotal, 0))
+        : round2(qty * unitPrice);
+
+    return {
+      ...line,
+      qty,
+      unitPrice,
+      unitCost,
+      lineTotal,
+      pricingMode,
+    };
+  });
 
   const total = round2(
-    draft.lines.reduce((sum, line) => sum + Number(line.lineTotal || 0), 0)
+    normalizedLines.reduce((sum, line) => sum + Number(line.lineTotal || 0), 0)
   );
 
   const payments: Payment[] = [];
@@ -663,7 +738,7 @@ export function saveSale(
     });
   }
 
-  for (const line of draft.lines) {
+  for (const line of normalizedLines) {
     if (!line.itemId) continue;
     const index = items.findIndex((x) => x.id === line.itemId);
     if (index === -1) continue;
@@ -676,17 +751,15 @@ export function saveSale(
     };
   }
 
-  const paid = paymentAmount >= total && total > 0;
-
   const record: SaleRecord = {
     id: draft.id,
     customerId: draft.customerId,
     customerName: draft.customerName,
     note: draft.note,
-    lines: draft.lines,
+    lines: normalizedLines,
     total,
     payments,
-    paid,
+    paid: paymentAmount >= total && total > 0,
     createdAt: draft.createdAt,
   };
 
@@ -737,7 +810,7 @@ export function addPaymentToSale(
   method?: PaymentMethod,
   methodLabel?: string
 ): SaleRecord {
-  const sales = readJson<SaleRecord[]>(SALES_KEY, []);
+  const sales = getSales();
   const index = sales.findIndex((x) => x.id === saleId);
   if (index === -1) throw new Error("Fant ikke salget");
 
@@ -774,10 +847,9 @@ export function saleRemaining(sale: SaleRecord): number {
 }
 
 export function saleProfit(sale: SaleRecord): number {
-  const cost = sale.lines.reduce(
-    (sum, line) => sum + Number(line.qty || 0) * Number(line.unitCost || 0),
-    0
-  );
+  const cost = sale.lines.reduce((sum, line) => {
+    return sum + Number(line.qty || 0) * Number(line.unitCost || 0);
+  }, 0);
   return round2(sale.total - cost);
 }
 
@@ -986,7 +1058,7 @@ export function getPaymentMethodStats(): PaymentMethodStat[] {
 
 export function exportAllData(): AppBackup {
   return {
-    version: 5,
+    version: 6,
     exportedAt: nowIso(),
     theme: getTheme(),
     saldo: getSaldo(),
@@ -1053,50 +1125,7 @@ export function importBackupObject(input: unknown): void {
     : [];
 
   const mappedSales: SaleRecord[] = Array.isArray(data.sales)
-    ? data.sales.map((sale) => {
-        const lines: SaleLine[] = Array.isArray(sale.lines)
-          ? sale.lines.map((line) => ({
-              id: line.id ?? uid("sline"),
-              itemId: line.itemId,
-              itemName: line.itemName,
-              qty: clampNumber(line.qty, 0),
-              unitPrice: round2(clampNumber(line.unitPrice, 0)),
-              unitCost: round2(
-                clampNumber((line as SaleLine & { unitCostAtSale?: number }).unitCost, 0) ||
-                  clampNumber(
-                    (line as SaleLine & { unitCostAtSale?: number }).unitCostAtSale,
-                    0
-                  )
-              ),
-              lineTotal: round2(
-                clampNumber(line.lineTotal, 0) ||
-                  clampNumber(line.qty, 0) * clampNumber(line.unitPrice, 0)
-              ),
-            }))
-          : [];
-
-        const total =
-          round2(clampNumber(sale.total, 0)) ||
-          round2(lines.reduce((sum, line) => sum + line.lineTotal, 0));
-
-        const payments: Payment[] = Array.isArray(sale.payments)
-          ? sale.payments.map((p) => normalizePayment(p))
-          : [];
-
-        return {
-          id: sale.id ?? uid("sale"),
-          customerId: sale.customerId,
-          customerName: sale.customerName,
-          note: sale.note,
-          lines,
-          total,
-          payments,
-          paid:
-            sale.paid ??
-            salePaidSum({ ...sale, lines, total, payments } as SaleRecord) >= total,
-          createdAt: sale.createdAt ?? nowIso(),
-        };
-      })
+    ? data.sales.map((sale) => normalizeSaleRecord(sale))
     : [];
 
   const mappedPurchases: PurchaseRecord[] = Array.isArray(data.purchases)
