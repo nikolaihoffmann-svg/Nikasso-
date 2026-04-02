@@ -53,6 +53,8 @@ export type Payment = {
   methodLabel?: string;
 };
 
+export type SalePricingMode = "unit" | "fixed_total";
+
 export type SaleLine = {
   id: string;
   itemId?: string;
@@ -61,6 +63,7 @@ export type SaleLine = {
   unitPrice: number;
   unitCost: number;
   lineTotal: number;
+  pricingMode?: SalePricingMode;
 };
 
 export type SaleRecord = {
