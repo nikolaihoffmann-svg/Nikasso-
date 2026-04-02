@@ -98,13 +98,15 @@ export type PurchaseLine = {
 
 export type PurchaseStatus = "betalt" | "ikke_betalt";
 
+export type PurchaseCostMode = "last_price" | "no_change";
+
 export type PurchaseRecord = {
   id: string;
   supplier: string;
   status: PurchaseStatus;
   dueDate?: string;
   note?: string;
-  updateCostMode: "weighted_average" | "last_price" | "no_change";
+  updateCostMode: PurchaseCostMode;
   lines: PurchaseLine[];
   total: number;
   createdAt: string;
@@ -116,7 +118,7 @@ export type PurchaseDraft = {
   status: PurchaseStatus;
   dueDate?: string;
   note?: string;
-  updateCostMode: "weighted_average" | "last_price" | "no_change";
+  updateCostMode: PurchaseCostMode;
   lines: PurchaseLine[];
   createdAt: string;
 };
