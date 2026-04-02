@@ -89,7 +89,7 @@ export default function Innkjop() {
   return (
     <div>
       <h1 className="pageTitle">Innkjøp</h1>
-      <p className="pageLead">Før inn lagerkjøp, kostpris og leverandør på en ryddig måte.</p>
+      <p className="pageLead">Siste pris er nå standard, siden du ikke vil blande gammel og ny varekost.</p>
 
       <div className="card">
         <div className="grid2">
@@ -130,8 +130,7 @@ export default function Innkjop() {
               }))
             }
           >
-            <option value="weighted_average">Vektet snitt (anbefalt)</option>
-            <option value="last_price">Sett til siste pris</option>
+            <option value="last_price">Siste pris (anbefalt)</option>
             <option value="no_change">Ikke endre</option>
           </select>
         </label>
@@ -216,7 +215,7 @@ export default function Innkjop() {
         </div>
 
         <div className="cardActions">
-          <div className="muted">Lagrer lagerøkning og oppdaterer kostpris.</div>
+          <div className="muted">Ved varekjøp brukes nå siste innkjøpspris som ny kostpris.</div>
           <button className="btn btnPrimary" type="button" onClick={handleSave}>
             Lagre innkjøp
           </button>
@@ -268,9 +267,7 @@ export default function Innkjop() {
                   </span>
 
                   <span className="badge">
-                    {purchase.updateCostMode === "weighted_average"
-                      ? "Vektet snitt"
-                      : purchase.updateCostMode === "last_price"
+                    {purchase.updateCostMode === "last_price"
                       ? "Siste pris"
                       : "Ingen kost-endring"}
                   </span>
