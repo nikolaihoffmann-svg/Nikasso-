@@ -26,10 +26,6 @@ const DEBTS_KEY = "nikasso_debts_v1";
 const SALDO_KEY = "nikasso_saldo_v2";
 const THEME_KEY = "nikasso_theme_v2";
 
-/* =========================
-   BASIC HELPERS
-========================= */
-
 function nowIso(): string {
   return new Date().toISOString();
 }
@@ -67,10 +63,6 @@ export function fmtKr(n: number): string {
     maximumFractionDigits: 2,
   })} kr`;
 }
-
-/* =========================
-   NORMALIZERS
-========================= */
 
 function normalizeCategory(value: unknown): ItemCategory {
   const v = String(value ?? "").trim();
@@ -185,9 +177,39 @@ function normalizeDebt(input: Partial<DebtRecord>): DebtRecord {
   };
 }
 
-/* =========================
-   RAW ACCESSORS
-========================= */
+function normalizePurchaseCostMode(value: unknown): "last_price" | "no_change" {
+  const v = String(value ?? "").trim().toLowerCase();
+  if (v === "no_change") return "no_change";
+  return "last_price";
+}
+
+function normalizePurchaseRecord(input: Partial<PurchaseRecord>): PurchaseRecord {
+  return {
+    id: String(input.id ?? uid("purchase")),
+    supplier: String(input.supplier ?? ""),
+    status: input.status === "ikke_betalt" ? "ikke_betalt" : "betalt",
+    dueDate: input.dueDate || undefined,
+    note: input.note || undefined,
+    updateCostMode: normalizePurchaseCostMode(input.updateCostMode),
+    lines: Array.isArray(input.lines)
+      ? input.lines.map((line) => ({
+          id: line.id ?? uid("pline"),
+          kind:
+            line.kind === "forbruk" || line.kind === "utstyr" ? line.kind : "varekjop",
+          itemId: line.itemId,
+          itemName: line.itemName,
+          qty: clampNumber(line.qty, 0),
+          unitCost: round2(clampNumber(line.unitCost, 0)),
+          lineTotal: round2(
+            clampNumber(line.lineTotal, 0) ||
+              clampNumber(line.qty, 0) * clampNumber(line.unitCost, 0)
+          ),
+        }))
+      : [],
+    total: round2(clampNumber(input.total, 0)),
+    createdAt: String(input.createdAt ?? nowIso()),
+  };
+}
 
 function getAllItemsRaw(): InventoryItem[] {
   return readJson<Array<Partial<InventoryItem> & Record<string, unknown>>>(ITEMS_KEY, [])
@@ -206,10 +228,6 @@ function writeCustomers(customers: Customer[]): void {
 function writeDebts(debts: DebtRecord[]): void {
   writeJson(DEBTS_KEY, debts);
 }
-
-/* =========================
-   THEME / SALDO
-========================= */
 
 export function getTheme(): "dark" | "light" {
   const theme = localStorage.getItem(THEME_KEY);
@@ -233,10 +251,6 @@ export function adjustSaldo(delta: number): number {
   setSaldo(next);
   return next;
 }
-
-/* =========================
-   GETTERS
-========================= */
 
 export function getItems(): InventoryItem[] {
   return getAllItemsRaw()
@@ -262,9 +276,9 @@ export function getSales(): SaleRecord[] {
 }
 
 export function getPurchases(): PurchaseRecord[] {
-  return readJson<PurchaseRecord[]>(PURCHASES_KEY, []).sort((a, b) =>
-    b.createdAt.localeCompare(a.createdAt)
-  );
+  return readJson<Partial<PurchaseRecord>[]>(PURCHASES_KEY, [])
+    .map(normalizePurchaseRecord)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 export function getDebts(): DebtRecord[] {
@@ -272,10 +286,6 @@ export function getDebts(): DebtRecord[] {
     .map(normalizeDebt)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
-
-/* =========================
-   ITEMS
-========================= */
 
 export type CreateItemInput = {
   name: string;
@@ -406,10 +416,6 @@ export function deleteItem(itemId: string): void {
   writeItems(items.filter((x) => x.id !== itemId));
 }
 
-/* =========================
-   CUSTOMERS
-========================= */
-
 export type CreateCustomerInput = {
   name: string;
   phone?: string;
@@ -497,10 +503,6 @@ export function deleteCustomer(customerId: string): void {
   writeCustomers(customers.filter((x) => x.id !== customerId));
 }
 
-/* =========================
-   DRAFT CREATORS
-========================= */
-
 export function createEmptySale(): SaleDraft {
   return {
     id: uid("sale"),
@@ -519,7 +521,7 @@ export function createEmptyPurchase(): PurchaseDraft {
     status: "betalt",
     dueDate: "",
     note: "",
-    updateCostMode: "weighted_average",
+    updateCostMode: "last_price",
     lines: [makePurchaseLine()],
     createdAt: nowIso(),
   };
@@ -561,25 +563,9 @@ export function makePurchaseLine(): PurchaseLine {
   };
 }
 
-/* =========================
-   PURCHASES
-========================= */
-
-function calcWeightedAverage(
-  currentStock: number,
-  currentCost: number,
-  incomingQty: number,
-  incomingUnitCost: number
-): number {
-  const totalQty = currentStock + incomingQty;
-  if (totalQty <= 0) return round2(incomingUnitCost);
-  const totalValue = currentStock * currentCost + incomingQty * incomingUnitCost;
-  return round2(totalValue / totalQty);
-}
-
 export function savePurchase(draft: PurchaseDraft): PurchaseRecord {
   const items = getAllItemsRaw();
-  const purchases = readJson<PurchaseRecord[]>(PURCHASES_KEY, []);
+  const purchases = getPurchases();
 
   const total = round2(
     draft.lines.reduce((sum, line) => sum + Number(line.lineTotal || 0), 0)
@@ -596,23 +582,17 @@ export function savePurchase(draft: PurchaseDraft): PurchaseRecord {
     const qty = clampNumber(line.qty, 0);
     const unitCost = round2(clampNumber(line.unitCost, 0));
 
-    let nextCost = current.costPrice;
-    if (draft.updateCostMode === "weighted_average") {
-      nextCost = calcWeightedAverage(current.stock, current.costPrice, qty, unitCost);
-    } else if (draft.updateCostMode === "last_price") {
-      nextCost = unitCost;
-    }
-
     items[index] = {
       ...current,
       stock: current.stock + qty,
-      costPrice: draft.updateCostMode === "no_change" ? current.costPrice : nextCost,
+      costPrice: draft.updateCostMode === "no_change" ? current.costPrice : unitCost,
       updatedAt: nowIso(),
     };
   }
 
   const record: PurchaseRecord = {
     ...draft,
+    updateCostMode: normalizePurchaseCostMode(draft.updateCostMode),
     total,
   };
 
@@ -651,10 +631,6 @@ export function deletePurchase(purchaseId: string): void {
     purchases.filter((x) => x.id !== purchaseId)
   );
 }
-
-/* =========================
-   SALES
-========================= */
 
 export function saveSale(
   draft: SaleDraft,
@@ -805,10 +781,6 @@ export function saleProfit(sale: SaleRecord): number {
   return round2(sale.total - cost);
 }
 
-/* =========================
-   DEBTS
-========================= */
-
 export function saveDebt(
   draft: DebtDraft,
   options?: {
@@ -937,10 +909,6 @@ export function debtRemaining(debt: DebtRecord): number {
   return Math.max(0, round2(debt.total - debtPaidSum(debt)));
 }
 
-/* =========================
-   CUSTOMER SUMS
-========================= */
-
 export function customerSales(customerId: string): SaleRecord[] {
   return getSales().filter((sale) => sale.customerId === customerId);
 }
@@ -960,10 +928,6 @@ export function customerTotalRemaining(customerId: string): number {
 export function customerDebtRemaining(customerId: string): number {
   return round2(customerDebts(customerId).reduce((sum, debt) => sum + debtRemaining(debt), 0));
 }
-
-/* =========================
-   TOTALS / STATS
-========================= */
 
 export function lowStockItems(): InventoryItem[] {
   return getItems().filter((item) => item.stock <= item.minStock);
@@ -1020,13 +984,9 @@ export function getPaymentMethodStats(): PaymentMethodStat[] {
   return Object.values(bucket).sort((a, b) => b.amount - a.amount);
 }
 
-/* =========================
-   BACKUP / IMPORT / RESET
-========================= */
-
 export function exportAllData(): AppBackup {
   return {
-    version: 4,
+    version: 5,
     exportedAt: nowIso(),
     theme: getTheme(),
     saldo: getSaldo(),
@@ -1140,7 +1100,7 @@ export function importBackupObject(input: unknown): void {
     : [];
 
   const mappedPurchases: PurchaseRecord[] = Array.isArray(data.purchases)
-    ? data.purchases
+    ? data.purchases.map((purchase) => normalizePurchaseRecord(purchase))
     : [];
 
   const mappedDebts: DebtRecord[] = Array.isArray(data.debts)
@@ -1164,10 +1124,6 @@ export async function importBackupFile(file: File): Promise<void> {
   const parsed = JSON.parse(raw);
   importBackupObject(parsed);
 }
-
-/* =========================
-   SEED
-========================= */
 
 export function ensureSeedData(): void {
   if (getAllItemsRaw().length === 0) {
