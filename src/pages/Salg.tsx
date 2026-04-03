@@ -14,7 +14,13 @@ import {
   saleRemaining,
   updateSaleMeta,
 } from "../app/storage";
-import type { PaymentMethod, SaleDraft, SaleLine, SaleRecord } from "../types";
+import type {
+  PaymentMethod,
+  SaleDraft,
+  SaleLine,
+  SalePricingMode,
+  SaleRecord,
+} from "../types";
 
 const QUICK_METHODS: PaymentMethod[] = [
   "vipps",
@@ -24,10 +30,28 @@ const QUICK_METHODS: PaymentMethod[] = [
   "bankoverforing",
 ];
 
+function parseNoNumber(value: string): number {
+  const normalized = value.replace(",", ".").trim();
+  if (!normalized) return 0;
+  const n = Number(normalized);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function formatInputNumber(value: number | undefined): string {
+  if (!value) return "";
+  return String(value).replace(".", ",");
+}
+
+type DraftLineInput = {
+  qty: string;
+  unitPrice: string;
+  fixedTotal: string;
+};
+
 export default function Salg() {
   const [draft, setDraft] = useState<SaleDraft>(createEmptySale());
   const [message, setMessage] = useState("");
-  const [paymentAmount, setPaymentAmount] = useState("0");
+  const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentNote, setPaymentNote] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("vipps");
   const [manualMethodLabel, setManualMethodLabel] = useState("");
@@ -43,26 +67,93 @@ export default function Salg() {
   const [laterPaymentMethod, setLaterPaymentMethod] = useState<Record<string, PaymentMethod>>({});
   const [laterManualMethodLabel, setLaterManualMethodLabel] = useState<Record<string, string>>({});
 
+  const [lineInputs, setLineInputs] = useState<Record<string, DraftLineInput>>(() => {
+    const first = createEmptySale().lines[0];
+    return {
+      [first.id]: {
+        qty: formatInputNumber(first.qty),
+        unitPrice: "",
+        fixedTotal: "",
+      },
+    };
+  });
+
   function refreshMessage(text: string): void {
     setMessage(`${text} ${Date.now()}`);
+  }
+
+  function ensureLineInput(line: SaleLine): DraftLineInput {
+    return (
+      lineInputs[line.id] ?? {
+        qty: formatInputNumber(line.qty || 1),
+        unitPrice: formatInputNumber(line.unitPrice),
+        fixedTotal: line.pricingMode === "fixed_total" ? formatInputNumber(line.lineTotal) : "",
+      }
+    );
+  }
+
+  function recalcLine(next: SaleLine): SaleLine {
+    const pricingMode: SalePricingMode = next.pricingMode === "fixed_total" ? "fixed_total" : "unit";
+    if (pricingMode === "fixed_total") {
+      return {
+        ...next,
+        pricingMode,
+        lineTotal: parseNoNumber(String(next.lineTotal)),
+      };
+    }
+
+    return {
+      ...next,
+      pricingMode,
+      lineTotal: parseNoNumber(String(next.qty)) * parseNoNumber(String(next.unitPrice)),
+    };
   }
 
   function updateLine(lineId: string, patch: Partial<SaleLine>): void {
     setDraft((prev) => {
       const lines = prev.lines.map((line) => {
         if (line.id !== lineId) return line;
-        const next: SaleLine = { ...line, ...patch };
-        next.lineTotal = Number(next.qty || 0) * Number(next.unitPrice || 0);
+        const next: SaleLine = recalcLine({ ...line, ...patch });
         return next;
       });
       return { ...prev, lines };
     });
   }
 
+  function updateLineInput(
+    lineId: string,
+    key: keyof DraftLineInput,
+    value: string,
+    apply: (raw: string) => Partial<SaleLine>
+  ): void {
+    setLineInputs((prev) => ({
+      ...prev,
+      [lineId]: {
+        qty: prev[lineId]?.qty ?? "",
+        unitPrice: prev[lineId]?.unitPrice ?? "",
+        fixedTotal: prev[lineId]?.fixedTotal ?? "",
+        [key]: value,
+      },
+    }));
+
+    updateLine(lineId, apply(value));
+  }
+
   function addLine(): void {
+    const line = makeSaleLine();
+
     setDraft((prev) => ({
       ...prev,
-      lines: [...prev.lines, makeSaleLine()],
+      lines: [...prev.lines, line],
+    }));
+
+    setLineInputs((prev) => ({
+      ...prev,
+      [line.id]: {
+        qty: "1",
+        unitPrice: "",
+        fixedTotal: "",
+      },
     }));
   }
 
@@ -74,6 +165,12 @@ export default function Salg() {
         lines: prev.lines.filter((line) => line.id !== lineId),
       };
     });
+
+    setLineInputs((prev) => {
+      const next = { ...prev };
+      delete next[lineId];
+      return next;
+    });
   }
 
   const total = useMemo(() => {
@@ -82,24 +179,33 @@ export default function Salg() {
 
   const estimatedProfit = useMemo(() => {
     return draft.lines.reduce((sum, line) => {
-      return sum + (Number(line.unitPrice || 0) - Number(line.unitCost || 0)) * Number(line.qty || 0);
+      return sum + Number(line.lineTotal || 0) - Number(line.unitCost || 0) * Number(line.qty || 0);
     }, 0);
   }, [draft.lines]);
 
   function handleSave(): void {
     saveSale(draft, {
-      paymentAmount: Number(paymentAmount || 0),
+      paymentAmount: parseNoNumber(paymentAmount),
       paymentNote,
       paymentMethod,
       paymentMethodLabel: paymentMethod === "annet" ? manualMethodLabel : undefined,
     });
 
+    const nextDraft = createEmptySale();
+
     setMessage("Salg lagret");
-    setDraft(createEmptySale());
-    setPaymentAmount("0");
+    setDraft(nextDraft);
+    setPaymentAmount("");
     setPaymentNote("");
     setPaymentMethod("vipps");
     setManualMethodLabel("");
+    setLineInputs({
+      [nextDraft.lines[0].id]: {
+        qty: "1",
+        unitPrice: "",
+        fixedTotal: "",
+      },
+    });
   }
 
   const sales = useMemo(() => getSales(), [message]);
@@ -145,7 +251,7 @@ export default function Salg() {
   }
 
   function handleRegisterPayment(saleId: string): void {
-    const amount = Number(laterPaymentAmount[saleId] || 0);
+    const amount = parseNoNumber(laterPaymentAmount[saleId] || "");
     if (amount <= 0) return;
 
     const method = laterPaymentMethod[saleId] ?? "vipps";
@@ -171,7 +277,7 @@ export default function Salg() {
   return (
     <div>
       <h1 className="pageTitle">Salg</h1>
-      <p className="pageLead">Registrer salg raskt, med fortjeneste og betaling i samme flyt.</p>
+      <p className="pageLead">Registrer salg raskt, med fortjeneste, fastpris og betaling i samme flyt.</p>
 
       <div className="card">
         <div className="grid2">
@@ -200,61 +306,170 @@ export default function Salg() {
         </div>
 
         <div className="list" style={{ marginTop: 18 }}>
-          {draft.lines.map((line, index) => (
-            <div key={line.id} className="lineCard">
-              <div className="rowBetween">
-                <div style={{ fontWeight: 800, fontSize: 22 }}>Linje {index + 1}</div>
-                {draft.lines.length > 1 ? (
-                  <button className="btn btnDanger" type="button" onClick={() => removeLine(line.id)}>
-                    Fjern linje
-                  </button>
-                ) : null}
-              </div>
+          {draft.lines.map((line, index) => {
+            const input = ensureLineInput(line);
+            const pricingMode: SalePricingMode =
+              line.pricingMode === "fixed_total" ? "fixed_total" : "unit";
 
-              <label className="label">
-                <span>Vare</span>
-                <ItemPickerWithCreate
-                  value={line.itemId}
-                  onChange={(item) => {
-                    updateLine(line.id, {
-                      itemId: item?.id,
-                      itemName: item?.name ?? "",
-                      unitPrice: item?.salePrice ?? 0,
-                      unitCost: item?.costPrice ?? 0,
-                      lineTotal: (item?.salePrice ?? 0) * (line.qty || 0),
-                    });
-                  }}
-                />
-              </label>
+            return (
+              <div key={line.id} className="lineCard">
+                <div className="rowBetween">
+                  <div style={{ fontWeight: 800, fontSize: 22 }}>Linje {index + 1}</div>
+                  {draft.lines.length > 1 ? (
+                    <button className="btn btnDanger" type="button" onClick={() => removeLine(line.id)}>
+                      Fjern linje
+                    </button>
+                  ) : null}
+                </div>
 
-              <div className="grid2">
                 <label className="label">
-                  <span>Antall</span>
-                  <input
-                    type="number"
-                    value={line.qty}
-                    onChange={(e) => updateLine(line.id, { qty: Number(e.target.value || 0) })}
+                  <span>Vare</span>
+                  <ItemPickerWithCreate
+                    value={line.itemId}
+                    onChange={(item) => {
+                      const qty = parseNoNumber(input.qty || "1") || 1;
+                      const unitPrice = item?.salePrice ?? 0;
+                      const unitCost = item?.costPrice ?? 0;
+
+                      updateLine(line.id, {
+                        itemId: item?.id,
+                        itemName: item?.name ?? "",
+                        unitPrice,
+                        unitCost,
+                        qty,
+                        pricingMode: "unit",
+                        lineTotal: qty * unitPrice,
+                      });
+
+                      setLineInputs((prev) => ({
+                        ...prev,
+                        [line.id]: {
+                          qty: prev[line.id]?.qty || "1",
+                          unitPrice: unitPrice ? formatInputNumber(unitPrice) : "",
+                          fixedTotal: "",
+                        },
+                      }));
+                    }}
                   />
                 </label>
 
-                <label className="label">
-                  <span>Pris per stk</span>
-                  <input
-                    type="number"
-                    value={line.unitPrice}
-                    onChange={(e) => updateLine(line.id, { unitPrice: Number(e.target.value || 0) })}
-                  />
-                </label>
-              </div>
+                <div style={{ marginTop: 2 }}>
+                  <div className="muted" style={{ marginBottom: 8 }}>Pristype</div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <button
+                      type="button"
+                      className={pricingMode === "unit" ? "btn btnPrimary" : "btn"}
+                      onClick={() => {
+                        const qty = parseNoNumber(input.qty || "1") || 1;
+                        const unitPrice = parseNoNumber(input.unitPrice || "");
+                        updateLine(line.id, {
+                          pricingMode: "unit",
+                          qty,
+                          unitPrice,
+                          lineTotal: qty * unitPrice,
+                        });
+                      }}
+                    >
+                      Pris per stk
+                    </button>
 
-              <div className="rowBetween">
-                <span className="badge badgeBlue">Linjesum: {fmtKr(line.lineTotal)}</span>
-                <span className="badge badgeGold">
-                  Fortjeneste: {fmtKr((line.unitPrice - line.unitCost) * line.qty)}
-                </span>
+                    <button
+                      type="button"
+                      className={pricingMode === "fixed_total" ? "btn btnPrimary" : "btn"}
+                      onClick={() => {
+                        const fixedTotal =
+                          parseNoNumber(input.fixedTotal || "") ||
+                          parseNoNumber(input.qty || "1") * parseNoNumber(input.unitPrice || "");
+                        updateLine(line.id, {
+                          pricingMode: "fixed_total",
+                          lineTotal: fixedTotal,
+                        });
+                        setLineInputs((prev) => ({
+                          ...prev,
+                          [line.id]: {
+                            qty: prev[line.id]?.qty ?? "1",
+                            unitPrice: prev[line.id]?.unitPrice ?? "",
+                            fixedTotal: fixedTotal ? formatInputNumber(fixedTotal) : "",
+                          },
+                        }));
+                      }}
+                    >
+                      Fastpris på linja
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid2">
+                  <label className="label">
+                    <span>Antall</span>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={input.qty}
+                      onChange={(e) =>
+                        updateLineInput(line.id, "qty", e.target.value, (raw) => {
+                          const qty = parseNoNumber(raw);
+                          if (pricingMode === "fixed_total") {
+                            return { qty };
+                          }
+                          const unitPrice = parseNoNumber(input.unitPrice || "");
+                          return {
+                            qty,
+                            lineTotal: qty * unitPrice,
+                          };
+                        })
+                      }
+                      placeholder="F.eks. 3"
+                    />
+                  </label>
+
+                  {pricingMode === "unit" ? (
+                    <label className="label">
+                      <span>Pris per stk</span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={input.unitPrice}
+                        onChange={(e) =>
+                          updateLineInput(line.id, "unitPrice", e.target.value, (raw) => {
+                            const unitPrice = parseNoNumber(raw);
+                            const qty = parseNoNumber(input.qty || "");
+                            return {
+                              unitPrice,
+                              lineTotal: qty * unitPrice,
+                            };
+                          })
+                        }
+                        placeholder="F.eks. 199,90"
+                      />
+                    </label>
+                  ) : (
+                    <label className="label">
+                      <span>Fastpris for hele linja</span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={input.fixedTotal}
+                        onChange={(e) =>
+                          updateLineInput(line.id, "fixedTotal", e.target.value, (raw) => ({
+                            lineTotal: parseNoNumber(raw),
+                          }))
+                        }
+                        placeholder="F.eks. 500"
+                      />
+                    </label>
+                  )}
+                </div>
+
+                <div className="rowBetween">
+                  <span className="badge badgeBlue">Linjesum: {fmtKr(line.lineTotal)}</span>
+                  <span className="badge badgeGold">
+                    Fortjeneste: {fmtKr(Number(line.lineTotal || 0) - Number(line.unitCost || 0) * Number(line.qty || 0))}
+                  </span>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         <div className="cardActions">
@@ -272,9 +487,11 @@ export default function Salg() {
           <label className="label">
             <span>Betalt nå</span>
             <input
-              type="number"
+              type="text"
+              inputMode="decimal"
               value={paymentAmount}
               onChange={(e) => setPaymentAmount(e.target.value)}
+              placeholder="F.eks. 500"
             />
           </label>
 
@@ -448,7 +665,10 @@ export default function Salg() {
                             <div className="customerMain">
                               <div className="featureRowTitle">{line.itemName || "Uten varenavn"}</div>
                               <div className="featureRowSub">
-                                Antall: {line.qty} • Pris: {fmtKr(line.unitPrice)}
+                                Antall: {line.qty} •{" "}
+                                {line.pricingMode === "fixed_total"
+                                  ? `Fastpris`
+                                  : `Pris: ${fmtKr(line.unitPrice)}`}
                               </div>
                             </div>
 
@@ -480,7 +700,9 @@ export default function Salg() {
                             sale.payments.map((payment) => (
                               <div key={payment.id} className="featureRow">
                                 <div className="customerMain">
-                                  <div className="featureRowTitle">{paymentMethodLabel(payment.method, payment.methodLabel)}</div>
+                                  <div className="featureRowTitle">
+                                    {paymentMethodLabel(payment.method, payment.methodLabel)}
+                                  </div>
                                   <div className="featureRowSub">
                                     {new Date(payment.createdAt).toLocaleString("no-NO")}
                                     {payment.note ? ` • ${payment.note}` : ""}
@@ -498,7 +720,8 @@ export default function Salg() {
                         <label className="label">
                           <span>Registrer betaling senere</span>
                           <input
-                            type="number"
+                            type="text"
+                            inputMode="decimal"
                             value={laterPaymentAmount[sale.id] ?? ""}
                             onChange={(e) =>
                               setLaterPaymentAmount((prev) => ({ ...prev, [sale.id]: e.target.value }))
