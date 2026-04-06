@@ -4,12 +4,14 @@ import { ensureSeedData } from "./storage";
 import Logo from "./Logo";
 import Oversikt from "../pages/Oversikt";
 import Varer from "../pages/Varer";
+import Innkjop from "../pages/Innkjop";
 
-type Tab = "oversikt" | "varer" | "data";
+type Tab = "oversikt" | "varer" | "innkjop" | "data";
 
 const navItems: Array<{ key: Tab; label: string }> = [
   { key: "oversikt", label: "Oversikt" },
   { key: "varer", label: "Varer" },
+  { key: "innkjop", label: "Innkjøp" },
 ];
 
 export default function App() {
@@ -23,6 +25,7 @@ export default function App() {
   const content =
     tab === "oversikt" ? <Oversikt /> :
     tab === "varer" ? <Varer /> :
+    tab === "innkjop" ? <Innkjop /> :
     <div>Data</div>;
 
   return (
