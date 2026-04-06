@@ -11,6 +11,19 @@ import {
 } from "../app/storage";
 import type { InventoryItem } from "../types";
 
+function parseNoNumber(value: string): number {
+  const normalized = value.replace(",", ".").trim();
+  if (!normalized) return 0;
+  const n = Number(normalized);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function formatInputNumber(value: number | undefined): string {
+  if (value === undefined || value === null) return "";
+  if (value === 0) return "";
+  return String(value).replace(".", ",");
+}
+
 export default function Varer() {
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [openNew, setOpenNew] = useState(false);
@@ -27,7 +40,7 @@ export default function Varer() {
     setStockEdits((prev) => {
       const next: Record<string, string> = {};
       for (const item of all) {
-        next[item.id] = prev[item.id] ?? String(item.stock);
+        next[item.id] = prev[item.id] ?? formatInputNumber(item.stock);
       }
       return next;
     });
@@ -56,16 +69,18 @@ export default function Varer() {
   const lowItems = useMemo(() => lowStockItems(), [items]);
 
   function handleSaveAbsoluteStock(item: InventoryItem): void {
-    const raw = stockEdits[item.id];
-    if (raw === undefined || raw === "") return;
-    setItemStock(item.id, Number(raw || 0));
+    const raw = stockEdits[item.id] ?? "";
+    const value = parseNoNumber(raw);
+    setItemStock(item.id, value);
     refresh();
   }
 
   function handleQuickAdjust(item: InventoryItem): void {
-    const raw = quickAdjust[item.id];
-    if (!raw) return;
-    adjustItemStock(item.id, Number(raw || 0));
+    const raw = quickAdjust[item.id] ?? "";
+    const value = parseNoNumber(raw);
+    if (value === 0) return;
+
+    adjustItemStock(item.id, value);
     setQuickAdjust((prev) => ({ ...prev, [item.id]: "" }));
     refresh();
   }
@@ -184,18 +199,21 @@ export default function Varer() {
                     <label className="label">
                       <span>Sett lager direkte</span>
                       <input
-                        type="number"
-                        value={stockEdits[item.id] ?? String(item.stock)}
+                        type="text"
+                        inputMode="decimal"
+                        value={stockEdits[item.id] ?? ""}
                         onChange={(e) =>
                           setStockEdits((prev) => ({ ...prev, [item.id]: e.target.value }))
                         }
+                        placeholder="F.eks. 12"
                       />
                     </label>
 
                     <label className="label">
                       <span>Juster lager (+ / -)</span>
                       <input
-                        type="number"
+                        type="text"
+                        inputMode="decimal"
                         placeholder="f.eks. 5 eller -3"
                         value={quickAdjust[item.id] ?? ""}
                         onChange={(e) =>
