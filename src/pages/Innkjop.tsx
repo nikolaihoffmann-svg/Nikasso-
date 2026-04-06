@@ -10,38 +10,141 @@ import {
 } from "../app/storage";
 import type { PurchaseDraft, PurchaseLine, PurchaseRecord } from "../types";
 
+type DraftLineInput = {
+  qty: string;
+  unitCost: string;
+};
+
+function parseNoNumber(value: string): number {
+  const normalized = value.replace(",", ".").trim();
+  if (!normalized) return 0;
+  const n = Number(normalized);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function formatInputNumber(value: number | undefined): string {
+  if (value === undefined || value === null) return "";
+  if (value === 0) return "";
+  return String(value).replace(".", ",");
+}
+
+function createInitialPurchaseState(): {
+  draft: PurchaseDraft;
+  lineInputs: Record<string, DraftLineInput>;
+} {
+  const draft = createEmptyPurchase();
+  const firstLine = draft.lines[0];
+
+  return {
+    draft,
+    lineInputs: {
+      [firstLine.id]: {
+        qty: firstLine.qty ? formatInputNumber(firstLine.qty) || "1" : "1",
+        unitCost: "",
+      },
+    },
+  };
+}
+
 export default function Innkjop() {
-  const [draft, setDraft] = useState<PurchaseDraft>(createEmptyPurchase());
+  const initial = useMemo(() => createInitialPurchaseState(), []);
+  const [draft, setDraft] = useState<PurchaseDraft>(initial.draft);
+  const [lineInputs, setLineInputs] = useState<Record<string, DraftLineInput>>(initial.lineInputs);
+
   const [message, setMessage] = useState("");
   const [historyQuery, setHistoryQuery] = useState("");
+
+  function refreshMessage(text: string): void {
+    setMessage(`${text} ${Date.now()}`);
+  }
+
+  function visibleMessage(text: string): string {
+    return text.replace(/\s\d+$/, "");
+  }
+
+  function ensureLineInput(line: PurchaseLine): DraftLineInput {
+    return (
+      lineInputs[line.id] ?? {
+        qty: formatInputNumber(line.qty) || "1",
+        unitCost: formatInputNumber(line.unitCost),
+      }
+    );
+  }
+
+  function recalcLine(next: PurchaseLine): PurchaseLine {
+    return {
+      ...next,
+      lineTotal: parseNoNumber(String(next.qty)) * parseNoNumber(String(next.unitCost)),
+    };
+  }
 
   function updateLine(lineId: string, patch: Partial<PurchaseLine>): void {
     setDraft((prev) => {
       const lines = prev.lines.map((line) => {
         if (line.id !== lineId) return line;
-        const next: PurchaseLine = { ...line, ...patch };
-        next.lineTotal = Number(next.qty || 0) * Number(next.unitCost || 0);
-        return next;
+        return recalcLine({ ...line, ...patch });
       });
+
       return { ...prev, lines };
     });
   }
 
+  function updateLineInput(
+    lineId: string,
+    key: keyof DraftLineInput,
+    value: string,
+    apply: (raw: string) => Partial<PurchaseLine>
+  ): void {
+    setLineInputs((prev) => ({
+      ...prev,
+      [lineId]: {
+        qty: prev[lineId]?.qty ?? "",
+        unitCost: prev[lineId]?.unitCost ?? "",
+        [key]: value,
+      },
+    }));
+
+    updateLine(lineId, apply(value));
+  }
+
   function addLine(): void {
+    const line = makePurchaseLine();
+
     setDraft((prev) => ({
       ...prev,
-      lines: [...prev.lines, makePurchaseLine()],
+      lines: [...prev.lines, line],
+    }));
+
+    setLineInputs((prev) => ({
+      ...prev,
+      [line.id]: {
+        qty: "1",
+        unitCost: "",
+      },
     }));
   }
 
   function removeLine(lineId: string): void {
     setDraft((prev) => {
       if (prev.lines.length <= 1) return prev;
+
       return {
         ...prev,
         lines: prev.lines.filter((line) => line.id !== lineId),
       };
     });
+
+    setLineInputs((prev) => {
+      const next = { ...prev };
+      delete next[lineId];
+      return next;
+    });
+  }
+
+  function resetDraft(): void {
+    const next = createInitialPurchaseState();
+    setDraft(next.draft);
+    setLineInputs(next.lineInputs);
   }
 
   const total = useMemo(() => {
@@ -50,8 +153,8 @@ export default function Innkjop() {
 
   function handleSave(): void {
     savePurchase(draft);
-    setMessage(`Innkjøp lagret ${Date.now()}`);
-    setDraft(createEmptyPurchase());
+    resetDraft();
+    refreshMessage("Innkjøp lagret");
   }
 
   const purchases = useMemo(() => getPurchases(), [message]);
@@ -83,13 +186,15 @@ export default function Innkjop() {
     }
 
     deletePurchase(purchase.id);
-    setMessage(`Innkjøp slettet ${Date.now()}`);
+    refreshMessage("Innkjøp slettet");
   }
 
   return (
     <div>
       <h1 className="pageTitle">Innkjøp</h1>
-      <p className="pageLead">Siste pris er nå standard, siden du ikke vil blande gammel og ny varekost.</p>
+      <p className="pageLead">
+        Siste pris er nå standard, siden du ikke vil blande gammel og ny varekost.
+      </p>
 
       <div className="card">
         <div className="grid2">
@@ -136,71 +241,115 @@ export default function Innkjop() {
         </label>
 
         <div className="list" style={{ marginTop: 18 }}>
-          {draft.lines.map((line, index) => (
-            <div key={line.id} className="lineCard">
-              <div className="rowBetween">
-                <div style={{ fontWeight: 800, fontSize: 22 }}>Linje {index + 1}</div>
-                {draft.lines.length > 1 ? (
-                  <button className="btn btnDanger" type="button" onClick={() => removeLine(line.id)}>
-                    Fjern linje
-                  </button>
-                ) : null}
-              </div>
+          {draft.lines.map((line, index) => {
+            const input = ensureLineInput(line);
 
-              <label className="label">
-                <span>Type</span>
-                <select
-                  value={line.kind}
-                  onChange={(e) =>
-                    updateLine(line.id, {
-                      kind: e.target.value as PurchaseLine["kind"],
-                    })
-                  }
-                >
-                  <option value="varekjop">Varekjøp (lager)</option>
-                  <option value="forbruk">Forbruk</option>
-                  <option value="utstyr">Utstyr</option>
-                </select>
-              </label>
+            return (
+              <div key={line.id} className="lineCard">
+                <div className="rowBetween">
+                  <div style={{ fontWeight: 800, fontSize: 22 }}>Linje {index + 1}</div>
+                  {draft.lines.length > 1 ? (
+                    <button
+                      className="btn btnDanger"
+                      type="button"
+                      onClick={() => removeLine(line.id)}
+                    >
+                      Fjern linje
+                    </button>
+                  ) : null}
+                </div>
 
-              <label className="label">
-                <span>Vare</span>
-                <ItemPickerWithCreate
-                  value={line.itemId}
-                  onChange={(item) => {
-                    updateLine(line.id, {
-                      itemId: item?.id,
-                      itemName: item?.name ?? "",
-                      unitCost: item?.costPrice ?? 0,
-                      lineTotal: (item?.costPrice ?? 0) * (line.qty || 0),
-                    });
-                  }}
-                />
-              </label>
-
-              <div className="grid2">
                 <label className="label">
-                  <span>Antall</span>
-                  <input
-                    type="number"
-                    value={line.qty}
-                    onChange={(e) => updateLine(line.id, { qty: Number(e.target.value || 0) })}
-                  />
+                  <span>Type</span>
+                  <select
+                    value={line.kind}
+                    onChange={(e) =>
+                      updateLine(line.id, {
+                        kind: e.target.value as PurchaseLine["kind"],
+                      })
+                    }
+                  >
+                    <option value="varekjop">Varekjøp (lager)</option>
+                    <option value="forbruk">Forbruk</option>
+                    <option value="utstyr">Utstyr</option>
+                  </select>
                 </label>
 
                 <label className="label">
-                  <span>Kostpris</span>
-                  <input
-                    type="number"
-                    value={line.unitCost}
-                    onChange={(e) => updateLine(line.id, { unitCost: Number(e.target.value || 0) })}
+                  <span>Vare</span>
+                  <ItemPickerWithCreate
+                    value={line.itemId}
+                    onChange={(item) => {
+                      const qty = parseNoNumber(input.qty || "1") || 1;
+                      const unitCost = item?.costPrice ?? 0;
+
+                      updateLine(line.id, {
+                        itemId: item?.id,
+                        itemName: item?.name ?? "",
+                        unitCost,
+                        qty,
+                        lineTotal: qty * unitCost,
+                      });
+
+                      setLineInputs((prev) => ({
+                        ...prev,
+                        [line.id]: {
+                          qty: prev[line.id]?.qty || "1",
+                          unitCost: unitCost ? formatInputNumber(unitCost) : "",
+                        },
+                      }));
+                    }}
                   />
                 </label>
-              </div>
 
-              <span className="badge badgeBlue">Linjesum: {fmtKr(line.lineTotal)}</span>
-            </div>
-          ))}
+                <div className="grid2">
+                  <label className="label">
+                    <span>Antall</span>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={input.qty}
+                      onChange={(e) =>
+                        updateLineInput(line.id, "qty", e.target.value, (raw) => {
+                          const qty = parseNoNumber(raw);
+                          const unitCost = parseNoNumber(input.unitCost || "");
+
+                          return {
+                            qty,
+                            lineTotal: qty * unitCost,
+                          };
+                        })
+                      }
+                      placeholder="F.eks. 3"
+                    />
+                  </label>
+
+                  <label className="label">
+                    <span>Kostpris</span>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={input.unitCost}
+                      onChange={(e) =>
+                        updateLineInput(line.id, "unitCost", e.target.value, (raw) => {
+                          const unitCost = parseNoNumber(raw);
+                          const qty = parseNoNumber(input.qty || "");
+
+                          return {
+                            unitCost,
+                            lineTotal: qty * unitCost,
+                          };
+                        })
+                      }
+                      placeholder="F.eks. 133,33"
+                    />
+                  </label>
+                </div>
+
+                <span className="badge badgeBlue">Linjesum: {fmtKr(line.lineTotal)}</span>
+              </div>
+            );
+          })}
         </div>
 
         <div className="cardActions">
@@ -222,7 +371,7 @@ export default function Innkjop() {
         </div>
 
         {message ? (
-          <div style={{ marginTop: 12, color: "#86efac" }}>{message.replace(/\s\d+$/, "")}</div>
+          <div style={{ marginTop: 12, color: "#86efac" }}>{visibleMessage(message)}</div>
         ) : null}
       </div>
 
@@ -262,7 +411,11 @@ export default function Innkjop() {
                 </div>
 
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-                  <span className={purchase.status === "betalt" ? "badge badgeSuccess" : "badge badgeDanger"}>
+                  <span
+                    className={
+                      purchase.status === "betalt" ? "badge badgeSuccess" : "badge badgeDanger"
+                    }
+                  >
                     {purchase.status === "betalt" ? "Betalt" : "Ikke betalt"}
                   </span>
 
@@ -299,7 +452,11 @@ export default function Innkjop() {
 
                 <div className="cardActions">
                   <div className="muted">Ved sletting trekkes lager tilbake for varekjøp.</div>
-                  <button className="btn btnDanger" type="button" onClick={() => handleDeletePurchase(purchase)}>
+                  <button
+                    className="btn btnDanger"
+                    type="button"
+                    onClick={() => handleDeletePurchase(purchase)}
+                  >
                     Slett innkjøp
                   </button>
                 </div>
