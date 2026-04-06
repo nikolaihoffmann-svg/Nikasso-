@@ -30,6 +30,12 @@ const QUICK_METHODS: PaymentMethod[] = [
   "bankoverforing",
 ];
 
+type DraftLineInput = {
+  qty: string;
+  unitPrice: string;
+  fixedTotal: string;
+};
+
 function parseNoNumber(value: string): number {
   const normalized = value.replace(",", ".").trim();
   if (!normalized) return 0;
@@ -38,18 +44,35 @@ function parseNoNumber(value: string): number {
 }
 
 function formatInputNumber(value: number | undefined): string {
-  if (!value) return "";
+  if (value === undefined || value === null) return "";
+  if (value === 0) return "";
   return String(value).replace(".", ",");
 }
 
-type DraftLineInput = {
-  qty: string;
-  unitPrice: string;
-  fixedTotal: string;
-};
+function createInitialSaleState(): {
+  draft: SaleDraft;
+  lineInputs: Record<string, DraftLineInput>;
+} {
+  const draft = createEmptySale();
+  const firstLine = draft.lines[0];
+
+  return {
+    draft,
+    lineInputs: {
+      [firstLine.id]: {
+        qty: firstLine.qty ? formatInputNumber(firstLine.qty) || "1" : "1",
+        unitPrice: "",
+        fixedTotal: "",
+      },
+    },
+  };
+}
 
 export default function Salg() {
-  const [draft, setDraft] = useState<SaleDraft>(createEmptySale());
+  const initial = useMemo(() => createInitialSaleState(), []);
+  const [draft, setDraft] = useState<SaleDraft>(initial.draft);
+  const [lineInputs, setLineInputs] = useState<Record<string, DraftLineInput>>(initial.lineInputs);
+
   const [message, setMessage] = useState("");
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentNote, setPaymentNote] = useState("");
@@ -62,30 +85,24 @@ export default function Salg() {
   const [editCustomerId, setEditCustomerId] = useState<string | undefined>(undefined);
   const [editCustomerName, setEditCustomerName] = useState("");
   const [editNote, setEditNote] = useState("");
+
   const [laterPaymentAmount, setLaterPaymentAmount] = useState<Record<string, string>>({});
   const [laterPaymentNote, setLaterPaymentNote] = useState<Record<string, string>>({});
   const [laterPaymentMethod, setLaterPaymentMethod] = useState<Record<string, PaymentMethod>>({});
   const [laterManualMethodLabel, setLaterManualMethodLabel] = useState<Record<string, string>>({});
 
-  const [lineInputs, setLineInputs] = useState<Record<string, DraftLineInput>>(() => {
-    const first = createEmptySale().lines[0];
-    return {
-      [first.id]: {
-        qty: formatInputNumber(first.qty),
-        unitPrice: "",
-        fixedTotal: "",
-      },
-    };
-  });
-
   function refreshMessage(text: string): void {
     setMessage(`${text} ${Date.now()}`);
+  }
+
+  function visibleMessage(text: string): string {
+    return text.replace(/\s\d+$/, "");
   }
 
   function ensureLineInput(line: SaleLine): DraftLineInput {
     return (
       lineInputs[line.id] ?? {
-        qty: formatInputNumber(line.qty || 1),
+        qty: formatInputNumber(line.qty) || "1",
         unitPrice: formatInputNumber(line.unitPrice),
         fixedTotal: line.pricingMode === "fixed_total" ? formatInputNumber(line.lineTotal) : "",
       }
@@ -93,7 +110,9 @@ export default function Salg() {
   }
 
   function recalcLine(next: SaleLine): SaleLine {
-    const pricingMode: SalePricingMode = next.pricingMode === "fixed_total" ? "fixed_total" : "unit";
+    const pricingMode: SalePricingMode =
+      next.pricingMode === "fixed_total" ? "fixed_total" : "unit";
+
     if (pricingMode === "fixed_total") {
       return {
         ...next,
@@ -113,9 +132,9 @@ export default function Salg() {
     setDraft((prev) => {
       const lines = prev.lines.map((line) => {
         if (line.id !== lineId) return line;
-        const next: SaleLine = recalcLine({ ...line, ...patch });
-        return next;
+        return recalcLine({ ...line, ...patch });
       });
+
       return { ...prev, lines };
     });
   }
@@ -160,6 +179,7 @@ export default function Salg() {
   function removeLine(lineId: string): void {
     setDraft((prev) => {
       if (prev.lines.length <= 1) return prev;
+
       return {
         ...prev,
         lines: prev.lines.filter((line) => line.id !== lineId),
@@ -179,9 +199,23 @@ export default function Salg() {
 
   const estimatedProfit = useMemo(() => {
     return draft.lines.reduce((sum, line) => {
-      return sum + Number(line.lineTotal || 0) - Number(line.unitCost || 0) * Number(line.qty || 0);
+      return (
+        sum +
+        Number(line.lineTotal || 0) -
+        Number(line.unitCost || 0) * Number(line.qty || 0)
+      );
     }, 0);
   }, [draft.lines]);
+
+  function resetDraft(): void {
+    const next = createInitialSaleState();
+    setDraft(next.draft);
+    setLineInputs(next.lineInputs);
+    setPaymentAmount("");
+    setPaymentNote("");
+    setPaymentMethod("vipps");
+    setManualMethodLabel("");
+  }
 
   function handleSave(): void {
     saveSale(draft, {
@@ -191,21 +225,8 @@ export default function Salg() {
       paymentMethodLabel: paymentMethod === "annet" ? manualMethodLabel : undefined,
     });
 
-    const nextDraft = createEmptySale();
-
-    setMessage("Salg lagret");
-    setDraft(nextDraft);
-    setPaymentAmount("");
-    setPaymentNote("");
-    setPaymentMethod("vipps");
-    setManualMethodLabel("");
-    setLineInputs({
-      [nextDraft.lines[0].id]: {
-        qty: "1",
-        unitPrice: "",
-        fixedTotal: "",
-      },
-    });
+    resetDraft();
+    refreshMessage("Salg lagret");
   }
 
   const sales = useMemo(() => getSales(), [message]);
@@ -220,6 +241,7 @@ export default function Salg() {
       const lineHit = sale.lines.some((line) =>
         (line.itemName || "").toLowerCase().includes(q)
       );
+
       return customerHit || noteHit || lineHit;
     });
   }, [sales, historyQuery]);
@@ -233,20 +255,25 @@ export default function Salg() {
 
   function saveEdit(): void {
     if (!editId) return;
+
     updateSaleMeta(editId, {
       customerId: editCustomerId,
       customerName: editCustomerName,
       note: editNote,
     });
+
     setEditId("");
     refreshMessage("Salg oppdatert");
   }
 
   function handleDeleteSale(sale: SaleRecord): void {
     if (!confirm(`Slette salget til ${sale.customerName || "Kontantsalg"}?`)) return;
+
     deleteSale(sale.id);
+
     if (expandedId === sale.id) setExpandedId("");
     if (editId === sale.id) setEditId("");
+
     refreshMessage("Salg slettet");
   }
 
@@ -268,6 +295,7 @@ export default function Salg() {
     setLaterPaymentNote((prev) => ({ ...prev, [saleId]: "" }));
     setLaterPaymentMethod((prev) => ({ ...prev, [saleId]: "vipps" }));
     setLaterManualMethodLabel((prev) => ({ ...prev, [saleId]: "" }));
+
     refreshMessage("Betaling registrert");
   }
 
@@ -277,7 +305,9 @@ export default function Salg() {
   return (
     <div>
       <h1 className="pageTitle">Salg</h1>
-      <p className="pageLead">Registrer salg raskt, med fortjeneste, fastpris og betaling i samme flyt.</p>
+      <p className="pageLead">
+        Registrer salg raskt, med fortjeneste, fastpris og betaling i samme flyt.
+      </p>
 
       <div className="card">
         <div className="grid2">
@@ -316,7 +346,11 @@ export default function Salg() {
                 <div className="rowBetween">
                   <div style={{ fontWeight: 800, fontSize: 22 }}>Linje {index + 1}</div>
                   {draft.lines.length > 1 ? (
-                    <button className="btn btnDanger" type="button" onClick={() => removeLine(line.id)}>
+                    <button
+                      className="btn btnDanger"
+                      type="button"
+                      onClick={() => removeLine(line.id)}
+                    >
                       Fjern linje
                     </button>
                   ) : null}
@@ -362,6 +396,7 @@ export default function Salg() {
                       onClick={() => {
                         const qty = parseNoNumber(input.qty || "1") || 1;
                         const unitPrice = parseNoNumber(input.unitPrice || "");
+
                         updateLine(line.id, {
                           pricingMode: "unit",
                           qty,
@@ -379,11 +414,14 @@ export default function Salg() {
                       onClick={() => {
                         const fixedTotal =
                           parseNoNumber(input.fixedTotal || "") ||
-                          parseNoNumber(input.qty || "1") * parseNoNumber(input.unitPrice || "");
+                          parseNoNumber(input.qty || "1") *
+                            parseNoNumber(input.unitPrice || "");
+
                         updateLine(line.id, {
                           pricingMode: "fixed_total",
                           lineTotal: fixedTotal,
                         });
+
                         setLineInputs((prev) => ({
                           ...prev,
                           [line.id]: {
@@ -409,9 +447,11 @@ export default function Salg() {
                       onChange={(e) =>
                         updateLineInput(line.id, "qty", e.target.value, (raw) => {
                           const qty = parseNoNumber(raw);
+
                           if (pricingMode === "fixed_total") {
                             return { qty };
                           }
+
                           const unitPrice = parseNoNumber(input.unitPrice || "");
                           return {
                             qty,
@@ -434,6 +474,7 @@ export default function Salg() {
                           updateLineInput(line.id, "unitPrice", e.target.value, (raw) => {
                             const unitPrice = parseNoNumber(raw);
                             const qty = parseNoNumber(input.qty || "");
+
                             return {
                               unitPrice,
                               lineTotal: qty * unitPrice,
@@ -464,7 +505,11 @@ export default function Salg() {
                 <div className="rowBetween">
                   <span className="badge badgeBlue">Linjesum: {fmtKr(line.lineTotal)}</span>
                   <span className="badge badgeGold">
-                    Fortjeneste: {fmtKr(Number(line.lineTotal || 0) - Number(line.unitCost || 0) * Number(line.qty || 0))}
+                    Fortjeneste:{" "}
+                    {fmtKr(
+                      Number(line.lineTotal || 0) -
+                        Number(line.unitCost || 0) * Number(line.qty || 0)
+                    )}
                   </span>
                 </div>
               </div>
@@ -518,6 +563,7 @@ export default function Salg() {
                 {paymentMethodLabel(method)}
               </button>
             ))}
+
             <button
               type="button"
               className={paymentMethod === "annet" ? "btn btnPrimary" : "btn"}
@@ -550,7 +596,9 @@ export default function Salg() {
           </button>
         </div>
 
-        {message ? <div style={{ marginTop: 12, color: "#86efac" }}>{message}</div> : null}
+        {message ? (
+          <div style={{ marginTop: 12, color: "#86efac" }}>{visibleMessage(message)}</div>
+        ) : null}
       </div>
 
       <div className="card" style={{ marginTop: 16 }}>
@@ -621,7 +669,11 @@ export default function Salg() {
                       </button>
                     </div>
 
-                    <button className="btn btnDanger" type="button" onClick={() => handleDeleteSale(sale)}>
+                    <button
+                      className="btn btnDanger"
+                      type="button"
+                      onClick={() => handleDeleteSale(sale)}
+                    >
                       Slett salg
                     </button>
                   </div>
@@ -642,7 +694,10 @@ export default function Salg() {
 
                         <label className="label">
                           <span>Notat</span>
-                          <input value={editNote} onChange={(e) => setEditNote(e.target.value)} />
+                          <input
+                            value={editNote}
+                            onChange={(e) => setEditNote(e.target.value)}
+                          />
                         </label>
                       </div>
 
@@ -667,7 +722,7 @@ export default function Salg() {
                               <div className="featureRowSub">
                                 Antall: {line.qty} •{" "}
                                 {line.pricingMode === "fixed_total"
-                                  ? `Fastpris`
+                                  ? "Fastpris"
                                   : `Pris: ${fmtKr(line.unitPrice)}`}
                               </div>
                             </div>
@@ -724,7 +779,10 @@ export default function Salg() {
                             inputMode="decimal"
                             value={laterPaymentAmount[sale.id] ?? ""}
                             onChange={(e) =>
-                              setLaterPaymentAmount((prev) => ({ ...prev, [sale.id]: e.target.value }))
+                              setLaterPaymentAmount((prev) => ({
+                                ...prev,
+                                [sale.id]: e.target.value,
+                              }))
                             }
                             placeholder="Beløp"
                           />
@@ -735,7 +793,10 @@ export default function Salg() {
                           <input
                             value={laterPaymentNote[sale.id] ?? ""}
                             onChange={(e) =>
-                              setLaterPaymentNote((prev) => ({ ...prev, [sale.id]: e.target.value }))
+                              setLaterPaymentNote((prev) => ({
+                                ...prev,
+                                [sale.id]: e.target.value,
+                              }))
                             }
                             placeholder="Valgfritt notat..."
                           />
@@ -749,9 +810,16 @@ export default function Salg() {
                             <button
                               key={method}
                               type="button"
-                              className={(laterPaymentMethod[sale.id] ?? "vipps") === method ? "btn btnPrimary" : "btn"}
+                              className={
+                                (laterPaymentMethod[sale.id] ?? "vipps") === method
+                                  ? "btn btnPrimary"
+                                  : "btn"
+                              }
                               onClick={() =>
-                                setLaterPaymentMethod((prev) => ({ ...prev, [sale.id]: method }))
+                                setLaterPaymentMethod((prev) => ({
+                                  ...prev,
+                                  [sale.id]: method,
+                                }))
                               }
                             >
                               {paymentMethodLabel(method)}
@@ -760,9 +828,16 @@ export default function Salg() {
 
                           <button
                             type="button"
-                            className={(laterPaymentMethod[sale.id] ?? "vipps") === "annet" ? "btn btnPrimary" : "btn"}
+                            className={
+                              (laterPaymentMethod[sale.id] ?? "vipps") === "annet"
+                                ? "btn btnPrimary"
+                                : "btn"
+                            }
                             onClick={() =>
-                              setLaterPaymentMethod((prev) => ({ ...prev, [sale.id]: "annet" }))
+                              setLaterPaymentMethod((prev) => ({
+                                ...prev,
+                                [sale.id]: "annet",
+                              }))
                             }
                           >
                             Annet
@@ -776,7 +851,10 @@ export default function Salg() {
                           <input
                             value={laterManualMethodLabel[sale.id] ?? ""}
                             onChange={(e) =>
-                              setLaterManualMethodLabel((prev) => ({ ...prev, [sale.id]: e.target.value }))
+                              setLaterManualMethodLabel((prev) => ({
+                                ...prev,
+                                [sale.id]: e.target.value,
+                              }))
                             }
                             placeholder="F.eks. Stripe, PayPal..."
                           />
