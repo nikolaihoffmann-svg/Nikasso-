@@ -6,14 +6,16 @@ import Oversikt from "../pages/Oversikt";
 import Varer from "../pages/Varer";
 import Innkjop from "../pages/Innkjop";
 import Salg from "../pages/Salg";
+import Kunder from "../pages/Kunder";
 
-type Tab = "oversikt" | "varer" | "innkjop" | "salg" | "data";
+type Tab = "oversikt" | "varer" | "innkjop" | "salg" | "kunder" | "data";
 
 const navItems: Array<{ key: Tab; label: string }> = [
   { key: "oversikt", label: "Oversikt" },
   { key: "varer", label: "Varer" },
   { key: "innkjop", label: "Innkjøp" },
   { key: "salg", label: "Salg" },
+  { key: "kunder", label: "Kunder" },
 ];
 
 export default function App() {
@@ -29,6 +31,7 @@ export default function App() {
     tab === "varer" ? <Varer /> :
     tab === "innkjop" ? <Innkjop /> :
     tab === "salg" ? <Salg /> :
+    tab === "kunder" ? <Kunder /> :
     <div>Data</div>;
 
   return (
