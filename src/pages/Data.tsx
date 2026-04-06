@@ -12,6 +12,13 @@ import {
   totalSalesOutstanding,
 } from "../app/storage";
 
+function parseNoNumber(value: string): number {
+  const normalized = value.replace(",", ".").trim();
+  if (!normalized) return 0;
+  const n = Number(normalized);
+  return Number.isFinite(n) ? n : 0;
+}
+
 export default function DataPage() {
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [message, setMessage] = useState("");
@@ -24,19 +31,21 @@ export default function DataPage() {
     try {
       await importBackupFile(file);
       setMessage("Backup importert");
+      if (fileRef.current) fileRef.current.value = "";
       window.location.reload();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "Import feilet");
+      if (fileRef.current) fileRef.current.value = "";
     }
   }
 
   function handleSaldoAdjust(): void {
-    const amount = Number(saldoAdjust || 0);
+    const amount = parseNoNumber(saldoAdjust);
     if (!Number.isFinite(amount) || amount === 0) return;
 
     adjustSaldo(amount);
     setSaldoAdjust("");
-    setMessage("Saldo oppdatert");
+    setMessage(`Saldo oppdatert med ${amount > 0 ? "+" : ""}${fmtKr(amount)}`);
   }
 
   const salesOpen = totalSalesOutstanding();
@@ -48,9 +57,7 @@ export default function DataPage() {
   return (
     <div>
       <h1 className="pageTitle">Data</h1>
-      <p className="pageLead">
-        Backup, status, saldo og samlet verdi på ett sted.
-      </p>
+      <p className="pageLead">Backup, status, saldo og samlet verdi på ett sted.</p>
 
       <div className="grid3">
         <div className="statCard">
@@ -98,7 +105,7 @@ export default function DataPage() {
         </div>
 
         <div className="statCard">
-          <div className="statLabel">Nettoverdi nå</div>
+          <div className="statLabel">Potensiell totalverdi</div>
           <div className="statValue">{fmtKr(potentialTotal)}</div>
         </div>
       </div>
@@ -110,7 +117,8 @@ export default function DataPage() {
           <label className="label">
             <span>Legg til eller trekk fra</span>
             <input
-              type="number"
+              type="text"
+              inputMode="decimal"
               value={saldoAdjust}
               onChange={(e) => setSaldoAdjust(e.target.value)}
               placeholder="f.eks. 500 eller -250"
@@ -204,7 +212,7 @@ export default function DataPage() {
 
             <div className="featureRow">
               <div className="customerMain">
-                <div className="featureRowTitle">Nettoverdi nå</div>
+                <div className="featureRowTitle">Potensiell totalverdi</div>
                 <div className="featureRowSub">
                   Saldo + samlet til gode + lagerverdi.
                 </div>
