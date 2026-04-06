@@ -8,6 +8,7 @@ import Innkjop from "../pages/Innkjop";
 import Salg from "../pages/Salg";
 import Kunder from "../pages/Kunder";
 import Gjeld from "../pages/Gjeld";
+import DataPage from "../pages/Data";
 
 type Tab =
   | "oversikt"
@@ -42,7 +43,7 @@ export default function App() {
     tab === "salg" ? <Salg /> :
     tab === "kunder" ? <Kunder /> :
     tab === "gjeld" ? <Gjeld /> :
-    <div>Data</div>;
+    <DataPage />;
 
   return (
     <div className="app">
