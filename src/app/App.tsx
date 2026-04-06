@@ -3,11 +3,13 @@ import "./styles.css";
 import { ensureSeedData } from "./storage";
 import Logo from "./Logo";
 import Oversikt from "../pages/Oversikt";
+import Varer from "../pages/Varer";
 
-type Tab = "oversikt" | "data";
+type Tab = "oversikt" | "varer" | "data";
 
 const navItems: Array<{ key: Tab; label: string }> = [
   { key: "oversikt", label: "Oversikt" },
+  { key: "varer", label: "Varer" },
 ];
 
 export default function App() {
@@ -18,7 +20,10 @@ export default function App() {
     document.documentElement.setAttribute("data-theme", "dark");
   }, []);
 
-  const content = tab === "oversikt" ? <Oversikt /> : <div>Data</div>;
+  const content =
+    tab === "oversikt" ? <Oversikt /> :
+    tab === "varer" ? <Varer /> :
+    <div>Data</div>;
 
   return (
     <div className="app">
