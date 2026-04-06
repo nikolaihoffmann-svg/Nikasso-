@@ -22,10 +22,27 @@ const QUICK_METHODS: PaymentMethod[] = [
   "bankoverforing",
 ];
 
+function parseNoNumber(value: string): number {
+  const normalized = value.replace(",", ".").trim();
+  if (!normalized) return 0;
+  const n = Number(normalized);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function formatInputNumber(value: number | undefined): string {
+  if (value === undefined || value === null) return "";
+  if (value === 0) return "";
+  return String(value).replace(".", ",");
+}
+
+function createInitialDebtState(): DebtDraft {
+  return createEmptyDebt();
+}
+
 export default function Gjeld() {
-  const [draft, setDraft] = useState<DebtDraft>(createEmptyDebt());
+  const [draft, setDraft] = useState<DebtDraft>(() => createInitialDebtState());
   const [message, setMessage] = useState("");
-  const [paymentAmount, setPaymentAmount] = useState("0");
+  const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentNote, setPaymentNote] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("vipps");
   const [manualMethodLabel, setManualMethodLabel] = useState("");
@@ -37,12 +54,16 @@ export default function Gjeld() {
   const [editTitle, setEditTitle] = useState("");
   const [editCustomerId, setEditCustomerId] = useState<string | undefined>(undefined);
   const [editCustomerName, setEditCustomerName] = useState("");
-  const [editTotal, setEditTotal] = useState("0");
+  const [editTotal, setEditTotal] = useState("");
   const [editNote, setEditNote] = useState("");
   const [amounts, setAmounts] = useState<Record<string, string>>({});
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [methods, setMethods] = useState<Record<string, PaymentMethod>>({});
   const [manualLabels, setManualLabels] = useState<Record<string, string>>({});
+
+  function visibleMessage(text: string): string {
+    return text.replace(/\s\d+$/, "");
+  }
 
   function refresh(text?: string): void {
     setDebts(getDebts());
@@ -53,19 +74,23 @@ export default function Gjeld() {
     refresh();
   }, []);
 
+  function resetDraft(): void {
+    setDraft(createInitialDebtState());
+    setPaymentAmount("");
+    setPaymentNote("");
+    setPaymentMethod("vipps");
+    setManualMethodLabel("");
+  }
+
   function handleSaveDebt(): void {
     saveDebt(draft, {
-      paymentAmount: Number(paymentAmount || 0),
+      paymentAmount: parseNoNumber(paymentAmount),
       paymentNote,
       paymentMethod,
       paymentMethodLabel: paymentMethod === "annet" ? manualMethodLabel : undefined,
     });
 
-    setDraft(createEmptyDebt());
-    setPaymentAmount("0");
-    setPaymentNote("");
-    setPaymentMethod("vipps");
-    setManualMethodLabel("");
+    resetDraft();
     refresh("Gjeld lagret");
   }
 
@@ -86,7 +111,7 @@ export default function Gjeld() {
   const biggestOpen = filteredDebts.reduce((max, debt) => Math.max(max, debtRemaining(debt)), 0);
 
   function handlePay(debtId: string): void {
-    const amount = Number(amounts[debtId] || 0);
+    const amount = parseNoNumber(amounts[debtId] || "");
     if (amount <= 0) return;
 
     const method = methods[debtId] ?? "vipps";
@@ -111,28 +136,33 @@ export default function Gjeld() {
     setEditTitle(debt.title);
     setEditCustomerId(debt.customerId);
     setEditCustomerName(debt.customerName || "");
-    setEditTotal(String(debt.total));
+    setEditTotal(formatInputNumber(debt.total));
     setEditNote(debt.note || "");
   }
 
   function saveEdit(): void {
     if (!editId) return;
+
     updateDebt(editId, {
       title: editTitle,
       customerId: editCustomerId,
       customerName: editCustomerName,
-      total: Number(editTotal || 0),
+      total: parseNoNumber(editTotal),
       note: editNote,
     });
+
     setEditId("");
     refresh("Gjeld oppdatert");
   }
 
   function handleDelete(debt: DebtRecord): void {
     if (!confirm(`Slette gjeldsposten "${debt.title}"?`)) return;
+
     deleteDebt(debt.id);
+
     if (expandedId === debt.id) setExpandedId("");
     if (editId === debt.id) setEditId("");
+
     refresh("Gjeld slettet");
   }
 
@@ -171,11 +201,13 @@ export default function Gjeld() {
           <label className="label">
             <span>Beløp</span>
             <input
-              type="number"
-              value={draft.total}
+              type="text"
+              inputMode="decimal"
+              value={formatInputNumber(draft.total)}
               onChange={(e) =>
-                setDraft((prev) => ({ ...prev, total: Number(e.target.value || 0) }))
+                setDraft((prev) => ({ ...prev, total: parseNoNumber(e.target.value) }))
               }
+              placeholder="F.eks. 2500"
             />
           </label>
 
@@ -193,9 +225,11 @@ export default function Gjeld() {
           <label className="label">
             <span>Betalt nå</span>
             <input
-              type="number"
+              type="text"
+              inputMode="decimal"
               value={paymentAmount}
               onChange={(e) => setPaymentAmount(e.target.value)}
+              placeholder="F.eks. 500"
             />
           </label>
 
@@ -254,7 +288,9 @@ export default function Gjeld() {
           </button>
         </div>
 
-        {message ? <div style={{ marginTop: 12, color: "#86efac" }}>{message.replace(/\s\d+$/, "")}</div> : null}
+        {message ? (
+          <div style={{ marginTop: 12, color: "#86efac" }}>{visibleMessage(message)}</div>
+        ) : null}
       </div>
 
       <div className="grid3" style={{ marginTop: 16 }}>
@@ -301,7 +337,8 @@ export default function Gjeld() {
                   <div className="customerMain">
                     <div style={{ fontSize: 20, fontWeight: 800 }}>{debt.title}</div>
                     <div className="muted" style={{ marginTop: 6 }}>
-                      {debt.customerName || "Uten kunde"} • {new Date(debt.createdAt).toLocaleString("no-NO")}
+                      {debt.customerName || "Uten kunde"} •{" "}
+                      {new Date(debt.createdAt).toLocaleString("no-NO")}
                     </div>
                   </div>
 
@@ -361,9 +398,11 @@ export default function Gjeld() {
                       <label className="label">
                         <span>Beløp</span>
                         <input
-                          type="number"
+                          type="text"
+                          inputMode="decimal"
                           value={editTotal}
                           onChange={(e) => setEditTotal(e.target.value)}
+                          placeholder="F.eks. 2500"
                         />
                       </label>
 
@@ -424,7 +463,8 @@ export default function Gjeld() {
                       <label className="label">
                         <span>Registrer betaling</span>
                         <input
-                          type="number"
+                          type="text"
+                          inputMode="decimal"
                           value={amounts[debt.id] ?? ""}
                           onChange={(e) =>
                             setAmounts((prev) => ({ ...prev, [debt.id]: e.target.value }))
@@ -452,16 +492,26 @@ export default function Gjeld() {
                           <button
                             key={method}
                             type="button"
-                            className={(methods[debt.id] ?? "vipps") === method ? "btn btnPrimary" : "btn"}
-                            onClick={() => setMethods((prev) => ({ ...prev, [debt.id]: method }))}
+                            className={
+                              (methods[debt.id] ?? "vipps") === method ? "btn btnPrimary" : "btn"
+                            }
+                            onClick={() =>
+                              setMethods((prev) => ({ ...prev, [debt.id]: method }))
+                            }
                           >
                             {paymentMethodLabel(method)}
                           </button>
                         ))}
                         <button
                           type="button"
-                          className={(methods[debt.id] ?? "vipps") === "annet" ? "btn btnPrimary" : "btn"}
-                          onClick={() => setMethods((prev) => ({ ...prev, [debt.id]: "annet" }))}
+                          className={
+                            (methods[debt.id] ?? "vipps") === "annet"
+                              ? "btn btnPrimary"
+                              : "btn"
+                          }
+                          onClick={() =>
+                            setMethods((prev) => ({ ...prev, [debt.id]: "annet" }))
+                          }
                         >
                           Annet
                         </button>
