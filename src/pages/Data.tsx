@@ -19,6 +19,10 @@ function parseNoNumber(value: string): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+function visibleMessage(text: string): string {
+  return text.replace(/\s\d+$/, "");
+}
+
 export default function DataPage() {
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [message, setMessage] = useState("");
@@ -222,7 +226,9 @@ export default function DataPage() {
         </div>
       </div>
 
-      {message ? <div style={{ marginTop: 16, color: "#86efac" }}>{message}</div> : null}
+      {message ? (
+        <div style={{ marginTop: 16, color: "#86efac" }}>{visibleMessage(message)}</div>
+      ) : null}
 
       <div className="card" style={{ marginTop: 16 }}>
         <div className="rowBetween">
