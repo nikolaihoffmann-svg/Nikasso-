@@ -1,5 +1,6 @@
 import "./styles.css";
+import Oversikt from "../pages/Oversikt";
 
 export default function App() {
-  return <div className="app">APP OK MED CSS</div>;
+  return <Oversikt />;
 }
