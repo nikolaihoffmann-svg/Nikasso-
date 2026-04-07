@@ -36,14 +36,32 @@ export default function App() {
     document.documentElement.setAttribute("data-theme", "dark");
   }, []);
 
-  const content =
-    tab === "oversikt" ? <Oversikt /> :
-    tab === "varer" ? <Varer /> :
-    tab === "innkjop" ? <Innkjop /> :
-    tab === "salg" ? <Salg /> :
-    tab === "kunder" ? <Kunder /> :
-    tab === "gjeld" ? <Gjeld /> :
-    <DataPage />;
+  let content: JSX.Element;
+
+  switch (tab) {
+    case "oversikt":
+      content = <Oversikt />;
+      break;
+    case "varer":
+      content = <Varer />;
+      break;
+    case "innkjop":
+      content = <Innkjop />;
+      break;
+    case "salg":
+      content = <Salg />;
+      break;
+    case "kunder":
+      content = <Kunder />;
+      break;
+    case "gjeld":
+      content = <Gjeld />;
+      break;
+    case "data":
+    default:
+      content = <DataPage />;
+      break;
+  }
 
   return (
     <div className="app">
