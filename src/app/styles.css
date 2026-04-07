@@ -484,7 +484,8 @@ textarea {
 .customerName {
   font-size: 18px;
   font-weight: 800;
-  overflow-wrap: anywhere;
+  word-break: normal;
+  overflow-wrap: break-word;
 }
 
 .customerMeta {
@@ -535,18 +536,20 @@ textarea {
 }
 
 .featureRow {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 12px;
   padding: 12px 14px;
   border-radius: 16px;
   border: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.04);
+  align-items: center;
 }
 
 .featureRowTitle {
   font-weight: 700;
-  overflow-wrap: anywhere;
+  word-break: normal;
+  overflow-wrap: break-word;
 }
 
 .featureRowSub {
@@ -665,7 +668,8 @@ textarea {
 .vareName {
   font-size: 18px;
   font-weight: 800;
-  overflow-wrap: anywhere;
+  word-break: normal;
+  overflow-wrap: break-word;
 }
 
 .vareMeta {
@@ -827,9 +831,13 @@ textarea {
   .customerButtonTop,
   .rowBetween,
   .itemRow,
-  .featureRow,
   .cardActions,
   .vareRow {
+    align-items: flex-start;
+  }
+
+  .featureRow {
+    grid-template-columns: 1fr;
     align-items: flex-start;
   }
 
