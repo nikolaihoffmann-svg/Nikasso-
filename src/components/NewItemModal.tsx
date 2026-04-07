@@ -20,7 +20,8 @@ function parseNoNumber(value: string): number {
 }
 
 function formatInputNumber(value: number | undefined): string {
-  if (!value) return "";
+  if (value === undefined || value === null) return "";
+  if (value === 0) return "";
   return String(value).replace(".", ",");
 }
 
@@ -140,7 +141,10 @@ export default function NewItemModal({
 
           <label className="label">
             <span>Kategori</span>
-            <select value={category} onChange={(e) => setCategory(e.target.value as ItemCategory)}>
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value as ItemCategory)}
+            >
               {categories.map((x) => (
                 <option key={x} value={x}>
                   {x}
@@ -206,7 +210,9 @@ export default function NewItemModal({
         {error ? <div className="modalError">{error}</div> : null}
 
         <div className="cardActions">
-          <div className="muted">Tallfelt er gjort enklere å bruke på iPhone, og enhet er låst til stk.</div>
+          <div className="muted">
+            Tallfelt er gjort enklere å bruke på iPhone, og enhet er låst til stk.
+          </div>
           <button className="btn btnPrimary" type="button" onClick={handleSave}>
             {isEdit ? "Lagre endringer" : "Lagre vare"}
           </button>
