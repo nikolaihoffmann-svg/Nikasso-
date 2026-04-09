@@ -1,14 +1,31 @@
 import { useMemo, useState } from "react";
 import ItemPickerWithCreate from "../components/ItemPickerWithCreate";
 import {
+  addPaymentToPurchase,
   createEmptyPurchase,
   deletePurchase,
   fmtKr,
   getPurchases,
   makePurchaseLine,
+  paymentMethodLabel,
+  purchasePaidSum,
+  purchaseRemaining,
   savePurchase,
 } from "../app/storage";
-import type { PurchaseDraft, PurchaseLine, PurchaseRecord } from "../types";
+import type {
+  PaymentMethod,
+  PurchaseDraft,
+  PurchaseLine,
+  PurchaseRecord,
+} from "../types";
+
+const QUICK_METHODS: PaymentMethod[] = [
+  "vipps",
+  "revolut",
+  "kontant",
+  "bytte",
+  "bankoverforing",
+];
 
 type DraftLineInput = {
   qty: string;
@@ -53,6 +70,16 @@ export default function Innkjop() {
 
   const [message, setMessage] = useState("");
   const [historyQuery, setHistoryQuery] = useState("");
+
+  const [paymentAmount, setPaymentAmount] = useState("");
+  const [paymentNote, setPaymentNote] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("vipps");
+  const [manualMethodLabel, setManualMethodLabel] = useState("");
+
+  const [laterPaymentAmount, setLaterPaymentAmount] = useState<Record<string, string>>({});
+  const [laterPaymentNote, setLaterPaymentNote] = useState<Record<string, string>>({});
+  const [laterPaymentMethod, setLaterPaymentMethod] = useState<Record<string, PaymentMethod>>({});
+  const [laterManualMethodLabel, setLaterManualMethodLabel] = useState<Record<string, string>>({});
 
   function refreshMessage(text: string): void {
     setMessage(`${text} ${Date.now()}`);
@@ -145,6 +172,10 @@ export default function Innkjop() {
     const next = createInitialPurchaseState();
     setDraft(next.draft);
     setLineInputs(next.lineInputs);
+    setPaymentAmount("");
+    setPaymentNote("");
+    setPaymentMethod("vipps");
+    setManualMethodLabel("");
   }
 
   const total = useMemo(() => {
@@ -152,7 +183,13 @@ export default function Innkjop() {
   }, [draft.lines]);
 
   function handleSave(): void {
-    savePurchase(draft);
+    savePurchase(draft, {
+      paymentAmount: parseNoNumber(paymentAmount),
+      paymentNote,
+      paymentMethod,
+      paymentMethodLabel: paymentMethod === "annet" ? manualMethodLabel : undefined,
+    });
+
     resetDraft();
     refreshMessage("Innkjøp lagret");
   }
@@ -187,6 +224,27 @@ export default function Innkjop() {
 
     deletePurchase(purchase.id);
     refreshMessage("Innkjøp slettet");
+  }
+
+  function handleRegisterPayment(purchaseId: string): void {
+    const amount = parseNoNumber(laterPaymentAmount[purchaseId] || "");
+    if (amount <= 0) return;
+
+    const method = laterPaymentMethod[purchaseId] ?? "vipps";
+
+    addPaymentToPurchase(
+      purchaseId,
+      amount,
+      laterPaymentNote[purchaseId] || "Registrert senere",
+      method,
+      method === "annet" ? laterManualMethodLabel[purchaseId] : undefined
+    );
+
+    setLaterPaymentAmount((prev) => ({ ...prev, [purchaseId]: "" }));
+    setLaterPaymentNote((prev) => ({ ...prev, [purchaseId]: "" }));
+    setLaterPaymentMethod((prev) => ({ ...prev, [purchaseId]: "vipps" }));
+    setLaterManualMethodLabel((prev) => ({ ...prev, [purchaseId]: "" }));
+    refreshMessage("Betaling registrert");
   }
 
   return (
@@ -363,6 +421,62 @@ export default function Innkjop() {
           </div>
         </div>
 
+        <div className="grid2" style={{ marginTop: 18 }}>
+          <label className="label">
+            <span>Betalt nå</span>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={paymentAmount}
+              onChange={(e) => setPaymentAmount(e.target.value)}
+              placeholder="F.eks. 500"
+            />
+          </label>
+
+          <label className="label">
+            <span>Betalingsnotat</span>
+            <input
+              value={paymentNote}
+              onChange={(e) => setPaymentNote(e.target.value)}
+              placeholder="Valgfritt notat..."
+            />
+          </label>
+        </div>
+
+        <div style={{ marginTop: 14 }}>
+          <div className="muted" style={{ marginBottom: 8 }}>Hurtigvalg betalingsmåte</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {QUICK_METHODS.map((method) => (
+              <button
+                key={method}
+                type="button"
+                className={paymentMethod === method ? "btn btnPrimary" : "btn"}
+                onClick={() => setPaymentMethod(method)}
+              >
+                {paymentMethodLabel(method)}
+              </button>
+            ))}
+            <button
+              type="button"
+              className={paymentMethod === "annet" ? "btn btnPrimary" : "btn"}
+              onClick={() => setPaymentMethod("annet")}
+            >
+              Annet
+            </button>
+          </div>
+        </div>
+
+        {paymentMethod === "annet" ? (
+          <label className="label" style={{ marginTop: 14 }}>
+            <span>Manuell betalingsmåte</span>
+            <input
+              value={manualMethodLabel}
+              onChange={(e) => setManualMethodLabel(e.target.value)}
+              placeholder="F.eks. Stripe, PayPal..."
+            />
+          </label>
+        ) : null}
+
         <div className="cardActions">
           <div className="muted">Ved varekjøp brukes nå siste innkjøpspris som ny kostpris.</div>
           <button className="btn btnPrimary" type="button" onClick={handleSave}>
@@ -394,74 +508,212 @@ export default function Innkjop() {
           {filteredPurchases.length === 0 ? (
             <div className="emptyText">Ingen innkjøp funnet.</div>
           ) : (
-            filteredPurchases.map((purchase) => (
-              <div key={purchase.id} className="card">
-                <div className="rowBetween" style={{ marginBottom: 12 }}>
-                  <div className="customerMain">
-                    <div className="featureRowTitle">{purchaseTitle(purchase)}</div>
-                    <div className="featureRowSub">
-                      {new Date(purchase.createdAt).toLocaleString("no-NO")}
+            filteredPurchases.map((purchase) => {
+              const remaining = purchaseRemaining(purchase);
+              const paid = purchasePaidSum(purchase);
+
+              return (
+                <div key={purchase.id} className="card">
+                  <div className="rowBetween" style={{ marginBottom: 12 }}>
+                    <div className="customerMain">
+                      <div className="featureRowTitle">{purchaseTitle(purchase)}</div>
+                      <div className="featureRowSub">
+                        {new Date(purchase.createdAt).toLocaleString("no-NO")}
+                      </div>
+                    </div>
+
+                    <div style={{ textAlign: "right" }}>
+                      <div style={{ fontWeight: 800 }}>{fmtKr(purchase.total)}</div>
+                      <div className="featureRowSub">
+                        Betalt: {fmtKr(paid)} • Rest: {fmtKr(remaining)}
+                      </div>
                     </div>
                   </div>
 
-                  <div style={{ textAlign: "right" }}>
-                    <div style={{ fontWeight: 800 }}>{fmtKr(purchase.total)}</div>
-                    <div className="featureRowSub">{purchase.lines.length} linjer</div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+                    <span
+                      className={
+                        remaining > 0 ? "badge badgeDanger" : "badge badgeSuccess"
+                      }
+                    >
+                      {remaining > 0 ? "Ikke betalt" : "Betalt"}
+                    </span>
+
+                    <span className="badge">
+                      {purchase.updateCostMode === "last_price"
+                        ? "Siste pris"
+                        : "Ingen kost-endring"}
+                    </span>
                   </div>
-                </div>
 
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-                  <span
-                    className={
-                      purchase.status === "betalt" ? "badge badgeSuccess" : "badge badgeDanger"
-                    }
-                  >
-                    {purchase.status === "betalt" ? "Betalt" : "Ikke betalt"}
-                  </span>
+                  <div className="featureList">
+                    {purchase.lines.map((line) => (
+                      <div key={line.id} className="featureRow">
+                        <div className="customerMain">
+                          <div className="featureRowTitle">{line.itemName || "Uten varenavn"}</div>
+                          <div className="featureRowSub">
+                            {line.kind} • Antall: {line.qty}
+                          </div>
+                        </div>
 
-                  <span className="badge">
-                    {purchase.updateCostMode === "last_price"
-                      ? "Siste pris"
-                      : "Ingen kost-endring"}
-                  </span>
-                </div>
+                        <div className="featureRowRight">
+                          <div>{fmtKr(line.lineTotal)}</div>
+                          <div className="featureRowSub">Kost: {fmtKr(line.unitCost)}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
 
-                <div className="featureList">
-                  {purchase.lines.map((line) => (
-                    <div key={line.id} className="featureRow">
-                      <div className="customerMain">
-                        <div className="featureRowTitle">{line.itemName || "Uten varenavn"}</div>
-                        <div className="featureRowSub">
-                          {line.kind} • Antall: {line.qty}
+                  {purchase.note ? (
+                    <div className="featureRowSub" style={{ marginTop: 12 }}>
+                      Notat: {purchase.note}
+                    </div>
+                  ) : null}
+
+                  {(purchase.payments ?? []).length > 0 ? (
+                    <div style={{ marginTop: 12 }}>
+                      <div className="featureRowSub" style={{ marginBottom: 8 }}>
+                        Betalinger:
+                      </div>
+
+                      <div className="featureList">
+                        {(purchase.payments ?? []).map((payment) => (
+                          <div key={payment.id} className="featureRow">
+                            <div className="customerMain">
+                              <div className="featureRowTitle">
+                                {paymentMethodLabel(payment.method, payment.methodLabel)}
+                              </div>
+                              <div className="featureRowSub">
+                                {new Date(payment.createdAt).toLocaleString("no-NO")}
+                                {payment.note ? ` • ${payment.note}` : ""}
+                              </div>
+                            </div>
+
+                            <div className="featureRowRight">{fmtKr(payment.amount)}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {remaining > 0 ? (
+                    <>
+                      <div className="grid2" style={{ marginTop: 12 }}>
+                        <label className="label">
+                          <span>Registrer betaling</span>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={laterPaymentAmount[purchase.id] ?? ""}
+                            onChange={(e) =>
+                              setLaterPaymentAmount((prev) => ({
+                                ...prev,
+                                [purchase.id]: e.target.value,
+                              }))
+                            }
+                            placeholder="Beløp"
+                          />
+                        </label>
+
+                        <label className="label">
+                          <span>Betalingsnotat</span>
+                          <input
+                            value={laterPaymentNote[purchase.id] ?? ""}
+                            onChange={(e) =>
+                              setLaterPaymentNote((prev) => ({
+                                ...prev,
+                                [purchase.id]: e.target.value,
+                              }))
+                            }
+                            placeholder="Valgfritt notat..."
+                          />
+                        </label>
+                      </div>
+
+                      <div style={{ marginTop: 14 }}>
+                        <div className="muted" style={{ marginBottom: 8 }}>Betalingsmåte</div>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          {QUICK_METHODS.map((method) => (
+                            <button
+                              key={method}
+                              type="button"
+                              className={
+                                (laterPaymentMethod[purchase.id] ?? "vipps") === method
+                                  ? "btn btnPrimary"
+                                  : "btn"
+                              }
+                              onClick={() =>
+                                setLaterPaymentMethod((prev) => ({
+                                  ...prev,
+                                  [purchase.id]: method,
+                                }))
+                              }
+                            >
+                              {paymentMethodLabel(method)}
+                            </button>
+                          ))}
+
+                          <button
+                            type="button"
+                            className={
+                              (laterPaymentMethod[purchase.id] ?? "vipps") === "annet"
+                                ? "btn btnPrimary"
+                                : "btn"
+                            }
+                            onClick={() =>
+                              setLaterPaymentMethod((prev) => ({
+                                ...prev,
+                                [purchase.id]: "annet",
+                              }))
+                            }
+                          >
+                            Annet
+                          </button>
                         </div>
                       </div>
 
-                      <div className="featureRowRight">
-                        <div>{fmtKr(line.lineTotal)}</div>
-                        <div className="featureRowSub">Kost: {fmtKr(line.unitCost)}</div>
+                      {(laterPaymentMethod[purchase.id] ?? "vipps") === "annet" ? (
+                        <label className="label" style={{ marginTop: 12 }}>
+                          <span>Manuell betalingsmåte</span>
+                          <input
+                            value={laterManualMethodLabel[purchase.id] ?? ""}
+                            onChange={(e) =>
+                              setLaterManualMethodLabel((prev) => ({
+                                ...prev,
+                                [purchase.id]: e.target.value,
+                              }))
+                            }
+                            placeholder="F.eks. Stripe, PayPal..."
+                          />
+                        </label>
+                      ) : null}
+
+                      <div className="cardActions">
+                        <div className="muted">Bruk dette når innkjøpet blir betalt senere.</div>
+                        <button
+                          className="btn btnSuccess"
+                          type="button"
+                          onClick={() => handleRegisterPayment(purchase.id)}
+                        >
+                          Registrer betaling
+                        </button>
                       </div>
-                    </div>
-                  ))}
-                </div>
+                    </>
+                  ) : null}
 
-                {purchase.note ? (
-                  <div className="featureRowSub" style={{ marginTop: 12 }}>
-                    Notat: {purchase.note}
+                  <div className="cardActions">
+                    <div className="muted">Ved sletting trekkes lager tilbake for varekjøp.</div>
+                    <button
+                      className="btn btnDanger"
+                      type="button"
+                      onClick={() => handleDeletePurchase(purchase)}
+                    >
+                      Slett innkjøp
+                    </button>
                   </div>
-                ) : null}
-
-                <div className="cardActions">
-                  <div className="muted">Ved sletting trekkes lager tilbake for varekjøp.</div>
-                  <button
-                    className="btn btnDanger"
-                    type="button"
-                    onClick={() => handleDeletePurchase(purchase)}
-                  >
-                    Slett innkjøp
-                  </button>
                 </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       </div>
