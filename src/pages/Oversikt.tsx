@@ -12,6 +12,8 @@ import {
   getSales,
   inventoryValue,
   paymentMethodLabel,
+  potentialInventoryProfit,
+  potentialInventorySalesValue,
   projectedTotalValue,
   salePaidSum,
   saleProfit,
@@ -94,6 +96,8 @@ export default function Oversikt() {
   const totalOpen = totalReceivables();
   const purchaseTotal = purchases.reduce((sum, purchase) => sum + Number(purchase.total || 0), 0);
   const stockValue = inventoryValue(items);
+  const potentialSalesValue = potentialInventorySalesValue(items);
+  const potentialStockProfit = potentialInventoryProfit(items);
   const grossProfit = sales.reduce((sum, sale) => sum + saleProfit(sale), 0);
   const potentialTotal = projectedTotalValue();
 
@@ -149,7 +153,6 @@ export default function Oversikt() {
   const maxDebtBars = Math.max(...debtBars.map((x) => x.value), 1);
   const bestSale = saleTotals.length ? Math.max(...saleTotals) : 0;
   const lowestSale = saleTotals.length ? Math.min(...saleTotals) : 0;
-
   const maxPaymentMethodAmount = Math.max(...paymentStats.map((x) => x.amount), 1);
 
   return (
@@ -190,6 +193,16 @@ export default function Oversikt() {
         <div className="infoCard">
           <div className="infoLabel">Lagerverdi</div>
           <div className="statMiniValue">{fmtKr(stockValue)}</div>
+        </div>
+
+        <div className="infoCard">
+          <div className="infoLabel">Potensiell salgsverdi</div>
+          <div className="statMiniValue">{fmtKr(potentialSalesValue)}</div>
+        </div>
+
+        <div className="infoCard">
+          <div className="infoLabel">Potensiell lagerfortjeneste</div>
+          <div className="statMiniValue">{fmtKr(potentialStockProfit)}</div>
         </div>
 
         <div className="infoCard">
@@ -281,7 +294,7 @@ export default function Oversikt() {
               <div className="featureRowRight">{sales.length}</div>
             </div>
             <div className="featureRow">
-              <div className="featureRowTitle">Antall gjeldsposter</div>
+              <div className="featureRowTitle">Gjeldsposter</div>
               <div className="featureRowRight">{debts.length}</div>
             </div>
           </div>
