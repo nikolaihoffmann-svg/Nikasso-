@@ -103,6 +103,15 @@ export type PurchaseStatus = "betalt" | "ikke_betalt";
 
 export type PurchaseCostMode = "last_price" | "no_change";
 
+export type PurchasePayment = {
+  id: string;
+  amount: number;
+  createdAt: string;
+  note?: string;
+  method?: PaymentMethod;
+  methodLabel?: string;
+};
+
 export type PurchaseRecord = {
   id: string;
   supplier: string;
@@ -112,6 +121,7 @@ export type PurchaseRecord = {
   updateCostMode: PurchaseCostMode;
   lines: PurchaseLine[];
   total: number;
+  payments: PurchasePayment[];
   createdAt: string;
 };
 
@@ -123,6 +133,8 @@ export type PurchaseDraft = {
   note?: string;
   updateCostMode: PurchaseCostMode;
   lines: PurchaseLine[];
+  total?: number;
+  payments?: PurchasePayment[];
   createdAt: string;
 };
 
