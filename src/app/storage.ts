@@ -12,6 +12,7 @@ import type {
   PaymentMethodStat,
   PurchaseDraft,
   PurchaseLine,
+  PurchasePayment,
   PurchaseRecord,
   SaleDraft,
   SaleLine,
@@ -150,6 +151,18 @@ function normalizePayment(input: Partial<Payment>): Payment {
   };
 }
 
+function normalizePurchasePayment(input: Partial<PurchasePayment>): PurchasePayment {
+  const method = normalizePaymentMethod(input.method);
+  return {
+    id: input.id ?? uid("ppay"),
+    amount: round2(clampNumber(input.amount, 0)),
+    createdAt: input.createdAt ?? nowIso(),
+    note: input.note,
+    method,
+    methodLabel: paymentMethodLabel(method, input.methodLabel),
+  };
+}
+
 function normalizeDebtPayment(input: Partial<DebtPayment>): DebtPayment {
   const method = normalizePaymentMethod(input.method);
   return {
@@ -189,29 +202,48 @@ function normalizePurchaseCostMode(value: unknown): "last_price" | "no_change" {
 }
 
 function normalizePurchaseRecord(input: Partial<PurchaseRecord>): PurchaseRecord {
+  const lines: PurchaseLine[] = Array.isArray(input.lines)
+    ? input.lines.map((line) => ({
+        id: line.id ?? uid("pline"),
+        kind:
+          line.kind === "forbruk" || line.kind === "utstyr" ? line.kind : "varekjop",
+        itemId: line.itemId,
+        itemName: line.itemName,
+        qty: clampNumber(line.qty, 0),
+        unitCost: round2(clampNumber(line.unitCost, 0)),
+        lineTotal: round2(
+          clampNumber(line.lineTotal, 0) ||
+            clampNumber(line.qty, 0) * clampNumber(line.unitCost, 0)
+        ),
+      }))
+    : [];
+
+  const total =
+    round2(clampNumber(input.total, 0)) ||
+    round2(lines.reduce((sum, line) => sum + line.lineTotal, 0));
+
+  const payments: PurchasePayment[] = Array.isArray(input.payments)
+    ? input.payments.map((p) => normalizePurchasePayment(p))
+    : [];
+
+  const paidSum = round2(payments.reduce((sum, p) => sum + Number(p.amount || 0), 0));
+  const status =
+    paidSum >= total && total > 0
+      ? "betalt"
+      : input.status === "ikke_betalt"
+        ? "ikke_betalt"
+        : "betalt";
+
   return {
     id: String(input.id ?? uid("purchase")),
     supplier: String(input.supplier ?? ""),
-    status: input.status === "ikke_betalt" ? "ikke_betalt" : "betalt",
+    status,
     dueDate: input.dueDate || undefined,
     note: input.note || undefined,
     updateCostMode: normalizePurchaseCostMode(input.updateCostMode),
-    lines: Array.isArray(input.lines)
-      ? input.lines.map((line) => ({
-          id: line.id ?? uid("pline"),
-          kind:
-            line.kind === "forbruk" || line.kind === "utstyr" ? line.kind : "varekjop",
-          itemId: line.itemId,
-          itemName: line.itemName,
-          qty: clampNumber(line.qty, 0),
-          unitCost: round2(clampNumber(line.unitCost, 0)),
-          lineTotal: round2(
-            clampNumber(line.lineTotal, 0) ||
-              clampNumber(line.qty, 0) * clampNumber(line.unitCost, 0)
-          ),
-        }))
-      : [],
-    total: round2(clampNumber(input.total, 0)),
+    lines,
+    total,
+    payments,
     createdAt: String(input.createdAt ?? nowIso()),
   };
 }
@@ -227,10 +259,7 @@ function normalizeSaleRecord(input: Partial<SaleRecord>): SaleRecord {
         const lineTotal =
           pricingMode === "fixed_total"
             ? round2(clampNumber(line.lineTotal, 0))
-            : round2(
-                clampNumber(line.lineTotal, 0) ||
-                  qty * unitPrice
-              );
+            : round2(clampNumber(line.lineTotal, 0) || qty * unitPrice);
 
         return {
           id: line.id ?? uid("sline"),
@@ -577,6 +606,7 @@ export function createEmptyPurchase(): PurchaseDraft {
     note: "",
     updateCostMode: "last_price",
     lines: [makePurchaseLine()],
+    payments: [],
     createdAt: nowIso(),
   };
 }
@@ -618,7 +648,15 @@ export function makePurchaseLine(): PurchaseLine {
   };
 }
 
-export function savePurchase(draft: PurchaseDraft): PurchaseRecord {
+export function savePurchase(
+  draft: PurchaseDraft,
+  options?: {
+    paymentAmount?: number;
+    paymentNote?: string;
+    paymentMethod?: PaymentMethod;
+    paymentMethodLabel?: string;
+  }
+): PurchaseRecord {
   const items = getAllItemsRaw();
   const purchases = getPurchases();
 
@@ -645,10 +683,27 @@ export function savePurchase(draft: PurchaseDraft): PurchaseRecord {
     };
   }
 
+  const paymentAmount = round2(clampNumber(options?.paymentAmount, 0));
+  const payments: PurchasePayment[] = [];
+
+  if (paymentAmount > 0) {
+    const method = normalizePaymentMethod(options?.paymentMethod);
+    payments.push({
+      id: uid("ppay"),
+      amount: paymentAmount,
+      createdAt: nowIso(),
+      note: options?.paymentNote?.trim() || undefined,
+      method,
+      methodLabel: paymentMethodLabel(method, options?.paymentMethodLabel),
+    });
+  }
+
   const record: PurchaseRecord = {
     ...draft,
     updateCostMode: normalizePurchaseCostMode(draft.updateCostMode),
     total,
+    payments,
+    status: paymentAmount >= total && total > 0 ? "betalt" : "ikke_betalt",
   };
 
   writeItems(items);
@@ -685,6 +740,51 @@ export function deletePurchase(purchaseId: string): void {
     PURCHASES_KEY,
     purchases.filter((x) => x.id !== purchaseId)
   );
+}
+
+export function addPaymentToPurchase(
+  purchaseId: string,
+  amount: number,
+  note?: string,
+  method?: PaymentMethod,
+  methodLabel?: string
+): PurchaseRecord {
+  const purchases = getPurchases();
+  const index = purchases.findIndex((x) => x.id === purchaseId);
+  if (index === -1) throw new Error("Fant ikke innkjøpet");
+
+  const purchase = purchases[index];
+  const normalizedMethod = normalizePaymentMethod(method);
+
+  const payment: PurchasePayment = {
+    id: uid("ppay"),
+    amount: round2(clampNumber(amount, 0)),
+    createdAt: nowIso(),
+    note: note?.trim() || undefined,
+    method: normalizedMethod,
+    methodLabel: paymentMethodLabel(normalizedMethod, methodLabel),
+  };
+
+  const payments = [...(purchase.payments ?? []), payment];
+  const paidSum = round2(payments.reduce((sum, p) => sum + Number(p.amount || 0), 0));
+
+  const updated: PurchaseRecord = {
+    ...purchase,
+    payments,
+    status: paidSum >= purchase.total && purchase.total > 0 ? "betalt" : "ikke_betalt",
+  };
+
+  purchases[index] = updated;
+  writeJson(PURCHASES_KEY, purchases);
+  return updated;
+}
+
+export function purchasePaidSum(purchase: PurchaseRecord): number {
+  return round2((purchase.payments ?? []).reduce((sum, p) => sum + Number(p.amount || 0), 0));
+}
+
+export function purchaseRemaining(purchase: PurchaseRecord): number {
+  return Math.max(0, round2(Number(purchase.total || 0) - purchasePaidSum(purchase)));
 }
 
 export function saveSale(
@@ -1023,6 +1123,23 @@ export function inventoryValue(items: InventoryItem[] = getItems()): number {
   );
 }
 
+export function potentialInventorySalesValue(items: InventoryItem[] = getItems()): number {
+  return round2(
+    items.reduce((sum, item) => sum + Number(item.salePrice || 0) * Number(item.stock || 0), 0)
+  );
+}
+
+export function potentialInventoryProfit(items: InventoryItem[] = getItems()): number {
+  return round2(
+    items.reduce(
+      (sum, item) =>
+        sum +
+        (Number(item.salePrice || 0) - Number(item.costPrice || 0)) * Number(item.stock || 0),
+      0
+    )
+  );
+}
+
 export function projectedTotalValue(): number {
   return round2(getSaldo() + totalReceivables() + inventoryValue());
 }
@@ -1053,12 +1170,20 @@ export function getPaymentMethodStats(): PaymentMethodStat[] {
     }
   }
 
+  for (const purchase of getPurchases()) {
+    for (const payment of purchase.payments ?? []) {
+      const key = normalizePaymentMethod(payment.method);
+      bucket[key].amount += round2(payment.amount || 0);
+      bucket[key].count += 1;
+    }
+  }
+
   return Object.values(bucket).sort((a, b) => b.amount - a.amount);
 }
 
 export function exportAllData(): AppBackup {
   return {
-    version: 6,
+    version: 7,
     exportedAt: nowIso(),
     theme: getTheme(),
     saldo: getSaldo(),
