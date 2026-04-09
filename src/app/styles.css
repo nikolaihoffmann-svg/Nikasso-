@@ -23,9 +23,17 @@ body,
 #root {
   margin: 0;
   min-height: 100%;
-  background: radial-gradient(circle at top, #0b1a33, #060c17);
+  background: #060c17;
   color: var(--text);
   font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+body {
+  background-color: #060c17;
+  padding-top: env(safe-area-inset-top);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+  padding-bottom: env(safe-area-inset-bottom);
 }
 
 * {
@@ -74,8 +82,10 @@ textarea {
 .app {
   position: relative;
   min-height: 100vh;
+  min-height: calc(100vh - env(safe-area-inset-top));
   padding: 18px;
   overflow-x: hidden;
+  background: radial-gradient(circle at top, #0b1a33, #060c17);
 }
 
 .bgGlow {
