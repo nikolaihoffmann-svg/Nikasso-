@@ -99,9 +99,22 @@ export default function App() {
   if (booting) {
     return (
       <div className="splashScreen">
+        <div className="splashGlow splashGlowBlue" />
+        <div className="splashGlow splashGlowGold" />
+
         <div className="splashInner">
-          <div className="splashLogoBadge">N+</div>
-          <div className="splashTitle">Nikasso+</div>
+          <div className="splashLogoShell">
+            <div className="splashLogoBadge">
+              <span className="splashLogoN">N</span>
+              <span className="splashLogoPlus">+</span>
+            </div>
+          </div>
+
+          <div className="splashTitleWrap">
+            <div className="splashTitle">Nikasso+</div>
+            <div className="splashSub">Laster appen…</div>
+          </div>
+
           <div className="splashLoader">
             <div className="splashLoaderBar" />
           </div>
