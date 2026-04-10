@@ -27,6 +27,7 @@ const PURCHASES_KEY = "nikasso_purchases_v2";
 const DEBTS_KEY = "nikasso_debts_v1";
 const SALDO_KEY = "nikasso_saldo_v2";
 const THEME_KEY = "nikasso_theme_v2";
+const APP_PASSWORD_KEY = "nikasso_app_password_v1";
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -53,6 +54,14 @@ function writeJson<T>(key: string, value: T): void {
 function clampNumber(value: unknown, fallback = 0): number {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
+}
+
+function encodePassword(value: string): string {
+  try {
+    return btoa(unescape(encodeURIComponent(value)));
+  } catch {
+    return value;
+  }
 }
 
 export function round2(n: number): number {
@@ -309,6 +318,42 @@ function writeCustomers(customers: Customer[]): void {
 
 function writeDebts(debts: DebtRecord[]): void {
   writeJson(DEBTS_KEY, debts);
+}
+
+export function hasAppPassword(): boolean {
+  const raw = localStorage.getItem(APP_PASSWORD_KEY);
+  return Boolean(raw && raw.trim());
+}
+
+export function setAppPassword(password: string): void {
+  const trimmed = password.trim();
+  if (!trimmed) {
+    throw new Error("Passord kan ikke være tomt");
+  }
+  localStorage.setItem(APP_PASSWORD_KEY, encodePassword(trimmed));
+}
+
+export function verifyAppPassword(password: string): boolean {
+  const saved = localStorage.getItem(APP_PASSWORD_KEY);
+  if (!saved) return true;
+  return saved === encodePassword(password.trim());
+}
+
+export function removeAppPassword(): void {
+  localStorage.removeItem(APP_PASSWORD_KEY);
+}
+
+export function changeAppPassword(currentPassword: string, newPassword: string): void {
+  if (hasAppPassword() && !verifyAppPassword(currentPassword)) {
+    throw new Error("Nåværende passord er feil");
+  }
+
+  const trimmedNew = newPassword.trim();
+  if (!trimmedNew) {
+    throw new Error("Nytt passord kan ikke være tomt");
+  }
+
+  setAppPassword(trimmedNew);
 }
 
 export function getTheme(): "dark" | "light" {
@@ -1215,6 +1260,7 @@ export function clearAllData(): void {
   localStorage.removeItem(PURCHASES_KEY);
   localStorage.removeItem(DEBTS_KEY);
   localStorage.removeItem(SALDO_KEY);
+  localStorage.removeItem(APP_PASSWORD_KEY);
 }
 
 export function importBackupObject(input: unknown): void {
