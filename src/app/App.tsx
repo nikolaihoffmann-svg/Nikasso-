@@ -1,7 +1,12 @@
 import { useEffect, useState } from "react";
 import "./styles.css";
-import { ensureSeedData } from "./storage";
+import {
+  ensureSeedData,
+  hasAppPassword,
+  verifyAppPassword,
+} from "./storage";
 import Logo from "./Logo";
+import LockScreen from "../components/LockScreen";
 import Oversikt from "../pages/Oversikt";
 import Varer from "../pages/Varer";
 import Innkjop from "../pages/Innkjop";
@@ -28,15 +33,43 @@ const navItems: Array<{ key: Tab; label: string }> = [
   { key: "gjeld", label: "Gjeld" },
 ];
 
+const SESSION_UNLOCK_KEY = "nikasso_unlocked_session_v1";
+
 export default function App() {
   const [tab, setTab] = useState<Tab>("oversikt");
+  const [booting, setBooting] = useState(true);
+  const [locked, setLocked] = useState(false);
 
   useEffect(() => {
     ensureSeedData();
     document.documentElement.setAttribute("data-theme", "dark");
+
+    const splashTimer = window.setTimeout(() => {
+      const needsPassword = hasAppPassword();
+      const alreadyUnlocked = sessionStorage.getItem(SESSION_UNLOCK_KEY) === "1";
+
+      if (needsPassword && !alreadyUnlocked) {
+        setLocked(true);
+      } else {
+        setLocked(false);
+      }
+
+      setBooting(false);
+    }, 1100);
+
+    return () => window.clearTimeout(splashTimer);
   }, []);
 
-  let content: JSX.Element;
+  function handleUnlock(pin: string): boolean {
+    const ok = verifyAppPassword(pin);
+    if (!ok) return false;
+
+    sessionStorage.setItem(SESSION_UNLOCK_KEY, "1");
+    setLocked(false);
+    return true;
+  }
+
+  let content;
 
   switch (tab) {
     case "oversikt":
@@ -61,6 +94,24 @@ export default function App() {
     default:
       content = <DataPage />;
       break;
+  }
+
+  if (booting) {
+    return (
+      <div className="splashScreen">
+        <div className="splashInner">
+          <div className="splashLogoBadge">N+</div>
+          <div className="splashTitle">Nikasso+</div>
+          <div className="splashLoader">
+            <div className="splashLoaderBar" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (locked) {
+    return <LockScreen onUnlock={handleUnlock} />;
   }
 
   return (
