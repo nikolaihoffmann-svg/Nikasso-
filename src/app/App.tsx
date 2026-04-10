@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import "./styles.css";
 import {
+  clearAllData,
   ensureSeedData,
   hasAppPassword,
-  verifyAppPassword,
+  resolveAppPinAction,
 } from "./storage";
 import Logo from "./Logo";
 import LockScreen from "../components/LockScreen";
@@ -34,11 +35,14 @@ const navItems: Array<{ key: Tab; label: string }> = [
 ];
 
 const SESSION_UNLOCK_KEY = "nikasso_unlocked_session_v1";
+const AUTO_LOCK_MS = 5 * 60 * 1000;
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("oversikt");
   const [booting, setBooting] = useState(true);
   const [locked, setLocked] = useState(false);
+
+  const autoLockTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     ensureSeedData();
@@ -60,13 +64,90 @@ export default function App() {
     return () => window.clearTimeout(splashTimer);
   }, []);
 
-  function handleUnlock(pin: string): boolean {
-    const ok = verifyAppPassword(pin);
-    if (!ok) return false;
+  useEffect(() => {
+    if (booting) return;
+    if (!hasAppPassword()) return;
+    if (locked) return;
 
-    sessionStorage.setItem(SESSION_UNLOCK_KEY, "1");
-    setLocked(false);
-    return true;
+    function clearAutoLockTimer(): void {
+      if (autoLockTimerRef.current !== null) {
+        window.clearTimeout(autoLockTimerRef.current);
+        autoLockTimerRef.current = null;
+      }
+    }
+
+    function lockApp(): void {
+      clearAutoLockTimer();
+      sessionStorage.removeItem(SESSION_UNLOCK_KEY);
+      setLocked(true);
+    }
+
+    function markActivity(): void {
+      clearAutoLockTimer();
+      autoLockTimerRef.current = window.setTimeout(() => {
+        lockApp();
+      }, AUTO_LOCK_MS);
+    }
+
+    function handleVisibilityChange(): void {
+      if (document.visibilityState === "hidden") {
+        lockApp();
+      } else if (document.visibilityState === "visible" && !locked) {
+        markActivity();
+      }
+    }
+
+    function handlePageHide(): void {
+      lockApp();
+    }
+
+    function handleWindowBlur(): void {
+      lockApp();
+    }
+
+    markActivity();
+
+    window.addEventListener("pointerdown", markActivity, { passive: true });
+    window.addEventListener("keydown", markActivity);
+    window.addEventListener("touchstart", markActivity, { passive: true });
+    window.addEventListener("mousemove", markActivity, { passive: true });
+    window.addEventListener("scroll", markActivity, { passive: true });
+    window.addEventListener("focus", markActivity);
+    window.addEventListener("blur", handleWindowBlur);
+    window.addEventListener("pagehide", handlePageHide);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      clearAutoLockTimer();
+      window.removeEventListener("pointerdown", markActivity);
+      window.removeEventListener("keydown", markActivity);
+      window.removeEventListener("touchstart", markActivity);
+      window.removeEventListener("mousemove", markActivity);
+      window.removeEventListener("scroll", markActivity);
+      window.removeEventListener("focus", markActivity);
+      window.removeEventListener("blur", handleWindowBlur);
+      window.removeEventListener("pagehide", handlePageHide);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [booting, locked]);
+
+  function handleUnlock(pin: string): boolean {
+    const action = resolveAppPinAction(pin);
+
+    if (action === "panic") {
+      sessionStorage.removeItem(SESSION_UNLOCK_KEY);
+      clearAllData();
+      window.location.reload();
+      return true;
+    }
+
+    if (action === "unlock") {
+      sessionStorage.setItem(SESSION_UNLOCK_KEY, "1");
+      setLocked(false);
+      return true;
+    }
+
+    return false;
   }
 
   let content;
