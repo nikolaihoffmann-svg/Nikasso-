@@ -28,6 +28,7 @@ const DEBTS_KEY = "nikasso_debts_v1";
 const SALDO_KEY = "nikasso_saldo_v2";
 const THEME_KEY = "nikasso_theme_v2";
 const APP_PASSWORD_KEY = "nikasso_app_password_v1";
+const APP_PANIC_PASSWORD_KEY = "nikasso_app_panic_password_v1";
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -320,9 +321,20 @@ function writeDebts(debts: DebtRecord[]): void {
   writeJson(DEBTS_KEY, debts);
 }
 
+function getEncodedNormalPin(): string {
+  return localStorage.getItem(APP_PASSWORD_KEY)?.trim() || "";
+}
+
+function getEncodedPanicPin(): string {
+  return localStorage.getItem(APP_PANIC_PASSWORD_KEY)?.trim() || "";
+}
+
 export function hasAppPassword(): boolean {
-  const raw = localStorage.getItem(APP_PASSWORD_KEY);
-  return Boolean(raw && raw.trim());
+  return Boolean(getEncodedNormalPin());
+}
+
+export function hasPanicPin(): boolean {
+  return Boolean(getEncodedPanicPin());
 }
 
 export function setAppPassword(password: string): void {
@@ -330,11 +342,17 @@ export function setAppPassword(password: string): void {
   if (!trimmed) {
     throw new Error("Passord kan ikke være tomt");
   }
-  localStorage.setItem(APP_PASSWORD_KEY, encodePassword(trimmed));
+
+  const encoded = encodePassword(trimmed);
+  if (getEncodedPanicPin() && encoded === getEncodedPanicPin()) {
+    throw new Error("Vanlig PIN kan ikke være lik reserve-PIN");
+  }
+
+  localStorage.setItem(APP_PASSWORD_KEY, encoded);
 }
 
 export function verifyAppPassword(password: string): boolean {
-  const saved = localStorage.getItem(APP_PASSWORD_KEY);
+  const saved = getEncodedNormalPin();
   if (!saved) return true;
   return saved === encodePassword(password.trim());
 }
@@ -354,6 +372,51 @@ export function changeAppPassword(currentPassword: string, newPassword: string):
   }
 
   setAppPassword(trimmedNew);
+}
+
+export function setPanicPin(password: string): void {
+  const trimmed = password.trim();
+  if (!trimmed) {
+    throw new Error("Reserve-PIN kan ikke være tom");
+  }
+
+  const encoded = encodePassword(trimmed);
+  if (getEncodedNormalPin() && encoded === getEncodedNormalPin()) {
+    throw new Error("Reserve-PIN kan ikke være lik vanlig PIN");
+  }
+
+  localStorage.setItem(APP_PANIC_PASSWORD_KEY, encoded);
+}
+
+export function verifyPanicPin(password: string): boolean {
+  const saved = getEncodedPanicPin();
+  if (!saved) return false;
+  return saved === encodePassword(password.trim());
+}
+
+export function removePanicPin(): void {
+  localStorage.removeItem(APP_PANIC_PASSWORD_KEY);
+}
+
+export function changePanicPin(currentPassword: string, newPassword: string): void {
+  if (hasPanicPin() && !verifyPanicPin(currentPassword)) {
+    throw new Error("Nåværende reserve-PIN er feil");
+  }
+
+  const trimmedNew = newPassword.trim();
+  if (!trimmedNew) {
+    throw new Error("Ny reserve-PIN kan ikke være tom");
+  }
+
+  setPanicPin(trimmedNew);
+}
+
+export function resolveAppPinAction(
+  password: string
+): "unlock" | "panic" | "invalid" {
+  if (verifyPanicPin(password)) return "panic";
+  if (verifyAppPassword(password)) return "unlock";
+  return "invalid";
 }
 
 export function getTheme(): "dark" | "light" {
@@ -1261,6 +1324,7 @@ export function clearAllData(): void {
   localStorage.removeItem(DEBTS_KEY);
   localStorage.removeItem(SALDO_KEY);
   localStorage.removeItem(APP_PASSWORD_KEY);
+  localStorage.removeItem(APP_PANIC_PASSWORD_KEY);
 }
 
 export function importBackupObject(input: unknown): void {
