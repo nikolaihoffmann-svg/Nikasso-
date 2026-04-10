@@ -1,16 +1,23 @@
 import { useMemo, useRef, useState } from "react";
 import {
   adjustSaldo,
+  changeAppPassword,
   clearAllData,
   downloadBackup,
   exportAllData,
   fmtKr,
+  hasAppPassword,
   importBackupFile,
   inventoryValue,
+  removeAppPassword,
+  setAppPassword,
+  setSaldo,
   totalDebtOutstanding,
   totalReceivables,
   totalSalesOutstanding,
 } from "../app/storage";
+
+const SESSION_UNLOCK_KEY = "nikasso_unlocked_session_v1";
 
 function parseNoNumber(value: string): number {
   const normalized = value.replace(",", ".").trim();
@@ -19,17 +26,29 @@ function parseNoNumber(value: string): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+function onlyDigits(value: string): string {
+  return value.replace(/\D/g, "").slice(0, 4);
+}
+
 function visibleMessage(text: string): string {
   return text.replace(/\s\d+$/, "");
 }
 
 export default function DataPage() {
   const fileRef = useRef<HTMLInputElement | null>(null);
+
   const [message, setMessage] = useState("");
   const [saldoAdjust, setSaldoAdjust] = useState("");
+  const [saldoSetValue, setSaldoSetValue] = useState("");
+
+  const [newPin, setNewPin] = useState("");
+  const [currentPin, setCurrentPin] = useState("");
+  const [nextPin, setNextPin] = useState("");
+  const [removePinValue, setRemovePinValue] = useState("");
 
   const backup = useMemo(() => exportAllData(), [message]);
   const debts = backup.debts ?? [];
+  const pinEnabled = hasAppPassword();
 
   async function handleImport(file: File): Promise<void> {
     try {
@@ -43,13 +62,78 @@ export default function DataPage() {
     }
   }
 
-  function handleSaldoAdjust(): void {
-    const amount = parseNoNumber(saldoAdjust);
-    if (!Number.isFinite(amount) || amount === 0) return;
+  function refreshMessage(text: string): void {
+    setMessage(`${text} ${Date.now()}`);
+  }
 
-    adjustSaldo(amount);
+  function handleSaldoAdjust(direction: 1 | -1): void {
+    const amount = parseNoNumber(saldoAdjust);
+    if (!Number.isFinite(amount) || amount <= 0) return;
+
+    const signed = direction === 1 ? amount : -amount;
+    adjustSaldo(signed);
     setSaldoAdjust("");
-    setMessage(`Saldo oppdatert med ${amount > 0 ? "+" : ""}${fmtKr(amount)}`);
+    refreshMessage(`Saldo justert ${direction === 1 ? "opp" : "ned"}`);
+  }
+
+  function handleSaldoSet(): void {
+    const amount = parseNoNumber(saldoSetValue);
+    if (!Number.isFinite(amount)) return;
+
+    setSaldo(amount);
+    setSaldoSetValue("");
+    refreshMessage("Saldo satt direkte");
+  }
+
+  function handleCreatePin(): void {
+    try {
+      if (newPin.length !== 4) {
+        setMessage("PIN må være 4 sifre");
+        return;
+      }
+
+      setAppPassword(newPin);
+      setNewPin("");
+      refreshMessage("PIN opprettet");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Kunne ikke opprette PIN");
+    }
+  }
+
+  function handleChangePin(): void {
+    try {
+      if (currentPin.length !== 4 || nextPin.length !== 4) {
+        setMessage("Begge PIN-feltene må være 4 sifre");
+        return;
+      }
+
+      changeAppPassword(currentPin, nextPin);
+      setCurrentPin("");
+      setNextPin("");
+      refreshMessage("PIN endret");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Kunne ikke endre PIN");
+    }
+  }
+
+  function handleRemovePin(): void {
+    try {
+      if (removePinValue.length !== 4) {
+        setMessage("Skriv inn gjeldende PIN");
+        return;
+      }
+
+      removeAppPassword(removePinValue);
+      setRemovePinValue("");
+      refreshMessage("PIN fjernet");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Kunne ikke fjerne PIN");
+    }
+  }
+
+  function handleLockNow(): void {
+    sessionStorage.removeItem(SESSION_UNLOCK_KEY);
+    window.location.reload();
   }
 
   const salesOpen = totalSalesOutstanding();
@@ -61,7 +145,7 @@ export default function DataPage() {
   return (
     <div>
       <h1 className="pageTitle">Data</h1>
-      <p className="pageLead">Backup, status, saldo og samlet verdi på ett sted.</p>
+      <p className="pageLead">Backup, status, saldo, verdi og app-lås på ett sted.</p>
 
       <div className="grid3">
         <div className="statCard">
@@ -116,28 +200,142 @@ export default function DataPage() {
 
       <div className="splitLayout" style={{ marginTop: 16 }}>
         <div className="card">
+          <h2 className="sectionTitle">Sett saldo direkte</h2>
+
+          <label className="label">
+            <span>Ny saldo</span>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={saldoSetValue}
+              onChange={(e) => setSaldoSetValue(e.target.value)}
+              placeholder="F.eks. 12500"
+            />
+          </label>
+
+          <div className="cardActions">
+            <div className="muted">Dette overskriver nåværende saldo.</div>
+            <button className="btn btnPrimary" type="button" onClick={handleSaldoSet}>
+              Sett saldo
+            </button>
+          </div>
+        </div>
+
+        <div className="card">
           <h2 className="sectionTitle">Juster saldo</h2>
 
           <label className="label">
-            <span>Legg til eller trekk fra</span>
+            <span>Beløp</span>
             <input
               type="text"
               inputMode="decimal"
               value={saldoAdjust}
               onChange={(e) => setSaldoAdjust(e.target.value)}
-              placeholder="f.eks. 500 eller -250"
+              placeholder="F.eks. 500"
             />
           </label>
 
-          <div className="cardActions">
-            <div className="muted">
-              Bruk positivt tall for å øke saldo og negativt for å redusere den.
-            </div>
-
-            <button className="btn btnPrimary" type="button" onClick={handleSaldoAdjust}>
-              Oppdater saldo
+          <div className="dataActionRow">
+            <button className="btn" type="button" onClick={() => handleSaldoAdjust(-1)}>
+              − Trekk fra
+            </button>
+            <button className="btn btnPrimary" type="button" onClick={() => handleSaldoAdjust(1)}>
+              + Legg til
             </button>
           </div>
+        </div>
+      </div>
+
+      <div className="splitLayout" style={{ marginTop: 16 }}>
+        <div className="card">
+          <h2 className="sectionTitle">PIN-lås</h2>
+
+          {!pinEnabled ? (
+            <>
+              <label className="label">
+                <span>Ny 4-sifret PIN</span>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  value={newPin}
+                  onChange={(e) => setNewPin(onlyDigits(e.target.value))}
+                  placeholder="••••"
+                  maxLength={4}
+                />
+              </label>
+
+              <div className="cardActions">
+                <div className="muted">Appen vil kreve PIN ved åpning.</div>
+                <button className="btn btnPrimary" type="button" onClick={handleCreatePin}>
+                  Opprett PIN
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="featureList">
+              <div className="featureRow">
+                <div className="customerMain">
+                  <div className="featureRowTitle">PIN-lås aktiv</div>
+                  <div className="featureRowSub">Appen er låst med 4 sifre.</div>
+                </div>
+                <div className="featureRowRight">
+                  <span className="badge badgeSuccess">Aktiv</span>
+                </div>
+              </div>
+
+              <label className="label">
+                <span>Nåværende PIN</span>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  value={currentPin}
+                  onChange={(e) => setCurrentPin(onlyDigits(e.target.value))}
+                  placeholder="••••"
+                  maxLength={4}
+                />
+              </label>
+
+              <label className="label">
+                <span>Ny PIN</span>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  value={nextPin}
+                  onChange={(e) => setNextPin(onlyDigits(e.target.value))}
+                  placeholder="••••"
+                  maxLength={4}
+                />
+              </label>
+
+              <div className="dataActionRow">
+                <button className="btn btnPrimary" type="button" onClick={handleChangePin}>
+                  Endre PIN
+                </button>
+                <button className="btn" type="button" onClick={handleLockNow}>
+                  Lås appen nå
+                </button>
+              </div>
+
+              <label className="label" style={{ marginTop: 10 }}>
+                <span>Fjern PIN (skriv nåværende)</span>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  value={removePinValue}
+                  onChange={(e) => setRemovePinValue(onlyDigits(e.target.value))}
+                  placeholder="••••"
+                  maxLength={4}
+                />
+              </label>
+
+              <div className="cardActions">
+                <div className="muted">Fjerner låsen helt fra denne enheten.</div>
+                <button className="btn btnDanger" type="button" onClick={handleRemovePin}>
+                  Fjern PIN
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="card">
