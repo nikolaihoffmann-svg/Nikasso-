@@ -34,9 +34,15 @@ export default function LockScreen({ onUnlock }: Props) {
 
   return (
     <div className="lockScreen">
+      <div className="splashGlow splashGlowBlue" />
+      <div className="splashGlow splashGlowGold" />
+
       <div className="lockCard">
         <div className="lockLogoWrap">
-          <div className="lockLogoBadge">N+</div>
+          <div className="lockLogoBadge">
+            <span className="lockLogoN">N</span>
+            <span className="lockLogoPlus">+</span>
+          </div>
         </div>
 
         <h1 className="lockTitle">Nikasso+</h1>
@@ -51,7 +57,7 @@ export default function LockScreen({ onUnlock }: Props) {
           ))}
         </div>
 
-        <label className="label" style={{ marginTop: 18 }}>
+        <label className="label lockLabel">
           <span>4-sifret PIN</span>
           <input
             type="password"
