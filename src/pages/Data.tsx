@@ -15,6 +15,7 @@ import {
   totalDebtOutstanding,
   totalReceivables,
   totalSalesOutstanding,
+  verifyAppPassword,
 } from "../app/storage";
 
 const SESSION_UNLOCK_KEY = "nikasso_unlocked_session_v1";
@@ -123,8 +124,14 @@ export default function DataPage() {
         return;
       }
 
-      removeAppPassword(removePinValue);
+      if (!verifyAppPassword(removePinValue)) {
+        setMessage("Feil PIN");
+        return;
+      }
+
+      removeAppPassword();
       setRemovePinValue("");
+      sessionStorage.removeItem(SESSION_UNLOCK_KEY);
       refreshMessage("PIN fjernet");
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "Kunne ikke fjerne PIN");
